@@ -1,0 +1,101 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.IvanBBaev/x-mcp-ai",
+  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as 50 typed tools across 12 packages, with a two-axis policy model and 2026 pay-per-use cost controls.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/IvanBBaev/x-mcp-ai",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "x-mcp-ai",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "X_MCP_AUTH_MODE",
+          "description": "Authentication mode: oauth2 (default), oauth1, or app-only.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_CLIENT_ID",
+          "description": "OAuth 2.0 client ID (oauth2 mode).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_CLIENT_SECRET",
+          "description": "OAuth 2.0 client secret (confidential clients only).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_BEARER_TOKEN",
+          "description": "Application-only bearer token (app-only mode).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_TOKEN_FILE",
+          "description": "Path to the rotating OAuth 2.0 token store (default: OS-resolved).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_API_KEY",
+          "description": "OAuth 1.0a consumer key (oauth1 mode).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_API_SECRET",
+          "description": "OAuth 1.0a consumer secret (oauth1 mode).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_ACCESS_TOKEN",
+          "description": "OAuth 1.0a access token (oauth1 mode).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_ACCESS_SECRET",
+          "description": "OAuth 1.0a access secret (oauth1 mode).",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_POLICY",
+          "description": "Policy preset: read-only (default), engage, publish, manage, or full.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_CREDIT_BUDGET",
+          "description": "Session spend cap in USD.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_BUDGET_MODE",
+          "description": "Budget enforcement: warn (default) or hard.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

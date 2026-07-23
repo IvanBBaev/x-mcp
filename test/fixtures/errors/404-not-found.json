@@ -1,0 +1,11 @@
+{
+  "_provenance": "X API v2 404 for a route/resource that does not exist. Source: docs.x.com/x-api response-codes + `resource-not-found` problem type. Captured 2026-07-23. Exercises: not-found class, DX-F13.",
+  "status": 404,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Not Found Error",
+    "type": "https://api.twitter.com/2/problems/resource-not-found",
+    "status": 404,
+    "detail": "Could not find the requested resource."
+  }
+}

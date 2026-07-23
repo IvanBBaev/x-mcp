@@ -1,0 +1,11 @@
+{
+  "_provenance": "PROVISIONAL. X API v2 403 standing in for a pay-per-use billing/entitlement rejection (insufficient credit or missing product / access level). The real credit-exhaustion body is not publicly documented — COST-6 names capturing it a Phase-1 live-test task, after which this fixture is locked. Shape modelled on the legacy access-level 403. Captured 2026-07-23. Exercises: billing class (COST-6/7), distinct from the local budget class.",
+  "status": 403,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Client Forbidden",
+    "type": "https://api.twitter.com/2/problems/client-not-enrolled",
+    "status": 403,
+    "detail": "This endpoint is not available with your current access level. You may need a different access level to reach this endpoint, or your prepaid credit is exhausted."
+  }
+}

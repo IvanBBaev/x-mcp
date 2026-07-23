@@ -1,0 +1,19 @@
+{
+  "data": {
+    "id": "1526228120226357248",
+    "name": "My Bot",
+    "username": "self_bot",
+    "created_at": "2022-05-16T12:00:00.000Z",
+    "description": "Automated account.",
+    "location": "cloud",
+    "url": "https://t.co/self",
+    "verified": false,
+    "protected": false,
+    "public_metrics": {
+      "followers_count": 12,
+      "following_count": 34,
+      "tweet_count": 5,
+      "listed_count": 0
+    }
+  }
+}

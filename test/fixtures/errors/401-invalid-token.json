@@ -1,0 +1,11 @@
+{
+  "_provenance": "X API v2 RFC-7807 problem body for an invalid/expired bearer or user token. Source: docs.x.com/x-api response-codes + observed `about:blank` unauthorized shape. Captured 2026-07-23. Exercises: auth class (DX-F13), AUTH-8 terminal-after-failed-refresh.",
+  "status": 401,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Unauthorized",
+    "type": "about:blank",
+    "status": 401,
+    "detail": "Unauthorized"
+  }
+}

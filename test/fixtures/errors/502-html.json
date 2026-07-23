@@ -1,0 +1,6 @@
+{
+  "_provenance": "Non-JSON HTML error page from an intermediary gateway (Cloudflare/nginx 502) — the body arrives as raw HTML, not an X problem object. Stored here as a string body with a text/html content-type. The markup embeds a fake internal hostname/secret sentinel to prove it never leaks into the mapped error (REND-7). Source: docs/07 NET-1 + typical Cloudflare 502 page. Captured 2026-07-23. Exercises: api class from non-JSON body (REND-7 sentinel, NET-1), 5xx retryable.",
+  "status": 502,
+  "headers": { "content-type": "text/html; charset=UTF-8" },
+  "body": "<!DOCTYPE html><html><head><title>502 Bad Gateway</title></head><body><h1>502 Bad Gateway</h1><p>The server returned an invalid or incomplete response.</p><!-- upstream=internal-lb-7.twitter.local SENTINEL_SECRET_sk-live-DEADBEEF --><hr><address>cloudflare</address></body></html>"
+}

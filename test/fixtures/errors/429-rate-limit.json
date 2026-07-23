@@ -1,0 +1,17 @@
+{
+  "_provenance": "X API v2 429 with standard 15-minute window headers plus a `retry-after`. `x-rate-limit-reset` is a fixed absolute epoch (2030-03-17T18:26:40Z) so the test can pin `nowMs`; `retry-after` is intentionally EARLIER than the reset to exercise RATE-7 (later time wins). Source: docs.x.com/x-api rate-limits. Captured 2026-07-23. Exercises: rate-limit class, reset_at/retry_after_seconds (RATE-2/7), DX-F13.",
+  "status": 429,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "x-rate-limit-limit": "180",
+    "x-rate-limit-remaining": "0",
+    "x-rate-limit-reset": "1900000000",
+    "retry-after": "30"
+  },
+  "body": {
+    "title": "Too Many Requests",
+    "type": "https://api.twitter.com/2/problems/rate-limit-exceeded",
+    "status": 429,
+    "detail": "Too Many Requests"
+  }
+}

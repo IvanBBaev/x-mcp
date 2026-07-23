@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "id": "12",
+      "name": "NASA",
+      "username": "NASA",
+      "created_at": "2007-12-19T20:30:39.000Z",
+      "description": "There's space for everybody.",
+      "verified": true,
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 74000000,
+        "following_count": 180,
+        "tweet_count": 65000,
+        "listed_count": 92000
+      }
+    }
+  ],
+  "errors": [
+    {
+      "value": "404999",
+      "detail": "Could not find user with ids: [404999].",
+      "title": "Not Found Error",
+      "resource_type": "user",
+      "parameter": "ids",
+      "type": "https://api.twitter.com/2/problems/resource-not-found"
+    }
+  ]
+}

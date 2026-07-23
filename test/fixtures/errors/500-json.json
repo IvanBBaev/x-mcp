@@ -1,0 +1,11 @@
+{
+  "_provenance": "X API v2 500 with a JSON problem body — an unexpected server error the mapper cannot classify more specifically, so it degrades to `api` and passes title/detail through (DRIFT-2). Source: docs.x.com/x-api response-codes. Captured 2026-07-23. Exercises: api class from a 5xx JSON body, retryable (NET-3 gate lives in api/http).",
+  "status": 500,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Internal Server Error",
+    "type": "about:blank",
+    "status": 500,
+    "detail": "Something went wrong. Please try again."
+  }
+}

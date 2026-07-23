@@ -1,0 +1,67 @@
+{
+  "name": "x-mcp-ai",
+  "version": "0.1.0",
+  "mcpName": "io.github.IvanBBaev/x-mcp-ai",
+  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as 50 typed tools across 12 packages, with a two-axis policy model and 2026 pay-per-use cost controls.",
+  "license": "MIT",
+  "author": "Ivan Baev <ivanbbaev@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IvanBBaev/x-mcp-ai.git"
+  },
+  "homepage": "https://github.com/IvanBBaev/x-mcp-ai#readme",
+  "bugs": {
+    "url": "https://github.com/IvanBBaev/x-mcp-ai/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "x-mcp-ai": "bin/x-mcp-ai.cjs"
+  },
+  "exports": {
+    ".": "./build/src/index.js"
+  },
+  "files": [
+    "build/src",
+    "bin"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"build/test/**/*.test.js\"",
+    "coverage": "npm run build && c8 node --test \"build/test/**/*.test.js\"",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "verify": "npm run clean && npm run build && c8 node --test \"build/test/**/*.test.js\" && npm run lint && npm run format:check"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "@types/node": "^22.5.0",
+    "c8": "^10.1.2",
+    "eslint": "^9.9.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.4.0",
+    "undici": "^6.19.8"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "x",
+    "twitter",
+    "x-api",
+    "llm",
+    "ai",
+    "claude"
+  ],
+  "trademark": "x-mcp-ai is an independent, unofficial project and is not affiliated with, endorsed by, or sponsored by X Corp. \"X\", \"Twitter\", and related marks are trademarks of X Corp, used nominatively only to describe interoperability with the X API."
+}

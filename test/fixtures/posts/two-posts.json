@@ -1,0 +1,62 @@
+{
+  "_provenance": "X API v2 GET /2/tweets?ids=111,222 batch lookup with the tweet.fields/expansions/user.fields/media.fields set the T-121 endpoint sends. Post 111 carries a photo attachment; post 222 both replies to 111 and quotes 333 (both present in includes.tweets so their authors resolve). Shapes verbatim from docs.x.com/x-api/data-dictionary. Captured 2026-07-23. Exercises: REND-1 @handle authors, metric mapping, REND-4 permalink, reply/quote refs, media compaction. NOTE: the ids-lookup endpoint does not truly return a `meta` block; it is included per the T-121 brief and is ignored by renderPosts.",
+  "data": [
+    {
+      "id": "111",
+      "text": "Shipping the new X MCP server today - safety-first by design.",
+      "created_at": "2026-07-20T14:30:00.000Z",
+      "author_id": "11",
+      "public_metrics": {
+        "retweet_count": 12,
+        "reply_count": 4,
+        "like_count": 87,
+        "quote_count": 3,
+        "bookmark_count": 9,
+        "impression_count": 5400
+      },
+      "attachments": { "media_keys": ["3_111"] }
+    },
+    {
+      "id": "222",
+      "text": "Quoting the announcement with a few thoughts on the design.",
+      "created_at": "2026-07-20T15:00:00.000Z",
+      "author_id": "22",
+      "public_metrics": {
+        "retweet_count": 1,
+        "reply_count": 2,
+        "like_count": 20,
+        "quote_count": 0,
+        "bookmark_count": 1,
+        "impression_count": 900
+      },
+      "referenced_tweets": [
+        { "type": "replied_to", "id": "111" },
+        { "type": "quoted", "id": "333" }
+      ]
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "11", "username": "author_one", "name": "Author One", "verified": true },
+      { "id": "22", "username": "author_two", "name": "Author Two", "verified": false },
+      { "id": "33", "username": "author_three", "name": "Author Three", "verified": false }
+    ],
+    "tweets": [
+      {
+        "id": "111",
+        "text": "Shipping the new X MCP server today - safety-first by design.",
+        "author_id": "11"
+      },
+      { "id": "333", "text": "The original announcement thread.", "author_id": "33" }
+    ],
+    "media": [
+      {
+        "media_key": "3_111",
+        "type": "photo",
+        "url": "https://pbs.twimg.com/media/example111.jpg",
+        "alt_text": "A screenshot of the server startup logs."
+      }
+    ]
+  },
+  "meta": { "result_count": 2 }
+}

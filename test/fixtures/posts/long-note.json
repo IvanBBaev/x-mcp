@@ -1,0 +1,28 @@
+{
+  "_provenance": "X API v2 GET /2/tweets?ids=444 for a long-form post: `text` holds the classic-length preview and `note_tweet.text` holds the full body. Shapes verbatim from docs.x.com/x-api/data-dictionary (note_tweet expansion). Captured 2026-07-23. Exercises: REND-3 long-form recovery - the compactor copies the full body into CompactPost.note_tweet and sets truncated=true.",
+  "data": [
+    {
+      "id": "444",
+      "text": "This is the classic-length preview of a long-form post that continues past the limit...",
+      "created_at": "2026-07-18T12:00:00.000Z",
+      "author_id": "44",
+      "public_metrics": {
+        "retweet_count": 30,
+        "reply_count": 15,
+        "like_count": 210,
+        "quote_count": 8,
+        "bookmark_count": 40,
+        "impression_count": 18000
+      },
+      "note_tweet": {
+        "text": "This is the classic-length preview of a long-form post that continues past the 280-character limit. The full body lives in note_tweet.text and is recovered by the compactor, which copies it onto CompactPost.note_tweet and marks truncated=true so an agent knows the display text was clipped. Here is some more prose to make the note genuinely long-form and exercise the note_text field cap in the sanitizer as well."
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "44", "username": "longform_author", "name": "Longform Author", "verified": true }
+    ]
+  },
+  "meta": { "result_count": 1 }
+}

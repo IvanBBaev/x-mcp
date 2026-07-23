@@ -1,0 +1,8 @@
+build/
+coverage/
+node_modules/
+
+# Hand-maintained markdown (design corpus, README, worklog): kept as authored, not
+# machine-reflowed — Prettier would churn tables and wrapping across the whole corpus.
+*.md
+docs/

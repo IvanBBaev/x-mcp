@@ -1,0 +1,33 @@
+{
+  "_provenance": "X API v2 HTTP-200 GET /2/tweets?ids=111,999 batch lookup that partially failed: one found post in `data`, and an `errors[]` array carrying one not-found id (999). `detail` seeded with a fake secret sentinel to prove renderMissing never surfaces raw platform prose (REND-7). Source: docs.x.com/x-api/fundamentals/errors partial-response shape. Captured 2026-07-23. Exercises: REND-2 partial-failure missing[] contract (found item + classified reason, NOT a thrown error), REND-7.",
+  "data": [
+    {
+      "id": "111",
+      "text": "The one post that still exists.",
+      "created_at": "2026-07-19T09:00:00.000Z",
+      "author_id": "11",
+      "public_metrics": {
+        "retweet_count": 0,
+        "reply_count": 1,
+        "like_count": 5,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 120
+      }
+    }
+  ],
+  "includes": {
+    "users": [{ "id": "11", "username": "author_one", "name": "Author One", "verified": true }]
+  },
+  "errors": [
+    {
+      "value": "999",
+      "detail": "Could not find tweet with ids: [999]. SENTINEL_SECRET_sk-live-DEADBEEF",
+      "title": "Not Found Error",
+      "resource_type": "tweet",
+      "parameter": "ids",
+      "resource_id": "999",
+      "type": "https://api.twitter.com/2/problems/resource-not-found"
+    }
+  ]
+}
