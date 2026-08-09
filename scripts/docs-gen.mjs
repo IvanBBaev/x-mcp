@@ -102,9 +102,13 @@ function writeRepoFile(relative, text) {
   writeFileSync(absolute, text);
 }
 
-/** Escape a value for a markdown table cell: no pipes, no newlines. */
+/**
+ * Escape a value for a markdown table cell: no pipes, no newlines. Backslashes go first —
+ * escaping them after the pipes would re-escape the backslash this function just added and
+ * turn `\|` back into a live column separator.
+ */
 function cell(value) {
-  return String(value).replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+  return String(value).replace(/\s+/g, ' ').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').trim();
 }
 
 const code = (value) => `\`${value}\``;

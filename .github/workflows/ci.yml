@@ -168,7 +168,14 @@ jobs:
       - name: Pack and boot from the tarball
         run: |
           tarball=$(npm pack --silent | tail -1)
-          mkdir -p "$RUNNER_TEMP/tarball-smoke"
-          tar -xzf "$tarball" -C "$RUNNER_TEMP/tarball-smoke"
-          cd "$RUNNER_TEMP/tarball-smoke/package"
-          X_MCP_AUTH_MODE=app-only X_MCP_BEARER_TOKEN=smoke node bin/x-mcp-ai.cjs doctor
+          smoke="$RUNNER_TEMP/tarball-smoke"
+          mkdir -p "$smoke"
+          cd "$smoke"
+          # INSTALL the tarball rather than untarring it. The packed tree carries no
+          # node_modules by design, so an untarred copy cannot resolve the SDK and the
+          # smoke test failed on that instead of on anything about the artifact. Installing
+          # is also what a user actually does, and it exercises the `files` allowlist, the
+          # declared runtime deps, and the bin shim npm links.
+          npm init -y >/dev/null
+          npm install --omit=dev "$GITHUB_WORKSPACE/$tarball"
+          X_MCP_AUTH_MODE=app-only X_MCP_BEARER_TOKEN=smoke ./node_modules/.bin/x-mcp-ai doctor

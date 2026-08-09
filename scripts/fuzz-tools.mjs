@@ -255,7 +255,10 @@ const HOSTILE = [
   ['string-json-break', () => '","injected":"yes'],
   ['string-crlf', () => 'value\r\nX-Injected: 1'],
   ['string-proto-literal', () => '__proto__'],
-  ['string-template', () => '${process.env.X_MCP_BEARER_TOKEN}'],
+  // The payload is the literal text `${...}` — a template-injection probe, not an
+  // interpolation. Assembled from two pieces so neither this file's reader nor a static
+  // analyzer mistakes it for a template literal that lost its backticks.
+  ['string-template', () => '$' + '{process.env.X_MCP_BEARER_TOKEN}'],
   ['path-traversal', () => '../../../../../../etc/passwd'],
   ['path-traversal-image', () => '../../../../../../etc/hosts.png'],
   ['path-nul-suffix', () => '/tmp/ok.png .txt'],
@@ -277,7 +280,11 @@ const HOSTILE = [
   ['object-throwing-tostring', () => throwingToString()],
   ['object-throwing-getter', () => throwingGetter()],
   ['date', () => new Date(8.64e15)],
-  ['regexp', () => /(a+)+$/],
+  // The payload here is the TYPE — a RegExp where the schema declares a string — not the
+  // pattern. Kept trivial on purpose: nothing in this server ever compiles or applies a
+  // caller-supplied pattern, so a catastrophically-backtracking one would test nothing and
+  // would sit in the repo as a live ReDoS gadget for anyone who copied it.
+  ['regexp', () => /^fuzz$/],
   ['function', () => () => 'nope'],
   ['symbol', () => Symbol('fuzz')],
   ['map', () => new Map([['k', 'v']])],

@@ -1,0 +1,10 @@
+# Working trees are LF on every platform. Without this, a Windows checkout applies
+# core.autocrlf and rewrites every file to CRLF, which `prettier --check` (endOfLine
+# defaults to "lf") then rejects — the whole repo fails formatting on Windows only.
+* text=auto eol=lf
+
+# These two carry deliberate NUL bytes and lone surrogates as fuzz payloads. Git already
+# detects them as binary; saying so explicitly keeps a future normalization pass from
+# rewriting the corpus it depends on.
+scripts/fuzz-tools.mjs -text
+test/api/oauth2/keychain.test.ts -text
