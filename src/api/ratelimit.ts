@@ -1,7 +1,13 @@
 // Header-driven rate-limit tracker + preflight (docs/02 §6 pipeline / §7; docs/01 §4).
 // Owned by T-115 (WP-1.4). Consumed by the request pipeline (core/registry, T-113) as the
-// pre-flight choke point, by api/http (T-114) after every response to update the table, and
-// by the `x_rate_limit_status` tool (T-120) to dump the table.
+// pre-flight choke point, by the http client's error mapper to update the table, and by the
+// `x_rate_limit_status` tool (T-120) to dump it.
+//
+// NOTE on what actually reaches `record` (T-320 F6): mcp/compose wires this tracker into the
+// per-bucket ERROR mapper, and api/http exposes no success-path header hook — so only non-2xx
+// responses train the table. This module is agnostic about that (it records whatever it is
+// handed); the consequence for callers is that `preflight` suppresses REPEAT 429s rather than
+// predicting the first one. Documented in docs/02 §7.
 //
 // What it does (cases RATE-1…7, CONC-3):
 //   • Parses `x-rate-limit-{limit,remaining,reset}` (and the `x-app-limit-24hour-*` 24-hour

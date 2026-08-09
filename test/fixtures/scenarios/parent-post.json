@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "id": "1700000000000000009",
+      "text": "Release notes for the safety-first tooling update.",
+      "created_at": "2026-07-20T18:00:00.000Z",
+      "author_id": "1526228120226357248",
+      "public_metrics": {
+        "retweet_count": 2,
+        "reply_count": 4,
+        "like_count": 11,
+        "quote_count": 1
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "1526228120226357248", "username": "self_bot", "name": "My Bot", "verified": false }
+    ]
+  }
+}

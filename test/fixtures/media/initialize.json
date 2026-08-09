@@ -1,0 +1,8 @@
+{
+  "_provenance": "X API v2 POST /2/media/upload/initialize success envelope (dedicated v2 path, MEDIA-1; the retired v1.1 upload.twitter.com routes never appear). Shape verbatim from docs.x.com/x-api media-upload chunked flow. Captured 2026-07-31. Exercises: INIT id/media_key extraction, expires_after_secs passthrough.",
+  "data": {
+    "id": "7100",
+    "media_key": "3_7100",
+    "expires_after_secs": 86400
+  }
+}

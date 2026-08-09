@@ -363,8 +363,11 @@ response); writes **per request**.
 Notes:
 
 - The **same read** can fall in `read-owned` instead of its base class when it targets
-  the authenticated user's own data — resolve own-vs-other at call time, prefer the
-  cheaper `read-owned` when the target resolves to `me`.
+  the authenticated user's own data. Of the shipped tools only `x_timeline_mentions`
+  models this discount locally (cost class `owned`); `x_timeline_user` prices
+  statically as `read-post` even when the target resolves to `me` — the own-vs-other
+  cost resolution is not modeled for it (noted 2026-07-31, T-214 audit; revisit if
+  the Owned Reads discount proves material in live captures).
 - `write-engagement` is the one gap in the published price list; its real cost (and the
   real `billing` error body, COST-6) is a named Phase 1 live-capture task. Until then
   the budget counts it as $0 and the docs flag the uncertainty rather than guessing.

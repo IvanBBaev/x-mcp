@@ -1,10 +1,10 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.IvanBBaev/x-mcp-ai",
-  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as 50 typed tools across 12 packages, with a two-axis policy model and 2026 pay-per-use cost controls.",
+  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as 41 typed tools across 12 packages, with a two-axis policy model and 2026 pay-per-use cost controls.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/IvanBBaev/x-mcp-ai",
+    "url": "https://github.com/IvanBBaev/x-mcp",
     "source": "github"
   },
   "packages": [
@@ -19,7 +19,7 @@
       "environmentVariables": [
         {
           "name": "X_MCP_AUTH_MODE",
-          "description": "Authentication mode: oauth2 (default), oauth1, or app-only.",
+          "description": "Authentication mode: oauth2 (default) or app-only.",
           "isRequired": false,
           "format": "string"
         },
@@ -50,36 +50,68 @@
           "format": "string"
         },
         {
-          "name": "X_MCP_API_KEY",
-          "description": "OAuth 1.0a consumer key (oauth1 mode).",
+          "name": "X_MCP_TOKEN_KEYCHAIN",
+          "description": "Set to 1 to keep OAuth 2.0 tokens in the OS keychain (macOS, Linux) instead of a token file. Mutually exclusive with an explicit X_MCP_TOKEN_FILE.",
           "isRequired": false,
-          "isSecret": true,
-          "format": "string"
-        },
-        {
-          "name": "X_MCP_API_SECRET",
-          "description": "OAuth 1.0a consumer secret (oauth1 mode).",
-          "isRequired": false,
-          "isSecret": true,
-          "format": "string"
-        },
-        {
-          "name": "X_MCP_ACCESS_TOKEN",
-          "description": "OAuth 1.0a access token (oauth1 mode).",
-          "isRequired": false,
-          "isSecret": true,
-          "format": "string"
-        },
-        {
-          "name": "X_MCP_ACCESS_SECRET",
-          "description": "OAuth 1.0a access secret (oauth1 mode).",
-          "isRequired": false,
-          "isSecret": true,
           "format": "string"
         },
         {
           "name": "X_MCP_POLICY",
           "description": "Policy preset: read-only (default), engage, publish, manage, or full.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_POLICY_ALLOW",
+          "description": "Comma-separated op:domain cells to allow on top of the preset (e.g. read:dm,write:dm).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_POLICY_DENY",
+          "description": "Comma-separated op:domain cells to deny; deny beats allow beats preset.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_HIDE_DENIED",
+          "description": "Set to 1 to drop policy-denied tools from registration entirely instead of registering them annotated as denied.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_MEDIA_DIR",
+          "description": "Directory uploads must resolve inside. Media upload is disabled unless this is set.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_AVAILABILITY",
+          "description": "Comma-separated specially-provisioned access classes to declare: pilot, premium-user, enterprise. Unset means the conservative default (app+user, user-only).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_PROFILES_FILE",
+          "description": "Path to a profiles file holding named configuration blocks.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_PROFILE",
+          "description": "Name of the profile to select from the profiles file.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_TIMEOUT_MS",
+          "description": "Per-HTTP-request timeout in milliseconds (default 30000).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_LOG_LEVEL",
+          "description": "Diagnostic verbosity on stderr: silent, error, info (default), or debug.",
           "isRequired": false,
           "format": "string"
         },

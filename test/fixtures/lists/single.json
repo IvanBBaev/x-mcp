@@ -1,0 +1,14 @@
+{
+  "data": {
+    "id": "1900000000000000001",
+    "name": "AI builders",
+    "description": "People shipping agent tooling.",
+    "private": false,
+    "member_count": 42,
+    "follower_count": 7,
+    "owner_id": "101"
+  },
+  "includes": {
+    "users": [{ "id": "101", "username": "alice_dev", "name": "Alice" }]
+  }
+}

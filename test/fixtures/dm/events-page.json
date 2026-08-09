@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000002",
+      "event_type": "MessageCreate",
+      "text": "All on track for Friday. Sending the checklist tomorrow.",
+      "sender_id": "777",
+      "created_at": "2026-07-29T10:05:00.000Z",
+      "dm_conversation_id": "9-777"
+    },
+    {
+      "id": "1900000000000000001",
+      "event_type": "MessageCreate",
+      "text": "Hey - quick check-in about the launch.",
+      "sender_id": "9",
+      "created_at": "2026-07-29T10:00:00.000Z",
+      "dm_conversation_id": "9-777"
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "9", "username": "me_handle", "name": "Me" },
+      { "id": "777", "username": "dana_dm", "name": "Dana" }
+    ]
+  },
+  "meta": {
+    "result_count": 2,
+    "next_token": "dmtok1"
+  }
+}

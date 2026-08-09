@@ -45,6 +45,11 @@ test('COST-4: a CostEstimate.usd override wins over the class base (URL post →
   // A non-finite / negative override is ignored in favour of the table price (defensive).
   assert.equal(priceOf({ class: 'r:post', usd: Number.NaN }), 0.005);
   assert.equal(priceOf({ class: 'r:post', usd: -1 }), 0.005);
+  // Zero is a LEGITIMATE override, not a missing one: a count-multiplied read that resolved
+  // to zero resources costs nothing, and falling back to the table price here would invent a
+  // charge for a call that fetched nothing. This is the `>= 0` / `> 0` boundary.
+  assert.equal(priceOf({ class: 'r:post', usd: 0 }), 0);
+  assert.equal(priceOf({ class: 'w:post', usd: 0 }), 0);
 });
 
 test('COST-2: a fresh budget starts at zero and is never seeded', () => {
@@ -126,6 +131,41 @@ test('warn mode never blocks: past-100% results carry a warning and still return
   assert.equal(meta.session_total_usd, 0.5);
   assert.match(meta.budget_warning ?? '', /exceeded the operator-set credit budget/);
   assert.equal(budget.total(), 0.5); // spend was recorded, not refused
+});
+
+test('spending EXACTLY the cap reads as 100% of it, not as exceeding it', () => {
+  // The `next <= limit` boundary. Landing precisely on the cap is the last legal state, so
+  // the wording must still be the percentage one — "exceeded" would tell the operator they
+  // overspent when they did not, and in hard mode the same boundary decides whether the call
+  // is allowed at all.
+  const budget = createSessionBudget({ limit: 0.015, mode: 'warn' });
+  const meta = budget.reserve('w:post'); // $0.015 against a $0.015 cap
+  assert.equal(meta.session_total_usd, 0.015);
+  assert.match(meta.budget_warning ?? '', /is at ~100% of the operator-set credit budget/);
+  assert.doesNotMatch(meta.budget_warning ?? '', /exceeded/);
+});
+
+test('hard mode allows the call that lands exactly on the cap and refuses the next one', () => {
+  const budget = createSessionBudget({ limit: 0.015, mode: 'hard' });
+  assert.equal(budget.reserve('w:post').session_total_usd, 0.015); // exactly the cap: allowed
+  assert.throws(
+    () => budget.reserve('w:post'),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  assert.equal(budget.total(), 0.015, 'the refused call must not have been charged');
+});
+
+test('COST-5: a zero cap in warn mode flags the very first paid call as exceeded', () => {
+  // limit: 0 is a legitimate operator setting ("spend nothing") — the warn threshold
+  // degenerates to 0, so any non-free reservation is immediately past the cap.
+  const budget = createSessionBudget({ limit: 0, mode: 'warn' });
+  const meta = budget.reserve('r:post'); // $0.005 against a $0 cap
+  assert.equal(meta.session_total_usd, 0.005);
+  assert.match(meta.budget_warning ?? '', /exceeded the operator-set credit budget/);
+  // A free call on a FRESH zero-cap budget stays warning-free (total is still $0) —
+  // the warning tracks the session total, so any spent budget would flag it.
+  const fresh = createSessionBudget({ limit: 0, mode: 'warn' });
+  assert.equal('budget_warning' in fresh.reserve('local'), false);
 });
 
 test('CONC-2: check-and-reserve is atomic — two interleaved calls cannot both pass', async () => {

@@ -1,7 +1,10 @@
 // Untrusted-content pipeline (T-117). A pure string -> string transform applied to EVERY
 // piece of third-party text -- post/DM bodies, display names, bios, handles, alt-text,
 // list names -- BEFORE it lands in a compact render shape (docs/02 section 5.2/5, docs/04
-// untrusted-content, REND-6). `core` does no I/O and imports nothing from other layers.
+// untrusted-content, REND-6). It also guards the ONE third-party-text path that never
+// reaches a compactor: the platform `title`/`detail` prose an error response carries into an
+// XError payload (see `sanitizePlatformText`). `core` does no I/O and imports nothing from
+// other layers.
 //
 // What this does, and what it deliberately does NOT do:
 //   - Strips invisible/format code points that can smuggle hidden instructions past a
@@ -57,6 +60,14 @@ export const FIELD_CAPS = {
   location: 120,
   /** URLs carried through from profile/media fields. */
   url: 500,
+  /**
+   * Platform-supplied ERROR prose (`title` / `detail` / `errors[].message`) before it is
+   * copied into an `XError` payload. Real X problem details sit well under 200 code points,
+   * so 500 never clips a genuine one while still bounding a drift-inflated or adversarial
+   * body. Lives in this table, not at the call site, so the error path cannot drift away
+   * from the caps every success path already obeys.
+   */
+  errorText: 500,
 } as const;
 
 // One character class covering every stripped code point, written entirely with explicit
@@ -100,6 +111,24 @@ export function sanitizeOptional(
   if (input === undefined) return undefined;
   const out = sanitizeText(input, maxLength === undefined ? {} : { maxLength });
   return out.length > 0 ? out : undefined;
+}
+
+/**
+ * Sanitize platform-supplied ERROR prose before it is copied into an `XError` payload
+ * (REND-6/REND-7). Errors are the one third-party-text path the compactors never see: an X
+ * error whose `detail` echoes attacker-influenced input (a duplicate-content 403 quoting the
+ * offending post, a 400 quoting the query) would otherwise reach the planner with bidi and
+ * invisible code points intact and unbounded in length. Same strip, same cap table, same
+ * truncation marker as every success path — this is a thin alias, never a second sanitizer.
+ *
+ * Our OWN remediation prose never goes through here: it is authored in this codebase rather
+ * than read off the wire, and capping it would clip the instructions DX-F13 requires.
+ *
+ * Returns `undefined` for an absent value or one that sanitizes to nothing, so the caller
+ * OMITS the field (exactOptionalPropertyTypes) instead of emitting an empty string.
+ */
+export function sanitizePlatformText(input: string | undefined): string | undefined {
+  return sanitizeOptional(input, FIELD_CAPS.errorText);
 }
 
 // Code-point-safe truncation: slice on `Array.from` units so a surrogate pair is never

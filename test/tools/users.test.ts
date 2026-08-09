@@ -14,6 +14,7 @@ import { createHttpClient } from '../../src/api/http.js';
 import { createHandleLookup } from '../../src/api/endpoints/users.js';
 import { xUserGet, usersTools } from '../../src/tools/users.js';
 import type { ToolContext, EndpointInvoker } from '../../src/core/tooldef.js';
+import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawSingleResponse, RawUser } from '../../src/core/render.js';
 import type { BatchResult, CompactUser } from '../../src/core/render-shapes.js';
 
@@ -174,7 +175,8 @@ test('x_user_get raw:true returns the uncompacted envelope, capped', async () =>
   assert.equal(envelope.data?.[0]?.id, '12');
   // Uncompacted: the raw `public_metrics` block survives (a compact user would have `metrics`).
   assert.ok(envelope.data?.[0]?.public_metrics);
-  assert.equal(out.summary, '2 raw user record(s)');
+  // `raw` skips sanitization, so it must NOT skip the REND-6 warning too (T-320 F4).
+  assert.equal(out.summary, `2 raw user record(s) ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });

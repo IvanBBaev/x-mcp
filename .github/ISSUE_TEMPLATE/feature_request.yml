@@ -1,0 +1,90 @@
+name: Feature request
+description: Propose a new tool, or a change to an existing tool's behavior.
+title: 'feat: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The tool surface is deliberately small and every tool carries a policy classification, so
+        proposals are judged on the problem first and the API second.
+
+        Please open a request before sending a large change — see `CONTRIBUTING.md`. If your
+        proposal is about hardening or a weakness in an existing control, use the **private**
+        reporting flow described in `SECURITY.md` instead of this form.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that x-mcp-ai cannot do today? Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed tool or behavior
+      description: |
+        For a new tool: the name (`x_<domain>_<verb>`), its parameters, what it returns, and the X API
+        endpoint behind it. For a change: the current behavior and the proposed one.
+      placeholder: |
+        Tool: x_list_members_add
+        Params: { list_id: string, user_id: string }
+        Returns: compact confirmation with the acting account
+        Endpoint: POST /2/lists/:id/members
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operation
+    attributes:
+      label: Policy class — operation
+      description: '`destructive` covers delete and block: hard to undo, or socially loud. It is a strictly higher bar than `write` and is never reachable through a `write:*` grant.'
+      options:
+        - read
+        - write
+        - destructive
+        - Not sure — please classify it for me
+        - Not applicable — this is not a new tool
+    validations:
+      required: true
+
+  - type: dropdown
+    id: domain
+    attributes:
+      label: Policy class — domain
+      options:
+        - content (posts, lists, media)
+        - user (profile lookups)
+        - engagement (likes, reposts, bookmarks)
+        - social-graph (follow, block, mute)
+        - dm
+        - moderation
+        - account
+        - Not sure — please classify it for me
+        - Not applicable — this is not a new tool
+    validations:
+      required: true
+
+  - type: textarea
+    id: policy-implications
+    attributes:
+      label: Policy implications
+      description: |
+        Why that `operation:domain` cell, and which presets should reach it? Note anything unusual:
+        additional OAuth scopes, a cost class beyond the existing ones, or a cell that no preset
+        grants (`read:dm` and `write:dm` are opt-in only and stay that way).
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This request contains no credentials, tokens or private account data.
+          required: true

@@ -1,0 +1,11 @@
+{
+  "_provenance": "X API v2 GET /2/media/upload?command=STATUS envelope after processing completes: state=succeeded with progress_percent 100. Shape verbatim from docs.x.com/x-api media-upload chunked flow. Captured 2026-07-31. Exercises: x_media_status terminal success state and the ready-to-attach summary.",
+  "data": {
+    "id": "7200",
+    "media_key": "13_7200",
+    "processing_info": {
+      "state": "succeeded",
+      "progress_percent": 100
+    }
+  }
+}

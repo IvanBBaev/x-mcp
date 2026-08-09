@@ -19,6 +19,11 @@
 //     HTML/non-JSON error page is recognised and dropped, never echoed. The `message` text is
 //     fixed per class and never interpolates a post/bio/DM string; only OUR own remediation
 //     prose plus safe scalar fields (status, reset time, scope name) appear.
+//   • REND-6 — the platform prose that DOES pass through (`platform_title`/`platform_detail`)
+//     is third-party text and is sanitized and length-capped on ingest exactly like every
+//     other third-party string (core/sanitize), because it lands in the tool error the model
+//     reads. Only OUR remediation prose is exempt — this codebase authors it, so there is
+//     nothing to strip and clipping it would destroy the DX-F13 instructions.
 //   • REND-2 — a batch/single lookup that partially fails (HTTP 200 with an `errors[]` array)
 //     is NOT an error: `collectMissing` returns the `missing[]` list so the tool can render
 //     found items + why the rest are absent.
@@ -35,6 +40,7 @@ import {
   type XErrorData,
 } from '../core/errors.js';
 import type { Missing, MissingReason } from '../core/render-shapes.js';
+import { sanitizePlatformText } from '../core/sanitize.js';
 
 // --- Public input types ----------------------------------------------------------
 
@@ -101,6 +107,10 @@ function readHeader(headers: HeaderSource, name: string): string | undefined {
  * The fields we care about from an X v2 error body, normalised across the RFC-7807 problem
  * shape (`{title, detail, type}` at top level) and the legacy `{errors:[{message,code}]}`
  * shape. Values are `undefined` when absent (never partially-typed).
+ *
+ * REND-6: every string in here is SANITIZED — `parseProblem` is the single point at which
+ * platform prose is lifted off the wire, so the rest of the module can treat these three
+ * fields as safe by construction.
  */
 interface ParsedProblem {
   readonly title: string | undefined;
@@ -126,7 +136,20 @@ function parseProblem(body: unknown): ParsedProblem {
       detail = detail ?? asString(first['detail']) ?? asString(first['message']);
     }
   }
-  return { title, detail, type };
+  // REND-6/REND-7: `title`/`detail` are surfaced to the agent verbatim in `platform_title` /
+  // `platform_detail` (DRIFT-2), so they get the SAME strip-and-cap every third-party string
+  // on a success path gets — the error payload is not an exemption from docs/04 §5, it is
+  // just the one path that never passes a compactor. Sanitizing HERE rather than in the two
+  // `data` builders means a future builder cannot forget it, and the classifiers below
+  // benefit too: a zero-width character can no longer be used to break up `scope` or
+  // `not enrolled` and steer a response into the wrong error class. `type` is a platform
+  // URI that never reaches the agent, but it is wire text like the others and reads cleaner
+  // sanitized than carved out by exception.
+  return {
+    title: sanitizePlatformText(title),
+    detail: sanitizePlatformText(detail),
+    type: sanitizePlatformText(type),
+  };
 }
 
 function haystack(problem: ParsedProblem): string {

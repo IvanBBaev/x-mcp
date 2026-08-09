@@ -9,8 +9,8 @@ open an issue to discuss anything non-trivial before sending a large change.
 Requires **Node.js >= 22** (see [`.nvmrc`](.nvmrc)).
 
 ```bash
-git clone https://github.com/IvanBBaev/x-mcp-ai.git
-cd x-mcp-ai
+git clone https://github.com/IvanBBaev/x-mcp.git
+cd x-mcp
 npm ci
 npm run build      # tsc → build/
 ```
@@ -60,9 +60,17 @@ and no credentials are needed to run the suite.
 - **Runtime dependencies stay minimal** — only `@modelcontextprotocol/sdk` and `zod`. Anything
   else belongs in `devDependencies`.
 - **Cost and policy are load-bearing.** New tools must declare their policy cell, availability
-  class, OAuth scopes and cost class; keep the catalog in
-  [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) in sync, and regenerate the tools table
-  between the `<!-- GENERATED:TOOLS -->` markers in the README.
+  class, OAuth scopes and cost class, and keep the hand-written design catalog in
+  [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) in sync.
+- **Three surfaces are machine-owned — never hand-edit them.** After any registry change run
+  `npm run docs:gen`, which imports the built registry and rewrites:
+  [`docs/reference/tools.md`](docs/reference/tools.md) (a whole file the generator owns),
+  the `<!-- GENERATED:TOOLS -->` region in [`README.md`](README.md), and the same-named region
+  in `docs/03-tool-catalog.md`. `npm run check` runs the generator in `--check` mode and fails
+  on any byte of drift, so a hand edit does not survive CI — it just costs you a red build.
+  The registry is the source of truth in every direction: when a surface disagrees with it,
+  the surface is wrong. Note the generator reads `build/`, so `npm run build` first (the
+  `docs:gen` script already chains it).
 - **No AI attribution** in commits or PRs.
 
 ## Where things live

@@ -13,6 +13,8 @@ import {
   renderPosts,
   renderPostPage,
   renderUserPage,
+  renderDmPage,
+  renderListPage,
   capRawMaxResults,
   toIso,
   RAW_MAX_RESULTS,
@@ -158,6 +160,63 @@ test('REND-10: raw:true max_results is capped at 25', () => {
   assert.equal(RAW_MAX_RESULTS, 25);
 });
 
+test('DRIFT-1: unknown fields on a raw post are tolerated and never reach the output', () => {
+  // The Raw* interfaces are TypeScript-only (no closed-object runtime validation), so a
+  // new field X ships tomorrow must neither crash the compactor nor leak through it.
+  // The casts model exactly that: a payload wider than the declared raw shape.
+  const post = renderPost(
+    {
+      id: '1',
+      author_id: 'u1',
+      text: 'hello',
+      community_id: 'c-MARKER-1',
+      edit_history_tweet_ids: ['1', '2'],
+      public_metrics: { like_count: 3, brand_new_metric: 777 },
+    } as never,
+    {
+      users: [{ id: 'u1', username: 'a', subscription_type: 'MARKER-2' } as never],
+      unknown_include_kind: [{ id: 'MARKER-3' }],
+    } as never,
+  );
+  assert.equal(post.author, '@a');
+  assert.equal(post.text, 'hello');
+  assert.equal(post.metrics?.likes, 3);
+  const json = JSON.stringify(post);
+  assert.equal(json.includes('community_id'), false);
+  assert.equal(json.includes('edit_history_tweet_ids'), false);
+  assert.equal(json.includes('brand_new_metric'), false);
+  assert.equal(json.includes('MARKER'), false);
+});
+
+test('DRIFT-1: unknown fields on a raw page envelope are tolerated and never leak', () => {
+  const page = renderPostPage({
+    data: [{ id: '1', author_id: 'u1', text: 'hi', brand_new_field: 'MARKER-4' } as never],
+    includes: { users: [{ id: 'u1', username: 'a' }] },
+    meta: { result_count: 1, next_token: 'NT', newest_id: 'MARKER-5' } as never,
+    injected_top_level: { secret: 'MARKER-6' },
+  } as never);
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0]?.author, '@a');
+  assert.equal(page.next_token, 'NT');
+  assert.equal(JSON.stringify(page).includes('MARKER'), false);
+});
+
+test('DRIFT-1: unknown fields on a raw user are tolerated and never leak', () => {
+  const user = renderUser({
+    id: 'u1',
+    username: 'alice',
+    name: 'Alice',
+    connection_status: ['MARKER-7'],
+    public_metrics: { followers_count: 10, media_count: 999 },
+  } as never);
+  assert.equal(user.handle, '@alice');
+  assert.equal(user.metrics?.followers, 10);
+  const json = JSON.stringify(user);
+  assert.equal(json.includes('connection_status'), false);
+  assert.equal(json.includes('media_count'), false);
+  assert.equal(json.includes('MARKER'), false);
+});
+
 test('renderPost maps public_metrics into the compact metrics shape', () => {
   const post = renderPost(
     {
@@ -225,4 +284,36 @@ test('a page omits next_token on the last page', () => {
   const page = renderUserPage({ data: [{ id: 'u1', username: 'a' }], meta: { result_count: 1 } });
   assert.equal(Object.hasOwn(page, 'next_token'), false);
   assert.equal(page.result_count, 1);
+});
+
+test('renderDmPage compacts DM events with resolved senders and threads extra notes', () => {
+  const page = renderDmPage(
+    {
+      data: [
+        { id: 'd1', sender_id: 'u1', text: 'first', dm_conversation_id: 'c1' },
+        { id: 'd2', sender_id: 'u9', text: 'second' }, // sender expansion missing (REND-5)
+      ],
+      includes: { users: [{ id: 'u1', username: 'sender' }] },
+      meta: { result_count: 2, next_token: 'dm-next' },
+    },
+    ['DMs are private correspondence.'],
+  );
+  assert.equal(page.result_count, 2);
+  assert.equal(page.next_token, 'dm-next');
+  assert.deepEqual(
+    page.items.map((d) => d.sender),
+    ['@sender', 'u9'],
+  );
+  assert.match(page.note ?? '', /DMs are private correspondence\./);
+});
+
+test('renderListPage compacts lists and resolves owner handles from includes', () => {
+  const page = renderListPage({
+    data: [{ id: 'l1', name: 'Reading', member_count: 3, owner_id: 'u1' }],
+    includes: { users: [{ id: 'u1', username: 'owner' }] },
+    meta: { result_count: 1 },
+  });
+  assert.equal(page.result_count, 1);
+  assert.deepEqual(page.items[0], { id: 'l1', name: 'Reading', member_count: 3, owner: '@owner' });
+  assert.equal(Object.hasOwn(page, 'next_token'), false);
 });

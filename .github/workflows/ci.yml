@@ -14,13 +14,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: build & test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+  # The four OS legs (docs/05 §7). The Windows leg runs the full suite including the
+  # token-store persistence/locking/perms tests — that platform is where the
+  # highest-risk module is most likely to break, so it is never skipped.
+  # engines is >=22 (+ engine-strict), so the matrix floor is Node 22, not the
+  # family's Node 20.
+  check:
+    name: check (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        node: [22, 24]
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+          - os: macos-latest
+            node: 22
+          - os: windows-latest
+            node: 22
     steps:
       - uses: actions/checkout@v4
 
@@ -31,13 +44,64 @@ jobs:
           cache: npm
 
       - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
+      # Full gate: verify (build+lint+format+tests) + coverage thresholds/floors + audit.
+      - run: npm run check
+
+  # npm audit on every push/PR (docs/05 §7, F1f) — an advisory in a transitive dep
+  # surfaces within a day, not at the next release attempt.
+  audit:
+    name: npm audit (prod, high)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+
+  # Drift gates (T-312 / T-313 / WP-0.8). Each guards a fact that is written in two places and
+  # that neither the type checker nor the test suite can see: the generated tool reference
+  # against the live registry, the serialized `tools/list` payload against its context budget,
+  # and server.json against package.json. They also run inside `npm run check` on every matrix
+  # leg — this job exists so a failure says WHICH one broke, in under a minute, without waiting
+  # on the four-OS matrix.
+  gates:
+    name: drift gates (docs, context budget, manifest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
       - run: npm run build
-      - run: npm test
+
+      # T-312: docs/reference/tools.md and the GENERATED:TOOLS regions must be byte-identical
+      # to what the registry produces, and every hand-written count must agree with it.
+      - name: Generated tool reference is in sync with the registry
+        run: node scripts/docs-gen.mjs --check
+
+      # T-313: every host pays for the whole tools/list result on every conversation. The
+      # per-tool breakdown is printed so an over-budget run names the tool that grew.
+      - name: tools/list stays inside the context budget
+        run: node scripts/context-gate.mjs
+
+      # WP-0.8: a stale version or an unmarked credential in server.json is only discovered at
+      # publish time otherwise.
+      - name: server.json is in lockstep with package.json
+        run: node scripts/server-json-guard.mjs
 
   coverage:
-    name: coverage
+    name: coverage upload
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,3 +123,52 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
         continue-on-error: true
+
+  # MCP-6 / OPS-F1: the CJS bin on ancient Node prints a legible version message,
+  # not a SyntaxError — asserted, not assumed. No npm ci (the bin has no deps and
+  # engine-strict would refuse the install anyway).
+  launcher-node12:
+    name: launcher probe (Node 12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 12
+        uses: actions/setup-node@v4
+        with:
+          node-version: 12
+
+      - name: Ancient Node gets a legible refusal
+        run: |
+          set +e
+          out=$(node bin/x-mcp-ai.cjs 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test "$code" -ne 0
+          echo "$out" | grep -Eq "x-mcp-ai: fatal: Node .* not supported"
+
+  # F16: smoke the PACKED artifact, not the repo layout — the tarball's bin must
+  # boot the compiled server end-to-end (doctor exercises bin → dynamic import →
+  # config → exit 0).
+  tarball-smoke:
+    name: packed-tarball smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and boot from the tarball
+        run: |
+          tarball=$(npm pack --silent | tail -1)
+          mkdir -p "$RUNNER_TEMP/tarball-smoke"
+          tar -xzf "$tarball" -C "$RUNNER_TEMP/tarball-smoke"
+          cd "$RUNNER_TEMP/tarball-smoke/package"
+          X_MCP_AUTH_MODE=app-only X_MCP_BEARER_TOKEN=smoke node bin/x-mcp-ai.cjs doctor

@@ -1,0 +1,108 @@
+name: Fuzz
+
+# Scheduled, not per-PR (docs/08 WP-3.12): the fuzzer is cheap but its value is in the
+# LONG tail — a different seed every week finds what one fixed corpus never will. CI
+# stays fast; this job is where the weird inputs live.
+on:
+  schedule:
+    # Mondays 04:17 UTC. Off the hour on purpose — the top of the hour is the busiest
+    # slot on shared runners and the most likely to be dropped.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Fuzz seed (blank = derive one from the run id)'
+        required: false
+        type: string
+      cases:
+        description: 'Random cases per tool'
+        required: false
+        default: '400'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # HARD GATE. Every registered tool takes thousands of hostile inputs — malformed types,
+  # absurd numbers, megabyte strings, control characters, `__proto__` / `constructor` keys,
+  # deep nesting, extra keys against `.strict()` — and must answer with a typed XError
+  # every single time. A crash, a hang, a leaked stack frame, a polluted prototype or any
+  # network reach fails this job.
+  fuzz:
+    name: tool-input fuzz (QA-F15)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      # A fresh seed per run is the whole point of scheduling this; it is printed and
+      # written to the report so any finding replays exactly.
+      - name: Pick a seed
+        id: seed
+        run: |
+          seed="${{ inputs.seed }}"
+          if [ -z "$seed" ]; then seed=$(( ${{ github.run_id }} % 2147483647 )); fi
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "fuzz seed: $seed"
+
+      - name: Fuzz every registered tool input
+        run: >-
+          node scripts/fuzz-tools.mjs
+          --seed ${{ steps.seed.outputs.seed }}
+          --cases ${{ inputs.cases || '400' }}
+          --report fuzz-report.json
+
+      - name: Upload the fuzz report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-report
+          path: fuzz-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # INFORMATIONAL. Coverage says a line ran; mutation asks whether anything CHECKED it.
+  # Survivors are a reading list for the next test-writing pass, never a build failure —
+  # hence continue-on-error, and the script itself always exits 0.
+  mutation:
+    name: core mutation run (QA-F14, informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Mutate src/core and re-run the core suite
+        run: node scripts/mutate-core.mjs --seed ${{ github.run_id }} --report mutation-report.json
+
+      - name: Upload the mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report
+          path: mutation-report.json
+          if-no-files-found: ignore
+          retention-days: 30

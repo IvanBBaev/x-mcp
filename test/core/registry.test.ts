@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 
-import { createRegistry, deriveAnnotations } from '../../src/core/registry.js';
+import { createRegistry, deriveAnnotations, withCallSignal } from '../../src/core/registry.js';
 import type {
   BudgetGate,
   BudgetReservation,
@@ -29,6 +29,7 @@ import type {
   ToolAnnotations,
   ToolContext,
   ToolHandler,
+  XApiRequest,
 } from '../../src/core/tooldef.js';
 import { makePorts } from '../helpers/index.js';
 
@@ -69,19 +70,19 @@ function fakePolicy(
     hideDenied: boolean;
   }> = {},
 ): PolicyGate {
-  const isSensitive = (cell: string): boolean =>
-    cell.endsWith(':dm') || cell.startsWith('destructive:') || cell.endsWith(':social-graph');
   return {
     preset: over.preset ?? 'read-only',
     hideDenied: over.hideDenied ?? false,
     isAllowed: over.isAllowed ?? (() => true),
     denyError: (tool) => {
       const cell = tool.policy;
-      // POL-7 / SEC-F10: a sensitive cell NAMES the cell but never the unlock env var.
-      const message = isSensitive(cell)
-        ? `Blocked by policy: the "${cell}" capability is disabled.`
-        : `Blocked by policy: the "${cell}" capability is disabled; set X_MCP_POLICY_ALLOW="${cell}" to enable it.`;
-      return policyError(message, { data: { cell } });
+      // POL-7 / SEC-F10, as narrowed by T-320 F2: a denial NAMES the blocked cell and never
+      // the unlock env var — for every cell, sensitive or not. This fake used to branch on
+      // sensitivity because the real `deniedToolError` did; it no longer does, and a fake that
+      // kept the branch would let a regression in the real one pass unnoticed here.
+      return policyError(`Blocked by policy: the "${cell}" capability is disabled.`, {
+        data: { cell },
+      });
     },
   };
 }
@@ -249,7 +250,7 @@ test('POL-7: denied tools stay listed + annotated; X_MCP_HIDE_DENIED drops them 
   );
 });
 
-test('POL-7 / POL-1: a denied tool is visible but its call is rejected with a policy error — no unlock hint for sensitive cells', async () => {
+test('POL-7 / POL-1: a denied tool is visible but its call is rejected with a policy error — no unlock hint for ANY cell', async () => {
   const dm = makeTool({ name: 'x_dm_send', policy: 'write:dm' });
   const reg = createRegistry([dm], deps({ policy: fakePolicy({ isAllowed: () => false }) }));
 
@@ -265,12 +266,17 @@ test('POL-7 / POL-1: a denied tool is visible but its call is rejected with a po
   // SEC-F10: the sensitive-cell error must NOT hand back the unlock env var/value.
   assert.doesNotMatch(err.message, /X_MCP_POLICY_ALLOW/);
 
-  // Contrast: a low-sensitivity cell MAY include the unlock hint.
+  // T-320 F2: neither does a LOW-SENSITIVITY one. This assertion used to be the mirror image
+  // — `assert.match(..., /X_MCP_POLICY_ALLOW/)`, pinning the hint as intended behaviour. It was
+  // the leaking half of a two-call escalation: `x_auth_status` hands over the whole policy
+  // matrix, so any denial that spells out the env var and its syntax completes the recipe for a
+  // cell the agent could not otherwise unlock. Withholding only counts if it is total.
   const eng = makeTool({ name: 'x_like_set', policy: 'write:engagement' });
   const reg2 = createRegistry([eng], deps({ policy: fakePolicy({ isAllowed: () => false }) }));
   const err2 = await rejected(reg2.call('x_like_set', {}, callCtx()));
   assert.equal(err2.kind, 'policy');
-  assert.match(err2.message, /X_MCP_POLICY_ALLOW/);
+  assert.equal(err2.data.cell, 'write:engagement'); // still actionable via `data.cell`…
+  assert.doesNotMatch(err2.message, /X_MCP/); // …without naming any env var.
 });
 
 // --- The pipeline gauntlet -----------------------------------------------------------
@@ -335,9 +341,10 @@ test('the pipeline runs the gauntlet in order (validate → policy → budget �
   assert.deepEqual(checkEstimate, { class: 'w:post' });
   assert.deepEqual(reserveEstimate, { class: 'w:post' });
 
-  // The handler receives a full ToolContext: ports, the auth-scoped invoker, the signal.
+  // The handler receives a full ToolContext: ports, an invoker, the signal. The invoker is
+  // NOT the raw one — MCP-7 binds the call signal to it (see the MCP-7 tests below).
   assert.ok(seenCtx);
-  assert.equal(seenCtx.http, fakeHttp);
+  assert.notEqual(seenCtx.http, fakeHttp);
   assert.equal(seenCtx.signal, ctrl.signal);
   assert.equal(typeof seenCtx.ports.clock.now(), 'number');
 });
@@ -461,4 +468,196 @@ test('handler errors: an XError propagates unchanged; a non-XError is wrapped as
   const reg2 = createRegistry([typed], deps());
   const err2 = await rejected(reg2.call('x_b', {}, callCtx()));
   assert.equal(err2.kind, 'rate-limit'); // passed through untouched
+});
+
+// --- Cooperative cancellation (MCP-7) -------------------------------------------------
+//
+// The registry is THE choke point: it binds the `tools/call` signal to the invoker it hands
+// the handler, so cancellation reaches every in-flight request of every tool without any
+// endpoint or tool opting in (docs/07 MCP-7, generalizing ARCH-F7 beyond media).
+
+/** An invoker that records the requests it is handed and answers with a fixed payload. */
+function recordingHttp(sink: XApiRequest[]): EndpointInvoker {
+  return {
+    send<T>(req: XApiRequest): Promise<T> {
+      sink.push(req);
+      return Promise.resolve({ ok: true } as unknown as T);
+    },
+  };
+}
+
+test('MCP-7: the call signal is bound to the invoker — EVERY request a handler sends carries it', async () => {
+  const sent: XApiRequest[] = [];
+  // A multi-request handler: the media-style INIT → APPEND×2 → FINALIZE conversation is the
+  // reason the binding lives on the invoker and not on one call site.
+  const tool = makeTool({
+    name: 'x_media_upload',
+    policy: 'write:content',
+    handler: async (_input, ctx) => {
+      await ctx.http.send({ method: 'POST', path: '/2/media/upload', body: { command: 'INIT' } });
+      await ctx.http.send({ method: 'POST', path: '/2/media/upload', body: { segment: 0 } });
+      await ctx.http.send({ method: 'POST', path: '/2/media/upload', body: { segment: 1 } });
+      await ctx.http.send({
+        method: 'POST',
+        path: '/2/media/upload',
+        body: { command: 'FINALIZE' },
+        scopes: ['media.write'],
+      });
+      return { data: { ok: true } };
+    },
+  });
+
+  const ctrl = new AbortController();
+  const reg = createRegistry([tool], deps());
+  await reg.call('x_media_upload', {}, callCtx({ http: recordingHttp(sent), signal: ctrl.signal }));
+
+  assert.equal(sent.length, 4);
+  for (const req of sent) {
+    assert.ok(req.signal, 'every request must carry a cancellation signal');
+    assert.equal(req.signal.aborted, false);
+  }
+  // One abort tears down every segment request — including ones already on the wire.
+  ctrl.abort();
+  for (const req of sent) assert.equal(req.signal?.aborted, true);
+
+  // The wrapper is transparent: it only ADDS `signal`, it never rewrites the request.
+  assert.equal(sent[0]?.method, 'POST');
+  assert.equal(sent[0]?.path, '/2/media/upload');
+  assert.deepEqual(sent[1]?.body, { segment: 0 });
+  assert.deepEqual(sent[3]?.scopes, ['media.write']);
+});
+
+test('MCP-7: a call with no host signal gets the raw invoker back — zero wrapping, no signal on the wire', async () => {
+  const sent: XApiRequest[] = [];
+  const raw = recordingHttp(sent);
+  let seenHttp: EndpointInvoker | undefined;
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    handler: async (_input, ctx) => {
+      seenHttp = ctx.http;
+      await ctx.http.send({ method: 'GET', path: '/2/tweets/1' });
+      return { data: { ok: true } };
+    },
+  });
+
+  const reg = createRegistry([tool], deps());
+  await reg.call('x_post_get', {}, callCtx({ http: raw }));
+
+  assert.equal(seenHttp, raw); // identity: nothing to bind, so nothing is wrapped
+  assert.equal(sent[0]?.signal, undefined);
+});
+
+test('MCP-7: an explicit per-request signal is COMBINED with the call signal, never replaced', async () => {
+  // Either side firing must tear the request down; neither layer can silently disable the
+  // other's cancellation. Two independent wrappers, one per direction.
+  const callSide = new AbortController();
+  const sentA: XApiRequest[] = [];
+  const boundA = withCallSignal(recordingHttp(sentA), callSide.signal);
+  const ownA = new AbortController();
+  await boundA.send({ method: 'GET', path: '/2/tweets/1', signal: ownA.signal });
+  const combinedA = sentA[0]?.signal;
+  assert.ok(combinedA);
+  assert.equal(combinedA.aborted, false);
+  callSide.abort(); // the host cancelled the tools/call
+  assert.equal(combinedA.aborted, true);
+
+  const callSideB = new AbortController();
+  const sentB: XApiRequest[] = [];
+  const boundB = withCallSignal(recordingHttp(sentB), callSideB.signal);
+  const ownB = new AbortController();
+  await boundB.send({ method: 'GET', path: '/2/tweets/2', signal: ownB.signal });
+  const combinedB = sentB[0]?.signal;
+  assert.ok(combinedB);
+  assert.equal(combinedB.aborted, false);
+  ownB.abort(); // the endpoint's own sub-timeout fired
+  assert.equal(combinedB.aborted, true);
+  assert.equal(callSideB.signal.aborted, false); // and it did NOT abort the whole call
+});
+
+test('MCP-7: a call cancelled before it starts does nothing at all — no gate, no handler, no charge', async () => {
+  const seen: string[] = [];
+  let handlerRan = false;
+  const tool = makeTool({
+    name: 'x_post_create',
+    policy: 'write:content',
+    input: z.object({ text: z.string() }),
+    handler: () => {
+      handlerRan = true;
+      return Promise.resolve({ data: {} });
+    },
+  });
+  const policy = fakePolicy({
+    isAllowed: () => {
+      seen.push('policy');
+      return true;
+    },
+  });
+  const budget: BudgetGate = {
+    check: () => {
+      seen.push('budget-check');
+    },
+    reserve: () => {
+      seen.push('reserve');
+      return { cost_usd: 0.015, session_total_usd: 0.015 };
+    },
+  };
+  const rateLimit: RateLimitGate = {
+    preflight: () => {
+      seen.push('rate');
+    },
+  };
+
+  const ctrl = new AbortController();
+  ctrl.abort();
+  const reg = createRegistry([tool], { policy, budget, rateLimit });
+  // Note the input is INVALID too: cancellation short-circuits even ahead of validation.
+  const err = await rejected(
+    reg.call('x_post_create', { text: 7 }, callCtx({ signal: ctrl.signal })),
+  );
+
+  assert.equal(err.kind, 'network'); // the frozen taxonomy's answer — no new class invented
+  assert.match(err.message, /cancelled by the MCP host/);
+  assert.equal(handlerRan, false);
+  assert.deepEqual(seen, []); // not a single gate ran, so nothing was charged (INT-2)
+});
+
+test('MCP-7: a raw AbortError escaping a handler renders as the cancellation error, not "failed unexpectedly"', async () => {
+  const ctrl = new AbortController();
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    handler: (_input, ctx) => {
+      ctrl.abort(); // the host cancels while the handler is mid-flight
+      ctx.signal?.throwIfAborted(); // a handler that merely honours the signal (MEDIA-7)
+      return Promise.resolve({ data: {} });
+    },
+  });
+  const reg = createRegistry([tool], deps());
+  const err = await rejected(reg.call('x_post_get', {}, callCtx({ signal: ctrl.signal })));
+
+  assert.equal(err.kind, 'network');
+  assert.equal(err.retryable, true); // a cancelled READ is safely re-issuable
+  assert.match(err.message, /cancelled by the MCP host/);
+  assert.doesNotMatch(err.message, /failed unexpectedly/);
+});
+
+test('MCP-7 → POST-4: a cancelled WRITE is non-retryable and warns the platform may have applied it', async () => {
+  const ctrl = new AbortController();
+  const write = makeTool({
+    name: 'x_post_create',
+    policy: 'write:content',
+    handler: () => {
+      ctrl.abort();
+      // A `DOMException` named AbortError, exactly as fetch/fs teardown produces it.
+      return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+    },
+  });
+  const reg = createRegistry([write], deps());
+  const err = await rejected(reg.call('x_post_create', {}, callCtx({ signal: ctrl.signal })));
+
+  assert.equal(err.kind, 'network');
+  assert.equal(err.retryable, false); // POST-4: never blind-retry an ambiguous write
+  assert.match(err.message, /may nevertheless have been applied/);
+  assert.match(err.message, /POST-4/);
 });

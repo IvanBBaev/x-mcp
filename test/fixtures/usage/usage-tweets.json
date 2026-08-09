@@ -1,0 +1,23 @@
+{
+  "_provenance": "X API v2 GET /2/usage/tweets envelope — shape verbatim from docs.x.com/x-api/usage/get-usage (the T-010 fact-check source, docs/01 §3.5). Captured 2026-07-31 (DRIFT-4). Counters come back as JSON STRINGS on this endpoint while cap_reset_day is numeric, so the fixture keeps both types. Exercises: string→number coercion, percent-of-cap (125000/2000000 = 6.3%), REND-9 date normalisation (a full ISO stamp and a date-only string), per-app summation over the daily series.",
+  "data": {
+    "project_id": "1441234567890123456",
+    "project_usage": "125000",
+    "project_cap": "2000000",
+    "cap_reset_day": 10,
+    "daily_project_usage": [
+      { "date": "2026-07-29T00:00:00.000Z", "usage": "80000" },
+      { "date": "2026-07-30", "usage": "45000" }
+    ],
+    "daily_client_app_usage": [
+      {
+        "client_app_id": "27847302",
+        "usage": [
+          { "date": "2026-07-29T00:00:00.000Z", "usage": "80000" },
+          { "date": "2026-07-30T00:00:00.000Z", "usage": "45000" }
+        ],
+        "usage_result_count": 2
+      }
+    ]
+  }
+}

@@ -27,20 +27,25 @@ export type PolicyPreset = (typeof POLICY_PRESETS)[number];
 /** Preset applied when `X_MCP_POLICY` is unset or empty (CFG-4 treats empty as unset). */
 export const DEFAULT_POLICY_PRESET: PolicyPreset = 'read-only';
 
-// The preset → allowed-cells table (docs/04 §3.1), composed exactly as the doc prose reads.
-// `read:dm` and `write:dm` appear in NO preset, including `full` — DM cells are reachable
-// only by an explicit ALLOW override (POL-3/4, F14).
-const READ_ONLY: readonly PolicyClass[] = [
+// The preset → allowed-cells table (docs/04 §3.1), composed exactly as the doc prose reads,
+// then normalized to canonical POLICY_CELLS order so `presetCells` matches the resolved
+// `allowed` view (logging / auth_status) cell-for-cell. `read:dm` and `write:dm` appear in
+// NO preset, including `full` — DM cells are reachable only by an explicit ALLOW override
+// (POL-3/4, F14).
+const canonical = (cells: readonly PolicyClass[]): readonly PolicyClass[] =>
+  POLICY_CELLS.filter((cell) => cells.includes(cell));
+
+const READ_ONLY: readonly PolicyClass[] = canonical([
   'read:content',
   'read:user',
   'read:account',
   'read:social-graph',
-];
-const ENGAGE: readonly PolicyClass[] = [...READ_ONLY, 'write:engagement'];
-const PUBLISH: readonly PolicyClass[] = [...ENGAGE, 'write:content', 'write:moderation'];
-const MANAGE: readonly PolicyClass[] = [...PUBLISH, 'destructive:content'];
+]);
+const ENGAGE: readonly PolicyClass[] = canonical([...READ_ONLY, 'write:engagement']);
+const PUBLISH: readonly PolicyClass[] = canonical([...ENGAGE, 'write:content', 'write:moderation']);
+const MANAGE: readonly PolicyClass[] = canonical([...PUBLISH, 'destructive:content']);
 // `full` = all non-DM cells, defined explicitly to mirror the docs/04 §3.1 table row.
-const FULL: readonly PolicyClass[] = [
+const FULL: readonly PolicyClass[] = canonical([
   'read:content',
   'read:user',
   'read:account',
@@ -51,7 +56,7 @@ const FULL: readonly PolicyClass[] = [
   'write:social-graph',
   'destructive:content',
   'destructive:social-graph',
-];
+]);
 
 const PRESET_CELLS = {
   'read-only': READ_ONLY,
@@ -216,16 +221,31 @@ export function deniedDescriptionSuffix(preset: PolicyPreset): string {
 }
 
 /**
- * Build the typed `policy` error for a denied tool call (POL-7 / SEC-F10). It always names
- * the blocked cell (carried in `data.cell`, `retryable: false`, `fix: 'operator'`). For a
- * SENSITIVE cell (`*:dm`, `destructive:*`, `*:social-graph`) the message stops there — it
- * MUST NOT name the env var/value that would unlock it, so the model cannot relay an
- * escalation recipe to the operator (kill-chain Scenario C). Low-sensitivity cells may hint.
+ * Build the typed `policy` error for a denied tool call (POL-7 / SEC-F10). It names the
+ * blocked cell (carried in `data.cell`, `retryable: false`, `fix: 'operator'`) and the active
+ * preset, and it stops there — for EVERY cell.
+ *
+ * The sensitive/low-sensitivity split this used to make is gone (T-320 F2). The old
+ * low-sensitivity branch appended *"An operator can enable it by adding `<cell>` to
+ * X_MCP_POLICY_ALLOW"*, on the theory that withholding the hint for `*:dm`,
+ * `destructive:*` and `*:social-graph` kept an escalation recipe away from a poisoned
+ * planner. It did not: `x_auth_status` returns the whole policy matrix — and the server's own
+ * MCP instructions tell the model to call it first — so an agent reads the blocked cell name
+ * from there, triggers ANY low-sensitivity denial to learn the variable name and the exact
+ * syntax, and relays the assembled recipe for the sensitive cell it actually wants. The
+ * withholding was defeated by two calls, and the branch that leaked the half it needed was
+ * pinned by tests as intended behaviour (kill-chain Scenario C).
+ *
+ * So the syntax moved to where only a human reads it — `docs/10-operator-guide.md` — and no
+ * denial message anywhere names an environment variable. The cell name stays: it is what
+ * makes the error actionable, it is already in `data.cell` for programmatic callers, and an
+ * operator who has the cell name can find the variable in one grep of their own config. What
+ * they cannot do is have the model hand them a ready-to-paste escalation line.
  */
 export function deniedToolError(cell: PolicyClass, preset: PolicyPreset): XError {
-  const base = `This operation is disabled by the active \`${preset}\` policy (blocked cell \`${cell}\`).`;
-  const message = isSensitiveCell(cell)
-    ? base
-    : `${base} An operator can enable it by adding \`${cell}\` to X_MCP_POLICY_ALLOW.`;
-  return policyError(message, { data: { cell } });
+  return policyError(
+    `This operation is disabled by the active \`${preset}\` policy (blocked cell \`${cell}\`). ` +
+      'Enabling it is an operator decision made outside this session; see the operator guide.',
+    { data: { cell } },
+  );
 }

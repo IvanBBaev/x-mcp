@@ -1,0 +1,42 @@
+{
+  "data": [
+    {
+      "id": "12",
+      "name": "NASA",
+      "username": "NASA",
+      "created_at": "2007-12-19T20:30:39.000Z",
+      "description": "There's space for everybody.",
+      "location": "Pale Blue Dot",
+      "url": "https://t.co/nasa",
+      "verified": true,
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 74000000,
+        "following_count": 180,
+        "tweet_count": 65000,
+        "listed_count": 92000
+      }
+    },
+    {
+      "id": "34",
+      "name": "Bill Gates",
+      "username": "BillGates",
+      "created_at": "2009-06-24T18:44:10.000Z",
+      "description": "Sharing things I'm learning through my foundation work and other interests.",
+      "location": "Seattle, WA",
+      "url": "https://t.co/bill",
+      "verified": true,
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 62000000,
+        "following_count": 500,
+        "tweet_count": 4200,
+        "listed_count": 140000
+      }
+    }
+  ],
+  "meta": {
+    "result_count": 2,
+    "next_token": "graph-cursor-7"
+  }
+}

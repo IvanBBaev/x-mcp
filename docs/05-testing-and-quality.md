@@ -16,8 +16,8 @@ in parentheses (`T-1xx`) are from
 | Layer | Scope | Doubles | Where |
 |---|---|---|---|
 | **Unit — core** | `core/*`: policy resolution, config/zod parsing, session budget math, render/sanitize shapes, field presets, error taxonomy, pagination clamp | none (pure) | `test/core-*.test.js` |
-| **Unit — api** | endpoint wrappers, oauth2 refresh/rotation/locking, oauth1 signing *(P3, if kept)*, rate-limit table, retry policy | `undici` `MockAgent` (built into Node ≥ 20) | `test/api-*.test.js` |
-| **Property-based (fast-check)** | encoding/ordering/algebra invariants: oauth1 signature base string *(P3)*, policy resolution (deny-wins, idempotent), `max_results` clamping across arbitrary integers | none / `MockAgent` | `test/prop-*.test.js` |
+| **Unit — api** | endpoint wrappers, oauth2 refresh/rotation/locking, rate-limit table, retry policy *(oauth1 signing dropped — decision 0001, T-307)* | `undici` `MockAgent` (built into Node ≥ 20) | `test/api-*.test.js` |
+| **Property-based (fast-check)** | encoding/ordering/algebra invariants: policy resolution (deny-wins, idempotent), `max_results` clamping across arbitrary integers *(oauth1 signature base string dropped — decision 0001)* | none / `MockAgent` | `test/prop-*.test.js` |
 | **Tool-level** | each tool end-to-end inside the process: input schema → pipeline → rendered output / typed error | `MockAgent` fixtures | `test/tools-*.test.js` |
 | **Contract fixtures** | recorded real v2 response JSON (sanitized) per endpoint, asserted against render output — catches API drift when refreshed (DRIFT-1/4) | fixture files w/ provenance | `test/fixtures/**` |
 | **MCP integration** | a real `@modelcontextprotocol/sdk` `Client` connected to the real server object over `InMemoryTransport`: `tools/list` schemas + annotations + `instructions`, representative `tools/call` round-trips, denied-tool-as-result, parallel calls (MCP-2/4/5/8) | `InMemoryTransport` + `MockAgent` | `test/mcp-*.test.js` |

@@ -1,6 +1,7 @@
 # Build & test artifacts (committed ignore; AI-harness files live in .git/info/exclude)
 node_modules/
 build/
+.build-*/
 coverage/
 *.log
 
