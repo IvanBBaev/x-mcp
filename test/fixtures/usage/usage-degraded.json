@@ -1,0 +1,10 @@
+{
+  "_provenance": "X API v2 GET /2/usage/tweets degraded 200: the envelope arrives with no `data` block (observed when the project has no usage record yet, and the shape a field rename would also produce — DRIFT-1). Captured 2026-07-31 (DRIFT-4). Exercises: platform figures degrade to a stated UNKNOWN rather than a silent zero, and the local session estimate still renders.",
+  "errors": [
+    {
+      "title": "Not authorized for usage",
+      "detail": "No usage record is available for this project.",
+      "type": "https://api.twitter.com/2/problems/not-authorized-for-resource"
+    }
+  ]
+}

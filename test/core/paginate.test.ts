@@ -59,6 +59,59 @@ test('PAGE-3: exact bounds are inclusive and unclamped', () => {
   assert.equal(clampMaxResults(100, PAGE_BOUNDS.searchRecent).clamped, false);
 });
 
+// The windows themselves are API contract, transcribed from docs/03's per-tool
+// `max_results N-M` annotations. Spot-checking a few entries leaves the rest free to drift
+// silently — a mutation run over this module found exactly that hole — so the whole table is
+// pinned here, literal by literal, and every window is exercised at both of its edges.
+const DOCUMENTED_BOUNDS: ReadonlyArray<readonly [keyof typeof PAGE_BOUNDS, number, number]> = [
+  ['searchRecent', 10, 100], // x_search_recent
+  ['searchArchive', 10, 500], // x_search_archive
+  ['timeline', 5, 100], // x_timeline_home / _mentions / _user
+  ['likedPosts', 5, 100], // x_liked_posts_list
+  ['quotePosts', 10, 100], // x_quote_posts_list
+  ['engagementList', 1, 100], // liking users, reposted-by, bookmarks, list members/timeline
+  ['socialGraph', 1, 1000], // followers, following, blocks, mutes
+  ['userSearch', 1, 1000], // x_user_search
+  ['dm', 1, 100], // the three DM event lookups
+];
+
+test('PAGE-3: every documented max_results window is exactly the one docs/03 promises', () => {
+  assert.deepEqual(
+    Object.keys(PAGE_BOUNDS).sort(),
+    DOCUMENTED_BOUNDS.map(([name]) => name).sort(),
+    'PAGE_BOUNDS gained or lost a window without a docs/03 row',
+  );
+  for (const [name, min, max] of DOCUMENTED_BOUNDS) {
+    assert.deepEqual(PAGE_BOUNDS[name], { min, max }, `${name} window drifted from docs/03`);
+  }
+});
+
+test('PAGE-3: each window clamps at both edges and passes its exact bounds through', () => {
+  for (const [name, min, max] of DOCUMENTED_BOUNDS) {
+    const bounds = PAGE_BOUNDS[name];
+    // One below the floor and one above the ceiling — the two values a wrong literal moves.
+    assert.deepEqual(
+      { value: clampMaxResults(min - 1, bounds).value, clamped: true },
+      { value: min, clamped: clampMaxResults(min - 1, bounds).clamped },
+      `${name} did not clamp up from ${min - 1}`,
+    );
+    assert.deepEqual(
+      { value: clampMaxResults(max + 1, bounds).value, clamped: true },
+      { value: max, clamped: clampMaxResults(max + 1, bounds).clamped },
+      `${name} did not clamp down from ${max + 1}`,
+    );
+    // The bounds are INCLUSIVE: neither edge may be treated as out of range.
+    assert.equal(clampMaxResults(min, bounds).clamped, false, `${name} clamped its own floor`);
+    assert.equal(clampMaxResults(max, bounds).clamped, false, `${name} clamped its own ceiling`);
+    // And the value just inside the ceiling is untouched — pins `>` against `>=` on line 88.
+    assert.equal(
+      clampMaxResults(max - 1, bounds).clamped,
+      false,
+      `${name} clamped a value inside its window`,
+    );
+  }
+});
+
 test('PAGE-3: nonsense max_results (NaN/Infinity/fractional) is a typed validation error', () => {
   for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 10.5]) {
     assert.throws(

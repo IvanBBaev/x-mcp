@@ -119,6 +119,38 @@ test('CFG-2: keychain mode and non-oauth2 modes resolve no default token file', 
   assert.equal(Object.hasOwn(appOnly, 'tokenFile'), false);
 });
 
+// --- PLAT-3: Windows-style paths survive verbatim (no hardcoded `/` joins) -------------
+// These run on every platform: config never re-joins or normalises an explicit path, so
+// backslashes, drive letters, and UNC prefixes must come out byte-identical on macOS too.
+
+test('PLAT-3: a drive-letter backslash token file passes through verbatim', () => {
+  const cfg = parseConfig({ X_MCP_TOKEN_FILE: 'C:\\Users\\me\\tokens.json' });
+  assert.equal(cfg.tokenFile, 'C:\\Users\\me\\tokens.json');
+});
+
+test('PLAT-3: backslash media dir and UNC profiles file pass through verbatim', () => {
+  const media = parseConfig({ X_MCP_MEDIA_DIR: 'D:\\media\\x' });
+  assert.equal(media.mediaDir, 'D:\\media\\x');
+
+  const unc = parseConfig({
+    X_MCP_PROFILES_FILE: '\\\\server\\share\\profiles.json',
+    X_MCP_PROFILE: 'work',
+  });
+  assert.equal(unc.profile?.file, '\\\\server\\share\\profiles.json');
+});
+
+test("PLAT-3: a literal %APPDATA% reference is NOT expanded (expansion is the shell's job)", () => {
+  const cfg = parseConfig({ X_MCP_TOKEN_FILE: '%APPDATA%\\x-mcp\\tokens.json' });
+  assert.equal(cfg.tokenFile, '%APPDATA%\\x-mcp\\tokens.json');
+});
+
+test('PLAT-3: a leading ~\\ expands via node:path (backslash form of CFG-1)', () => {
+  const cfg = parseConfig({ X_MCP_TOKEN_FILE: '~\\creds\\tokens.json' });
+  // The expected value is built with path.join itself, so the assertion is
+  // platform-independent: whatever separator join picks, expansion must match it.
+  assert.equal(cfg.tokenFile, path.join(os.homedir(), 'creds\\tokens.json'));
+});
+
 // --- CFG-3: profiles file vs profile selection vs direct credentials -------------------
 
 test('CFG-3: a profiles file requires X_MCP_PROFILE', () => {
@@ -151,6 +183,74 @@ test('CFG-3: a valid single profile parses (profile selection recorded, ~ expand
   assert.deepEqual(cfg.profile, { file: path.join(os.homedir(), 'profiles.json'), name: 'work' });
 });
 
+test('CFG-3: the selected profile is the single source of credentials (app-only)', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'bot' },
+    { bot: { auth_mode: 'app-only', bearer_token: 'AAAA' }, work: { auth_mode: 'oauth2' } },
+  );
+  assert.equal(cfg.authMode, 'app-only');
+  assert.equal(cfg.bearerToken, 'AAAA');
+  // app-only resolves no default token file, exactly as the direct env path (CFG-2).
+  assert.equal(Object.hasOwn(cfg, 'tokenFile'), false);
+});
+
+test('CFG-3: an oauth2 profile supplies client id/secret and its own token file', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+    {
+      work: {
+        auth_mode: 'oauth2',
+        client_id: 'CID',
+        client_secret: 'CSEC',
+        token_file: '~/work/tokens.json',
+      },
+    },
+  );
+  assert.equal(cfg.authMode, 'oauth2');
+  assert.equal(cfg.oauth2.clientId, 'CID');
+  assert.equal(cfg.oauth2.clientSecret, 'CSEC');
+  // CFG-1 expansion applies to a profile-supplied path exactly as to X_MCP_TOKEN_FILE.
+  assert.equal(cfg.tokenFile, path.join(os.homedir(), 'work/tokens.json'));
+});
+
+test('CFG-3: X_MCP_AUTH_MODE conflicting with the profile auth_mode is fatal (no silent winner)', () => {
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work', X_MCP_AUTH_MODE: 'app-only' },
+        { work: { auth_mode: 'oauth2', client_id: 'CID' } },
+      ),
+    /X_MCP_AUTH_MODE=app-only conflicts with auth_mode "oauth2" of profile "work"/,
+  );
+});
+
+test('CFG-3: a profile whose credentials contradict its auth_mode is fatal', () => {
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+        { work: { auth_mode: 'oauth2', bearer_token: 'AAAA' } },
+      ),
+    /bearer_token requires auth_mode app-only/,
+  );
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'bot' },
+        { bot: { auth_mode: 'app-only', client_id: 'CID' } },
+      ),
+    /client_id \/ client_secret require auth_mode oauth2/,
+  );
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'bot' },
+        { bot: { auth_mode: 'app-only' } },
+      ),
+    /auth_mode app-only requires bearer_token/,
+  );
+});
+
 // --- CFG-4: empty string is treated as unset -------------------------------------------
 
 test('CFG-4: empty/whitespace values are treated as unset (defaults apply)', () => {
@@ -177,7 +277,7 @@ test('CFG-4: an empty required var errors exactly like a missing one', () => {
 // --- CFG-5: fatal contract (typed error, legible, lists valid options) -----------------
 
 test('CFG-5: an invalid enum is fatal and the message lists the valid options', () => {
-  assertFatal(() => parseConfig({ X_MCP_AUTH_MODE: 'oauth3' }), /oauth2.*oauth1.*app-only/s);
+  assertFatal(() => parseConfig({ X_MCP_AUTH_MODE: 'oauth3' }), /oauth2.*app-only/s);
   assertFatal(() => parseConfig({ X_MCP_LOG_LEVEL: 'verbose' }), /silent.*error.*info.*debug/s);
   assertFatal(() => parseConfig({ X_MCP_BUDGET_MODE: 'soft' }), /warn.*hard/s);
 });
@@ -211,11 +311,6 @@ test('mode/credential conflicts are fatal', () => {
       parseConfig({ X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'A', X_MCP_CLIENT_ID: 'C' }),
     /X_MCP_CLIENT_ID.*oauth2/s,
   );
-  // OAuth 1.0a quadruple must be complete and requires oauth1 mode.
-  assertFatal(
-    () => parseConfig({ X_MCP_AUTH_MODE: 'oauth1', X_MCP_API_KEY: 'k' }),
-    /incomplete OAuth 1\.0a/,
-  );
   // Keychain + explicit token file are mutually exclusive.
   assertFatal(
     () => parseConfig({ X_MCP_TOKEN_KEYCHAIN: '1', X_MCP_TOKEN_FILE: '~/t.json' }),
@@ -223,20 +318,40 @@ test('mode/credential conflicts are fatal', () => {
   );
 });
 
-test('a complete OAuth 1.0a quadruple in oauth1 mode parses', () => {
+// --- OAuth 1.0a is gone (decision 0001, T-309) -----------------------------------------
+
+test('T-309: X_MCP_AUTH_MODE=oauth1 is refused like any unknown mode (decision 0001)', () => {
+  assertFatal(() => parseConfig({ X_MCP_AUTH_MODE: 'oauth1' }), /oauth2.*app-only/s);
+  // The message must not advertise the dropped mode as a valid option: `oauth1` may occur
+  // exactly once — as the rejected value, never in the list of accepted modes.
+  assert.throws(
+    () => parseConfig({ X_MCP_AUTH_MODE: 'oauth1' }),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.message.split('oauth1').length - 1, 1);
+      return true;
+    },
+  );
+});
+
+test('T-309: the OAuth 1.0a credential quadruple is no longer part of the surface', () => {
   const cfg = parseConfig({
-    X_MCP_AUTH_MODE: 'oauth1',
     X_MCP_API_KEY: 'k',
     X_MCP_API_SECRET: 's',
     X_MCP_ACCESS_TOKEN: 'at',
     X_MCP_ACCESS_SECRET: 'as',
   });
-  assert.deepEqual(cfg.oauth1, {
-    apiKey: 'k',
-    apiSecret: 's',
-    accessToken: 'at',
-    accessSecret: 'as',
-  });
+  // They parse as *unknown* X_MCP_* vars now: CFG-8 warnings, no credentials, no refusal.
+  assert.equal(cfg.authMode, 'oauth2');
+  assert.equal(Object.hasOwn(cfg, 'oauth1'), false);
+  for (const name of [
+    'X_MCP_API_KEY',
+    'X_MCP_API_SECRET',
+    'X_MCP_ACCESS_TOKEN',
+    'X_MCP_ACCESS_SECRET',
+  ]) {
+    assert.ok(cfg.warnings.some((w) => w.includes(name) && /possible typo/.test(w)));
+  }
 });
 
 // --- CFG-6: profiles content is re-validated when the file is supplied -----------------
@@ -276,6 +391,130 @@ test('CFG-6: a valid profile policy (preset name) passes re-validation', () => {
     { work: { auth_mode: 'oauth2', policy: 'publish' } },
   );
   assert.equal(cfg.profile?.name, 'work');
+  assert.equal(cfg.policy.preset, 'publish');
+});
+
+test('CFG-6: a profile policy given as a cell list becomes allow cells; deny still wins', () => {
+  const cfg = parseConfig(
+    {
+      X_MCP_PROFILES_FILE: '~/p.json',
+      X_MCP_PROFILE: 'work',
+      X_MCP_POLICY_DENY: 'destructive:content',
+    },
+    { work: { policy: 'write:content, read:user' } },
+  );
+  assert.equal(cfg.policy.preset, 'read-only');
+  assert.deepEqual(cfg.policy.allow, ['write:content', 'read:user']);
+  // A profile never touches DENY — deny > allow > preset stays the operator's (POL-2).
+  assert.deepEqual(cfg.policy.deny, ['destructive:content']);
+});
+
+test('CFG-6: an env policy overrides the profile policy and the override is warned about', () => {
+  const preset = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work', X_MCP_POLICY: 'read-only' },
+    { work: { policy: 'full' } },
+  );
+  assert.equal(preset.policy.preset, 'read-only');
+  assert.ok(preset.warnings.some((w) => /X_MCP_POLICY=read-only overrides the policy/.test(w)));
+
+  const cells = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work', X_MCP_POLICY_ALLOW: 'read:user' },
+    { work: { policy: 'write:content' } },
+  );
+  assert.deepEqual(cells.policy.allow, ['read:user']);
+  assert.ok(cells.warnings.some((w) => /X_MCP_POLICY_ALLOW overrides the policy cells/.test(w)));
+});
+
+test('CFG-6: X_MCP_TOKEN_FILE overrides the profile token_file and warns', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work', X_MCP_TOKEN_FILE: '~/env.json' },
+    { work: { auth_mode: 'oauth2', token_file: '~/profile.json' } },
+  );
+  assert.equal(cfg.tokenFile, path.join(os.homedir(), 'env.json'));
+  assert.ok(cfg.warnings.some((w) => /X_MCP_TOKEN_FILE overrides the token_file/.test(w)));
+});
+
+test('CFG-6: a profile token_file with X_MCP_TOKEN_KEYCHAIN=1 is fatal', () => {
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work', X_MCP_TOKEN_KEYCHAIN: '1' },
+        { work: { token_file: '~/profile.json' } },
+      ),
+    /token_file is mutually exclusive with X_MCP_TOKEN_KEYCHAIN=1/,
+  );
+});
+
+test('CFG-6: an unknown auth_mode inside the selected profile is fatal', () => {
+  assertFatal(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+        { work: { auth_mode: 'oauth1' } },
+      ),
+    /profile "work" is invalid.*auth_mode/s,
+  );
+});
+
+test('CFG-6: a profile entry that is not an object is fatal', () => {
+  assertFatal(
+    () =>
+      parseConfig({ X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' }, { work: 'oauth2' }),
+    /invalid profiles file/,
+  );
+});
+
+test('CFG-6: an unknown key in the selected profile warns but does not refuse', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+    { work: { auth_mode: 'oauth2', clientid: 'CID' } },
+  );
+  assert.equal(cfg.authMode, 'oauth2');
+  assert.ok(
+    cfg.warnings.some((w) => /Unknown key "clientid" in profile "work"/.test(w) && /typo/.test(w)),
+  );
+});
+
+test('CFG-6: a malformed *unselected* profile never blocks startup', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+    { work: { auth_mode: 'oauth2' }, broken: { auth_mode: 'nope', policy: 'godmode' } },
+  );
+  assert.equal(cfg.profile?.name, 'work');
+  assert.equal(cfg.warnings.length, 0);
+});
+
+test('CFG-6: empty profile values are treated as unset (CFG-4 parity inside the file)', () => {
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' },
+    { work: { auth_mode: 'oauth2', client_id: '   ', policy: '' } },
+  );
+  assert.equal(Object.hasOwn(cfg.oauth2, 'clientId'), false);
+  assert.equal(cfg.policy.preset, 'read-only');
+});
+
+test('CFG-6: profile secrets never leak into warnings or fatal messages (SEC-T16)', () => {
+  const secret = 'SUPER-SECRET-VALUE';
+  const cfg = parseConfig(
+    { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'bot' },
+    { bot: { auth_mode: 'app-only', bearer_token: secret, oops: secret } },
+  );
+  assert.equal(cfg.bearerToken, secret);
+  assert.ok(cfg.warnings.length > 0);
+  assert.ok(!cfg.warnings.some((w) => w.includes(secret)));
+
+  assert.throws(
+    () =>
+      parseConfig(
+        { X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'bot', X_MCP_AUTH_MODE: 'oauth2' },
+        { bot: { auth_mode: 'app-only', bearer_token: secret } },
+      ),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.ok(!err.message.includes(secret));
+      return true;
+    },
+  );
 });
 
 // --- CFG-7: base-URL value rules (the config half; proxy-ignore is api/http's) ---------
@@ -289,15 +528,55 @@ test('CFG-7: a non-x.com host is refused unless the insecure flag is set', () =>
     () => parseConfig({ X_MCP_BASE_URL: 'https://evil.example.com' }),
     /not \*\.x\.com.*X_MCP_ALLOW_INSECURE_BASE_URL=1/s,
   );
-  // With the flag, it is allowed and both a non-default and an insecure warning surface.
+  // With the flag it is allowed — in app-only mode, where no credential can follow it
+  // (T10). Both a non-default and an insecure warning surface.
   const cfg = parseConfig({
     X_MCP_BASE_URL: 'https://localhost:8443',
     X_MCP_ALLOW_INSECURE_BASE_URL: '1',
+    X_MCP_AUTH_MODE: 'app-only',
+    X_MCP_BEARER_TOKEN: 'AAAA',
   });
   assert.equal(cfg.baseUrl, 'https://localhost:8443');
   assert.equal(cfg.allowInsecureBaseUrl, true);
   assert.ok(cfg.warnings.some((w) => /non-default X API base URL/.test(w)));
   assert.ok(cfg.warnings.some((w) => /ALLOW_INSECURE_BASE_URL is enabled/.test(w)));
+  // The warning must be honest about the split: requests may leave x.com, credentials may not.
+  assert.ok(cfg.warnings.some((w) => /Credentials are NOT.*unauthenticated/s.test(w)));
+});
+
+// --- T10: the credential-egress allowlist is independent of the base URL ---------------
+
+test('T10: oauth2 refuses a non-x.com base URL even with the insecure flag', () => {
+  // The confused-deputy vector docs/04 T10 names first: a socially-engineered base URL
+  // makes the token endpoint the attacker's, so refreshing would hand over the refresh
+  // token. No request-time header check can undo that — the whole session is refused.
+  assertFatal(
+    () =>
+      parseConfig({
+        X_MCP_AUTH_MODE: 'oauth2',
+        X_MCP_CLIENT_ID: 'cid',
+        X_MCP_BASE_URL: 'https://x-api-mirror.evil',
+        X_MCP_ALLOW_INSECURE_BASE_URL: '1',
+      }),
+    /refuses a non-\*\.x\.com base URL.*refresh token would be sent to "x-api-mirror\.evil"/s,
+  );
+});
+
+test('T10: a profile-selected oauth2 mode is caught too, not just the env one', () => {
+  // The mode is only known after profile resolution — a check on the raw env would miss this.
+  assertFatal(
+    () =>
+      parseConfig(
+        {
+          X_MCP_PROFILES_FILE: '/tmp/profiles.json',
+          X_MCP_PROFILE: 'work',
+          X_MCP_BASE_URL: 'https://x-api-mirror.evil',
+          X_MCP_ALLOW_INSECURE_BASE_URL: '1',
+        },
+        { work: { auth_mode: 'oauth2', client_id: 'cid' } },
+      ),
+    /refuses a non-\*\.x\.com base URL/,
+  );
 });
 
 test('CFG-7: an *.x.com host is accepted without the flag', () => {

@@ -1,0 +1,3334 @@
+{
+  "_provenance": "Contract baseline for the per-tool `outputSchema` map (T-310, REND-11): the schemas are PUBLIC API under semver, so any diff here must be an intentional, reviewed contract change. Regenerate by serializing TOOL_OUTPUT_SCHEMAS from src/mcp/structured.ts with sorted tool names.",
+  "schemas": {
+    "x_auth_status": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "auth_mode": {
+              "type": "string",
+              "enum": ["app-only", "user"]
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "availability": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "policy": {
+              "type": "object",
+              "properties": {
+                "preset": {
+                  "type": "string"
+                },
+                "cells": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "required": ["preset", "cells"]
+            },
+            "me": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "handle": {
+                  "type": "string"
+                }
+              },
+              "required": ["id"]
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["auth_mode", "scopes", "availability", "policy"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_block_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["block", "unblock"]
+            },
+            "blocking": {
+              "type": "boolean"
+            }
+          },
+          "required": ["user_id", "action", "blocking"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_bookmark_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "post_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["add", "remove"]
+            },
+            "bookmarked": {
+              "type": "boolean"
+            }
+          },
+          "required": ["post_id", "url", "action", "bookmarked"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_bookmarks_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_dm_conversation_events_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_dm"
+              }
+            },
+            "result_count": {
+              "type": "number"
+            },
+            "next_token": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["items", "result_count"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_dm": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sender": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            }
+          },
+          "required": ["id", "sender"]
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_dm_events_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_dm"
+              }
+            },
+            "result_count": {
+              "type": "number"
+            },
+            "next_token": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["items", "result_count"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_dm": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sender": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            }
+          },
+          "required": ["id", "sender"]
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_dm_participant_events_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_dm"
+              }
+            },
+            "result_count": {
+              "type": "number"
+            },
+            "next_token": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["items", "result_count"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_dm": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sender": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            }
+          },
+          "required": ["id", "sender"]
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_dm_send": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "sent": {
+              "type": "boolean"
+            },
+            "conversation_id": {
+              "type": "string"
+            },
+            "event_id": {
+              "type": "string"
+            }
+          },
+          "required": ["sent"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_follow_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["follow", "unfollow"]
+            },
+            "following": {
+              "type": "boolean"
+            },
+            "pending_follow": {
+              "type": "boolean"
+            }
+          },
+          "required": ["user_id", "action", "following"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_followers_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_user"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "protected": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/user_metrics"
+            }
+          },
+          "required": ["id", "handle"]
+        },
+        "user_metrics": {
+          "type": "object",
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "posts": {
+              "type": "number"
+            },
+            "listed": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "x_following_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_user"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "protected": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/user_metrics"
+            }
+          },
+          "required": ["id", "handle"]
+        },
+        "user_metrics": {
+          "type": "object",
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "posts": {
+              "type": "number"
+            },
+            "listed": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "x_like_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "post_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["like", "unlike"]
+            },
+            "liked": {
+              "type": "boolean"
+            }
+          },
+          "required": ["post_id", "url", "action", "liked"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_create": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "private": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "name", "private"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_delete": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "deleted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "deleted"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_follow_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["follow", "unfollow"]
+            },
+            "following": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "action", "following"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_get": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/compact_list"
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_list": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "private": {
+              "type": "boolean"
+            },
+            "member_count": {
+              "type": "number"
+            },
+            "follower_count": {
+              "type": "number"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "name"]
+        }
+      }
+    },
+    "x_list_member_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "user_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["add", "remove"]
+            },
+            "is_member": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "user_id", "action", "is_member"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_members": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_user"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "protected": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/user_metrics"
+            }
+          },
+          "required": ["id", "handle"]
+        },
+        "user_metrics": {
+          "type": "object",
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "posts": {
+              "type": "number"
+            },
+            "listed": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "x_list_pin_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["pin", "unpin"]
+            },
+            "pinned": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "action", "pinned"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_list_timeline": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_list_update": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "list_id": {
+              "type": "string"
+            },
+            "updated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["list_id", "updated"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_lists_owned": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_list"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_list": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "private": {
+              "type": "boolean"
+            },
+            "member_count": {
+              "type": "number"
+            },
+            "follower_count": {
+              "type": "number"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "name"]
+        }
+      }
+    },
+    "x_media_status": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "media_id": {
+              "type": "string"
+            },
+            "processing_state": {
+              "type": "string"
+            },
+            "progress_percent": {
+              "type": "number"
+            },
+            "check_after_secs": {
+              "type": "number"
+            }
+          },
+          "required": ["media_id", "processing_state"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_media_upload": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "media_id": {
+              "type": "string"
+            },
+            "media_key": {
+              "type": "string"
+            },
+            "processing_state": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "media_category": {
+              "type": "string",
+              "enum": ["tweet_image", "tweet_gif", "tweet_video"]
+            },
+            "size_bytes": {
+              "type": "number"
+            },
+            "segments": {
+              "type": "number"
+            },
+            "expires_after_secs": {
+              "type": "number"
+            },
+            "alt_text_set": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_id",
+            "processing_state",
+            "media_type",
+            "media_category",
+            "size_bytes",
+            "segments"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_mute_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "user_id": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["mute", "unmute"]
+            },
+            "muting": {
+              "type": "boolean"
+            }
+          },
+          "required": ["user_id", "action", "muting"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_post_counts_archive": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "counts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "string"
+                      },
+                      "end": {
+                        "type": "string"
+                      },
+                      "count": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["count"]
+                  }
+                },
+                "total": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                }
+              },
+              "required": ["counts", "total"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_post_counts_recent": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "counts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "start": {
+                        "type": "string"
+                      },
+                      "end": {
+                        "type": "string"
+                      },
+                      "count": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["count"]
+                  }
+                },
+                "total": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                }
+              },
+              "required": ["counts", "total"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_post_create": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "url"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_post_delete": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "deleted": {
+              "type": "boolean"
+            },
+            "already_deleted": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "deleted"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_post_get": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/missing"
+                  }
+                }
+              },
+              "required": ["items"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        },
+        "missing": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not-found",
+                "deleted",
+                "suspended",
+                "protected",
+                "unauthorized",
+                "unavailable"
+              ]
+            },
+            "resource_type": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "reason"]
+        }
+      }
+    },
+    "x_post_hide_reply": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "post_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["hide", "unhide"]
+            },
+            "hidden": {
+              "type": "boolean"
+            }
+          },
+          "required": ["post_id", "url", "action", "hidden"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_rate_limit_status": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "buckets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "windows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": ["standard", "app-24h"]
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "remaining": {
+                          "type": "number"
+                        },
+                        "reset_at": {
+                          "type": "string"
+                        },
+                        "seconds_until_reset": {
+                          "type": "number"
+                        },
+                        "exhausted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "remaining",
+                        "reset_at",
+                        "seconds_until_reset",
+                        "exhausted"
+                      ]
+                    }
+                  }
+                },
+                "required": ["key", "windows"]
+              }
+            }
+          },
+          "required": ["buckets"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_repost_set": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "post_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "enum": ["repost", "unrepost"]
+            },
+            "reposted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["post_id", "url", "action", "reposted"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_search_archive": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_search_recent": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_timeline_home": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_timeline_mentions": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_timeline_user": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_post"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_post": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/post_metrics"
+            },
+            "reply_to": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "quoted": {
+              "$ref": "#/$defs/post_ref"
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/compact_media"
+              }
+            },
+            "url": {
+              "type": "string"
+            },
+            "note_tweet": {
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "required": ["id", "author", "text"]
+        },
+        "post_ref": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            }
+          },
+          "required": ["id"]
+        },
+        "post_metrics": {
+          "type": "object",
+          "properties": {
+            "replies": {
+              "type": "number"
+            },
+            "reposts": {
+              "type": "number"
+            },
+            "likes": {
+              "type": "number"
+            },
+            "quotes": {
+              "type": "number"
+            },
+            "bookmarks": {
+              "type": "number"
+            },
+            "impressions": {
+              "type": "number"
+            }
+          }
+        },
+        "compact_media": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["photo", "video", "animated_gif"]
+            },
+            "url": {
+              "type": "string"
+            },
+            "alt_text": {
+              "type": "string"
+            }
+          },
+          "required": ["type"]
+        }
+      }
+    },
+    "x_usage_get": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "platform": {
+                  "type": "object",
+                  "properties": {
+                    "project_id": {
+                      "type": "string"
+                    },
+                    "posts_read": {
+                      "type": "number"
+                    },
+                    "cap": {
+                      "type": "number"
+                    },
+                    "percent_used": {
+                      "type": "number"
+                    },
+                    "cap_reset_day": {
+                      "type": "number"
+                    },
+                    "daily": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "date": {
+                            "type": "string"
+                          },
+                          "posts_read": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["date", "posts_read"]
+                      }
+                    },
+                    "by_app": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "client_app_id": {
+                            "type": "string"
+                          },
+                          "posts_read": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["client_app_id", "posts_read"]
+                      }
+                    }
+                  },
+                  "required": ["posts_read"]
+                },
+                "session_budget": {
+                  "type": "object",
+                  "properties": {
+                    "spent_usd": {
+                      "type": "number"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": ["warn", "hard"]
+                    },
+                    "limit_usd": {
+                      "type": "number"
+                    },
+                    "remaining_usd": {
+                      "type": "number"
+                    },
+                    "percent_used": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["spent_usd", "mode"]
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["platform", "session_budget", "note"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
+    },
+    "x_user_get": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_user"
+                  }
+                },
+                "missing": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/missing"
+                  }
+                }
+              },
+              "required": ["items"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "protected": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/user_metrics"
+            }
+          },
+          "required": ["id", "handle"]
+        },
+        "user_metrics": {
+          "type": "object",
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "posts": {
+              "type": "number"
+            },
+            "listed": {
+              "type": "number"
+            }
+          }
+        },
+        "missing": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "not-found",
+                "deleted",
+                "suspended",
+                "protected",
+                "unauthorized",
+                "unavailable"
+              ]
+            },
+            "resource_type": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "reason"]
+        }
+      }
+    },
+    "x_user_search": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_user"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"],
+      "$defs": {
+        "compact_user": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "handle": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "verified": {
+              "type": "boolean"
+            },
+            "protected": {
+              "type": "boolean"
+            },
+            "created_at": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "metrics": {
+              "$ref": "#/$defs/user_metrics"
+            }
+          },
+          "required": ["id", "handle"]
+        },
+        "user_metrics": {
+          "type": "object",
+          "properties": {
+            "followers": {
+              "type": "number"
+            },
+            "following": {
+              "type": "number"
+            },
+            "posts": {
+              "type": "number"
+            },
+            "listed": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    }
+  }
+}

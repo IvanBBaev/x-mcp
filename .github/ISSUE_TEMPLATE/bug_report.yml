@@ -1,0 +1,145 @@
+name: Bug report
+description: A tool, the policy layer, auth, or the CLI behaves incorrectly.
+title: 'bug: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        **Do not report a security vulnerability here.** Token leaks, policy bypass, media-path
+        escape, authorize-flow weaknesses and similar issues go through **private** reporting —
+        see `SECURITY.md` in the repository root for the process and the scope.
+
+        This is a pre-1.0 project: please check that you are on the latest published `0.x`
+        release before filing, since the remediation for a known bug is usually "upgrade".
+
+  - type: input
+    id: version
+    attributes:
+      label: x-mcp-ai version
+      description: The exact published version — `npm ls x-mcp-ai`, or the version pinned in your MCP client config.
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`. The package requires Node >= 22.
+      placeholder: v22.14.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: Add the distribution/release in the reproduction steps if it is relevant.
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Windows (WSL)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: auth-mode
+    attributes:
+      label: Auth mode
+      description: The value of `X_MCP_AUTH_MODE`. OAuth 1.0a was dropped from the project and is deliberately not an option here.
+      options:
+        - oauth2 (user context, PKCE)
+        - app-only (bearer token)
+        - Not applicable — the server never started
+    validations:
+      required: true
+
+  - type: dropdown
+    id: policy
+    attributes:
+      label: Policy preset
+      description: The `X_MCP_POLICY` preset in effect. Choose the last option if you layered `X_MCP_POLICY_ALLOW` / `X_MCP_POLICY_DENY` on top of it.
+      options:
+        - read-only (default)
+        - engage
+        - publish
+        - manage
+        - full
+        - Preset plus ALLOW/DENY overrides — listed in the configuration below
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Redacted configuration
+      description: |
+        The `X_MCP_*` environment your server ran with, plus the relevant part of your MCP client config.
+
+        > **Never paste tokens, bearer values, client secrets, refresh tokens, `state`/`code` values,
+        > or the contents of your token or profiles file.** Replace every secret with `<redacted>` —
+        > their *presence* is what matters for triage, never their value.
+      render: text
+      placeholder: |
+        X_MCP_AUTH_MODE=oauth2
+        X_MCP_CLIENT_ID=<redacted>
+        X_MCP_POLICY=read-only
+        X_MCP_POLICY_ALLOW=write:engagement
+        X_MCP_TOKEN_FILE=~/.config/x-mcp/tokens.json
+        X_MCP_CREDIT_BUDGET=5.00
+        X_MCP_BUDGET_MODE=hard
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Name the tool you called and its arguments (redacted), so the call can be replayed against a mock.
+      placeholder: |
+        1. Start the server with the configuration above.
+        2. Call `x_post_create` with `{ "text": "..." }`.
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full typed error if there was one — its `kind`, `retryable` and `fix` fields are the fastest route to the failing layer.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: |
+        Output of `npx x-mcp-ai doctor` — offline diagnostics, no billable API calls. It reports
+        secrets as `set (masked)` and scrubs secret values from every line it prints, but read it
+        over before pasting anyway.
+      render: text
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This is **not** a security vulnerability — I have read the scope in `SECURITY.md`.
+          required: true
+        - label: I removed every token, secret and credential from the text above.
+          required: true

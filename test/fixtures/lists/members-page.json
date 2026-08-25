@@ -1,0 +1,35 @@
+{
+  "data": [
+    {
+      "id": "101",
+      "username": "alice_dev",
+      "name": "Alice",
+      "created_at": "2020-01-15T08:00:00.000Z",
+      "description": "Building agent tools.",
+      "verified": true,
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 1200,
+        "following_count": 300,
+        "tweet_count": 4500,
+        "listed_count": 12
+      }
+    },
+    {
+      "id": "102",
+      "username": "bob_builds",
+      "name": "Bob",
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 88,
+        "following_count": 120,
+        "tweet_count": 940,
+        "listed_count": 1
+      }
+    }
+  ],
+  "meta": {
+    "result_count": 2,
+    "next_token": "members-cursor-2"
+  }
+}

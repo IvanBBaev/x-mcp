@@ -97,6 +97,18 @@ test('AUTH-14: host-scoping predicate only matches the exact API origin', () => 
   assert.equal(shouldAttachAuth(new URL('http://api.x.com/2/tweets'), base), false);
 });
 
+test('T10: the predicate is an allowlist, not equality — a foreign base URL gets no token', () => {
+  // The case origin-equality alone would wave through: the operator-configured base URL IS
+  // the attacker's host, so `requestUrl.host === baseUrl.host` is satisfied. The hardcoded
+  // credential-egress list is what says no (docs/04 T10). oauth2 never reaches this — config
+  // refuses that session outright — so this is the app-only path: it runs, unauthenticated.
+  const foreign = new URL('https://x-api-mirror.evil');
+  assert.equal(shouldAttachAuth(new URL('https://x-api-mirror.evil/2/tweets'), foreign), false);
+  // A subdomain of the credential domain is still fine when that is what was configured.
+  const sandbox = new URL('https://api.sandbox.x.com');
+  assert.equal(shouldAttachAuth(new URL('https://api.sandbox.x.com/2/tweets'), sandbox), true);
+});
+
 test('AUTH-14: a redirect is refused, never followed (token cannot chase Location)', async () => {
   const http = mockHttp();
   // Single interceptor: if the client followed the redirect it would need a second request

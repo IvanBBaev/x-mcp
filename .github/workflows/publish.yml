@@ -1,0 +1,44 @@
+name: Publish
+
+# Tag-gated npm publish (docs/08 H1). Pushing a `v*` tag runs the full check gate
+# and publishes the packed artifact to npm with provenance. The version in the tag
+# must match package.json — a mismatched tag fails before anything is published.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # npm --provenance needs an OIDC token to attest the build
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Tag matches package.json
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+
+      # prepublishOnly runs `npm run check` (verify + coverage + gates + audit),
+      # so a publish can never ship a tree the full gate has not passed.
+      - name: Publish with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

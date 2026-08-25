@@ -1,0 +1,51 @@
+{
+  "_provenance": "X API v2 GET /2/tweets/search/all with the tweet.fields/expansions/user.fields/media.fields set the T-306 endpoint sends. Response envelope shape verbatim from docs.x.com/x-api/posts/search (full-archive search shares the recent-search envelope; only the path and reachable time span differ). Posts are 2014-2015 era to exercise the since-2006 archive span. Captured 2026-07-30 (DRIFT-4). Exercises: renderPostPage compaction, @handle resolution via includes.users, PAGE-1 next_token pass-through.",
+  "data": [
+    {
+      "id": "500000000000000001",
+      "text": "Archive result one: early post about the original streaming API.",
+      "created_at": "2015-03-14T10:00:00.000Z",
+      "author_id": "201",
+      "public_metrics": {
+        "retweet_count": 12,
+        "reply_count": 3,
+        "like_count": 48,
+        "quote_count": 2,
+        "bookmark_count": 0,
+        "impression_count": 9000
+      }
+    },
+    {
+      "id": "500000000000000002",
+      "text": "Archive result two mentioning the REST v1.1 deprecation timeline.",
+      "created_at": "2014-11-02T18:45:00.000Z",
+      "author_id": "202",
+      "public_metrics": {
+        "retweet_count": 1,
+        "reply_count": 0,
+        "like_count": 5
+      }
+    },
+    {
+      "id": "500000000000000003",
+      "text": "Archive result three from the same author as result one.",
+      "created_at": "2014-06-21T08:15:00.000Z",
+      "author_id": "201",
+      "public_metrics": {
+        "like_count": 2
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "201", "username": "carol_codes", "name": "Carol", "verified": true },
+      { "id": "202", "username": "dan_data", "name": "Dan", "verified": false }
+    ]
+  },
+  "meta": {
+    "newest_id": "500000000000000001",
+    "oldest_id": "500000000000000003",
+    "result_count": 3,
+    "next_token": "arch-next-1"
+  }
+}

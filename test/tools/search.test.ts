@@ -14,6 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createHttpClient } from '../../src/api/http.js';
+import { XError } from '../../src/core/errors.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
 import type { ToolContext } from '../../src/core/tooldef.js';
 import type { RawCountsResponse } from '../../src/api/endpoints/search.js';
@@ -139,6 +140,60 @@ test('x_search_recent: empty results carry the zero-results note', async () => {
   assert.equal(page.result_count, 0);
   assert.equal(page.next_token, undefined);
   assert.equal(page.note, 'No results matched this query.');
+
+  http.assertDone();
+  await http.close();
+});
+
+// A ToolContext whose http port fails loudly: DRIFT-3 rejections must fire BEFORE any
+// request, so reaching the stub at all is the failure (mirrors the posts bad-id test).
+function noHttpCtx(): ToolContext {
+  return {
+    ports: makePorts(),
+    http: {
+      send: () => Promise.reject(new Error('endpoint must not be called for a removed operator')),
+    },
+  };
+}
+
+/** Assert the rejection is the typed DRIFT-3 `validation` error, not the stub's Error. */
+function isRemovedOperatorError(err: unknown): boolean {
+  assert.ok(XError.is(err), 'expected an XError');
+  assert.equal(err.kind, 'validation');
+  assert.match(err.message, /operator removed by X/);
+  return true;
+}
+
+test('DRIFT-3: x_search_recent rejects each removed engagement operator before any request', async () => {
+  for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+    await assert.rejects(
+      () => xSearchRecent.handler({ query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
+      isRemovedOperatorError,
+    );
+  }
+});
+
+test('DRIFT-3: x_post_counts_recent applies the same pre-validation', async () => {
+  await assert.rejects(
+    () => xPostCountsRecent.handler({ query: 'ai min_likes:100' }, noHttpCtx()),
+    isRemovedOperatorError,
+  );
+});
+
+test('DRIFT-3: an operator name as a plain word is not a false positive', async () => {
+  // Only the `operator:` form is the removed syntax; the bare word must still search.
+  const http = mockHttp();
+  http.pool
+    .intercept({
+      path: '/2/tweets/search/recent',
+      method: 'GET',
+      query: { query: 'discussing min_likes removal', ...SEARCH_FIELD_PARAMS },
+    })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-empty.json'));
+
+  const out = await xSearchRecent.handler({ query: 'discussing min_likes removal' }, makeCtx(http));
+  const page = out.data as CompactPageResult;
+  assert.equal(page.result_count, 0);
 
   http.assertDone();
   await http.close();

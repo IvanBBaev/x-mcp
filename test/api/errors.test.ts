@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { XError } from '../../src/core/errors.js';
 import { mapHttpError, collectMissing } from '../../src/api/errors.js';
 import type { Missing } from '../../src/api/errors.js';
+import { FIELD_CAPS, TRUNCATION_MARKER } from '../../src/core/sanitize.js';
 import { loadFixture } from '../helpers/index.js';
 
 /** The scenario wrapper every fixture in test/fixtures/errors/ uses. */
@@ -155,6 +156,73 @@ test('REND-7 sentinel sweep: no fixture body content leaks into any mapped error
     assert.ok(err.message.length > 20, `remediation prose too short in ${name}`);
     assert.ok(XError.is(err));
   }
+});
+
+// --- REND-6: the platform prose that DOES pass through is sanitized (T-320 F3) -----
+//
+// `platform_title` / `platform_detail` are the ONE third-party-text path that never passes a
+// compactor, and X quotes attacker-influenced input back at us (a duplicate-content 403 echoes
+// the offending post, a 400 echoes the query). So the error payload gets the same strip and the
+// same cap table as every success path.
+
+// Built with String.fromCharCode, exactly as core/sanitize writes its class in \uXXXX form:
+// a literal invisible character in a test file is unreviewable in a diff.
+const ZWSP = String.fromCharCode(0x200b); // zero-width space
+const RLO = String.fromCharCode(0x202e); // right-to-left override
+const LRI = String.fromCharCode(0x2066); // left-to-right isolate
+const ESC = String.fromCharCode(0x1b); // ANSI escape introducer
+const BOM = String.fromCharCode(0xfeff);
+
+test('platform_title/platform_detail are stripped of invisible and bidi control characters', () => {
+  const err = mapHttpError(
+    400,
+    {},
+    {
+      title: `In${ZWSP}valid${RLO} Request`,
+      // The ESC would otherwise reach a terminal-based agent UI as a live colour escape.
+      detail: `The query ${ESC}[31mfailed${ESC}[0m to parse${LRI}.`,
+    },
+  );
+  assert.equal(err.data.platform_title, 'Invalid Request');
+  assert.equal(err.data.platform_detail, 'The query [31mfailed[0m to parse.');
+});
+
+test('a field that is nothing BUT invisible characters is omitted, not emitted empty', () => {
+  const err = mapHttpError(400, {}, { title: `${ZWSP}${ZWSP}${BOM}`, detail: 'real prose' });
+  assert.equal(err.data.platform_title, undefined);
+  assert.equal(err.data.platform_detail, 'real prose');
+});
+
+test('an oversized platform detail is capped with the truncation marker — never silently', () => {
+  const err = mapHttpError(400, {}, { detail: 'x'.repeat(50_000) });
+  const detail = err.data.platform_detail ?? '';
+  assert.equal(Array.from(detail).length, FIELD_CAPS.errorText);
+  assert.ok(detail.endsWith(TRUNCATION_MARKER), 'the clipping must be explicit');
+});
+
+test('the 429 builder sanitizes too — it writes its own data literal', () => {
+  // mapRateLimit does not go through baseData, so it is the branch most likely to drift.
+  const err = mapHttpError(
+    429,
+    {},
+    { title: `Too${ZWSP} Many Requests`, detail: 'y'.repeat(9_000) },
+  );
+  assert.equal(err.data.platform_title, 'Too Many Requests');
+  assert.equal(Array.from(err.data.platform_detail ?? '').length, FIELD_CAPS.errorText);
+});
+
+test('a zero-width character cannot steer a response into the wrong error class', () => {
+  // Sanitizing on ingest (parseProblem) rather than at the two `data` builders means the
+  // classifiers read the CLEANED text: a zero-width space inside `scope` can no longer hide
+  // the word from looksLikeScope and downgrade a scope failure to a generic forbidden one.
+  const scoped = mapHttpError(403, {}, { detail: `Your token is missing a sco${ZWSP}pe.` });
+  assert.equal(scoped.kind, 'scope');
+  const billed = mapHttpError(
+    403,
+    {},
+    { detail: `Client is not en${ZWSP}rolled in this product.` },
+  );
+  assert.equal(billed.kind, 'billing');
 });
 
 // --- REND-2: partial failures surface as missing[], NOT a thrown error -------------

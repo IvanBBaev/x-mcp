@@ -49,7 +49,7 @@ for **every** finding in the six reviews.
 |---|---|---|---|
 | WP-0.1 | M | **Pricing rewrite (BLOCKER 1).** Rewrite docs/01 §3 around pay-per-use credits; legacy-tier appendix. Catalog: replace *Tier* column with *availability* (`app+user` / `user-only` / `pilot` / `premium-user` / `enterprise`) + *cost class*. Error taxonomy: `tier` → availability semantics; add `billing` and `budget` classes. Budget → session **credit** budget (`X_MCP_CREDIT_BUDGET` USD + `X_MCP_BUDGET_MODE=warn\|hard`), covering reads **and** writes; static per-endpoint cost table as an appendix. | X-F1/F4, ARCH-F3/F4 |
 | WP-0.2 | M | **OAuth2 refresh state-machine spec (BLOCKER 2).** New design section in docs/02: single-flight, reload-under-lock/adopt-on-disk-pair, reload-on-401, persist-before-use, stale-lock protocol (PID+timestamp, HTTP timeout < staleness threshold, fail-closed). States + transitions + the two canonical tests named. Code lands in Phase 2; the *design* is a Phase 0R deliverable. | ARCH-F1, SEC-F1 |
-| WP-0.3 | M | **Catalog rework.** Adopt the Agent-DX merge/cut plan verbatim (nine `*_set` merges, unified `user_get`/`post_get` batch lookups, renames, destructive ops never behind enums, `alt_text` folded into `media_upload`) → 50 rows / 49 unconditional / ~28 typical. Adopt the `x_` name prefix and "X (Twitter): …" description openers. Add *phase* and *availability* columns. Redesign the dm package around the three DM-event lookups + 30-day retention. Split `media_upload`/`media_status`. | DX-F1/F2/F5/F14, X-F2/F6, ARCH-F7/F13 |
+| WP-0.3 | M | **Catalog rework.** Adopt the Agent-DX merge/cut plan verbatim (nine `*_set` merges, unified `user_get`/`post_get` batch lookups, renames, destructive ops never behind enums, `alt_text` folded into `media_upload`) → 50 rows / 50 unconditional / ~28 typical. Adopt the `x_` name prefix and "X (Twitter): …" description openers. Add *phase* and *availability* columns. Redesign the dm package around the three DM-event lookups + 30-day retention. Split `media_upload`/`media_status`. | DX-F1/F2/F5/F14, X-F2/F6, ARCH-F7/F13 |
 | WP-0.4 | S | **Policy corrections.** `block_*` → `destructive:social-graph`; `list_delete` → `destructive:content`; `read:dm` out of the `read-only` preset; add `manage` preset (publish + destructive:content); DM decomposed from `full`; explicit override-precedence rule (allow can enable `write:dm`; deny always wins). Ratify the denied-tool resolution: registered + "(disabled by policy)" annotation + no unlock hint for sensitive cells + `X_MCP_HIDE_DENIED=1`. | SEC-F2/F5/F9/F10/F14, QA-F4, DX-F6 |
 | WP-0.5 | S | **Config canonicalization.** One env-var table (add `X_MCP_LOG_LEVEL`, `X_MCP_BASE_URL`, `X_MCP_MEDIA_DIR`, `X_MCP_TOKEN_KEYCHAIN`, budget vars); profiles-file+direct-creds conflict rule; token-path defaults incl. Windows; `~` expansion; config dir fixed as `x-mcp`; one dependency statement (SDK + zod; decide dotenv vs Node `--env-file`). | ARCH-F9/F10, OPS-F5/F6 |
 | WP-0.6 | M | **Security fold-in.** T10–T17 into docs/04; authorize-flow spec (CSRF `state`, loopback one-shot listener); Authorization host-scoping; media default-deny + realpath/`O_NOFOLLOW`/same-fd; untrusted-content hardening (all third-party text, zero-width/bidi stripping, length caps, honest "does not prevent injection" note); redaction list expansion; kill-chain scenarios as appendix. | SEC-F3/F4/F6/F7/F8/F11 |
@@ -115,10 +115,10 @@ waiter-adopts-disk-pair) plus kill-9 recovery green on all OS legs; changelog's
 |---|---|---|---|
 | WP-3.1 | M | Social graph + users: follow/mute/block `_set` (block = destructive), followers/following, `x_user_search` (`app+user`, registers by default, budget-guarded). | Phase 2 |
 | WP-3.2 | M | Lists (post-merge: 10 tools incl. `x_list_timeline`, `x_list_members`), `x_list_delete` destructive. | Phase 2 |
-| WP-3.3 | L | Media: chunked upload + `x_media_status`, full path-security battery, cancellation + progress notifications (MEDIA-1…7). | Phase 2 |
+| WP-3.3 | L | Media: chunked upload + `x_media_status`, full path-security battery, cancellation + **internal** upload progress (MEDIA-1…7). **Wording corrected 2026-08-07** — this row previously said "progress notifications", which overstated the surface. Cancellation is real and tested end-to-end; progress is a per-segment seam inside `src/tools/media.ts` that deliberately leaves the protocol notification to the composition root, and `src/mcp/` neither reads `progressToken` nor emits `notifications/progress`. Wiring that bridge is a Phase-4 candidate, not shipped behaviour. | Phase 2 |
 | WP-3.4 | M | DMs as redesigned: three event lookups + `x_dm_send`, minimized renders, opt-in bodies, retention note (DM-1…4); gated per POL-3/4. | Phase 2 |
-| WP-3.5 | S | Availability registration mechanism + spaces/trends go/no-go. **Reframe (T-010 fact-check 2026-07-22):** full-archive search/counts, `x_user_search`, and WOEID trends are `app+user`-reachable under pay-per-use, so they **register by default** once Phase 3 ships (guarded by the credit budget), **not** behind an availability gate; the genuinely gated classes are `premium-user` (personalized trends), `pilot` (Community Notes), `enterprise` (>2M/compliance) — none of which has a v1 tool. This WP therefore delivers the class-gating machinery (for future premium/pilot/enterprise tools) plus the spaces/trends registration go/no-go. | 3.1 |
-| WP-3.6 | M | OAuth1 signer **only if a concrete blocked use-case has appeared** (roadmap Q3: default is *drop*; media/DM v2 coverage has removed most of the old need). If built: OA1-1…4 + property tests. | Phase 2 |
+| WP-3.5 | S | Availability registration mechanism + spaces/trends go/no-go. **Reframe (T-010 fact-check 2026-07-22):** full-archive search/counts, `x_user_search`, and WOEID trends are `app+user`-reachable under pay-per-use, so they **register by default** once Phase 3 ships (guarded by the credit budget), **not** behind an availability gate; the genuinely gated classes are `premium-user` (personalized trends), `pilot` (Community Notes), `enterprise` (>2M/compliance) — none of which has a v1 tool. This WP therefore delivers the class-gating machinery (for future premium/pilot/enterprise tools) plus the spaces/trends registration go/no-go. **The go/no-go half closed 2026-08-09 with NO-GO** — the class-gating machinery shipped, and `x_space_get`, `x_spaces_search` and `x_trends_by_location` are now unregistered *by decision*: [decisions/0002](decisions/0002-remaining-catalogued-tools.md) cut all three from the catalogue (Spaces is audio this server cannot render; trends needs a WOEID table the agent does not have), settling all eleven catalogued-but-unregistered tools in one pass because the context budget made them one question and not eleven. | 3.1 |
+| WP-3.6 | M | OAuth1 signer **only if a concrete blocked use-case has appeared** (roadmap Q3: default is *drop*; media/DM v2 coverage has removed most of the old need). If built: OA1-1…4 + property tests. **Resolved NO-GO 2026-07-31 (T-307)** — `docs/decisions/0001-oauth1-go-no-go.md`; signer not built. | Phase 2 |
 | WP-3.7 | M | Operator polish: keychain backend (`X_MCP_TOKEN_KEYCHAIN`), profiles file (CFG-3/6), README operator checklist incl. bot-disclosure note (X-F13). | Phase 2 |
 | WP-3.8 | M | **Modern MCP surface.** Tool `outputSchema` + `structuredContent` generated from the same render objects as the text content (REND-11) — output schemas join the public API; cancellation generalized to every in-flight HTTP call (MCP-7); parallel-call safety test (MCP-8). | Phase 2 |
 | WP-3.9 | M | **Docs generation + drift gates.** User-facing tool reference generated from the registry; CI guard asserting registry ↔ docs/03 ↔ generated reference agreement (names, count, classes, availability) — same pattern as syncrona's docs-drift gate; CI **context-size guard**: serialized `tools/list` stays under a fixed byte budget so the standing context cost can never silently creep (DX-F1 made this a number worth defending). | 3.1–3.5, 3.8 |
@@ -131,6 +131,18 @@ waiter-adopts-disk-pair) plus kill-9 recovery green on all OS legs; changelog's
 green; compatibility matrix documented; scenario suite and threat-model re-audit
 done; 1.0.0 on npm with provenance badge and the registry listing verified. The
 "1.0 acceptance checklist" below is the gate's full definition.
+
+> **Closed against this gate (2026-08-09).** The gate said nothing explicit about
+> tool-surface completeness while the phase tables implied the full catalogue ships in P3 —
+> and eleven catalogued P3 tools were unregistered. They could not all be added: the
+> `tools/list` payload was 74,446 B of an 80,000 B budget and the eleven cost roughly
+> 20,000 B. [decisions/0002](decisions/0002-remaining-catalogued-tools.md) settled it:
+> **`x_bookmarks_list` and `x_post_hide_reply` ship; the other nine are cut from the
+> catalogue**, each with a dated rationale in [03-tool-catalog.md](03-tool-catalog.md)
+> ("Deliberate omissions"). "Full surface" therefore means **41 tools in 12 packages** —
+> the catalogue and the registry are now the same set, which is exactly what the drift gate
+> asserts, so the gate is self-enforcing rather than prose. The remaining budget is 1,555 B;
+> a twelfth package is a Phase 4 question with a cap decision attached, not a P3 leftover.
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -147,21 +159,153 @@ fact-check rule first — this is the fastest-moving part of the platform.
 Consolidated definition of "done" for `v1.0.0` — everything here is covered by a WP
 above; this is the single list to walk before tagging:
 
-- [ ] Every corner case in [07-corner-cases.md](07-corner-cases.md) has a
+- [x] Every corner case in [07-corner-cases.md](07-corner-cases.md) has a
       referencing test or a dated won't-fix edit (standing rule 1).
-- [ ] Docs-drift gate green: registry ↔ docs/03 ↔ generated tool reference agree.
-- [ ] Context-size gate green: `tools/list` serialization under the fixed cap.
-- [ ] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
+      *Swept 2026-08-07: 110 numbered cases, 106 named by tests, the remaining four
+      (`OA1-1…4`) formally dropped by the T-307 NO-GO. Drift is zero in both
+      directions — no test names a case that no longer exists.*
+- [x] Docs-drift gate green: registry ↔ docs/03 ↔ generated tool reference agree.
+      *`npm run docs:check` (`scripts/docs-gen.mjs`). Verified 2026-08-09: 41 tools
+      in 12 packages, zero drift in either direction. The gate is proven non-vacuous
+      — corrupting a count and a policy cell each made it fail with a file:line, and
+      it caught all 17 stale prose counts left by the decisions/0002 surface change.*
+- [x] Context-size gate green: `tools/list` serialization under the fixed cap.
+      *`npm run gate:context` (`scripts/context-gate.mjs`). Measured on the wire, not
+      on the client's parsed copy: worst case **78,445 B against an 80,000 B cap**
+      (1.9% headroom), measured across all six policy configurations rather than
+      assumed. That is now **less than one average tool** of room — the surface is
+      full, which is precisely why decisions/0002 cut nine catalogued rows instead
+      of landing them. The baseline moved 74,422 → 78,445 B when `x_bookmarks_list`
+      and `x_post_hide_reply` landed; the gate reports the delta per run so creep is
+      visible per commit rather than only at the cap. Anything further needs
+      description trimming or an argued cap raise, not a quiet +2 kB.*
+- [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
+      *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
+      Audited the shipped code, not the design: 17 threats and 4 kill-chains walked
+      against source and tests, 11 findings (1 HIGH, 3 MEDIUM, 3 MEDIUM-LOW, 4 LOW),
+      all dispositioned in that document's §7 — 7 fixed in code, 2 closed as
+      documentation corrections (the promise was wrong, not the implementation),
+      2 accepted as documented residuals (F6 preemptive-refusal training, F9 budget
+      under-accounting). The blocking HIGH (F1: credentials followed
+      `X_MCP_BASE_URL` anywhere, so an operator-set or profile-set base URL could
+      exfiltrate the token) is closed by an independent hardcoded egress allowlist in
+      `src/core/egress.ts`, plus a startup refusal under `oauth2`. §1–§6 of the audit
+      are deliberately left unedited as the point-in-time record.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
-      ≥ 1 third-party client.
+      ≥ 1 third-party client. *Matrix documented in
+      [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
+      probe-verified** — re-probed 2026-08-09 at the 41-tool surface (§4.5.1): 41 tools
+      all carrying `outputSchema` and `annotations`, 20 marked disabled under `read-only`,
+      a `tools/call` denial that names the cell and no environment variable, and a
+      serialized payload byte-identical to what `gate:context` reports (78,445 B). The
+      other three rows need a GUI client a human has to drive; every one of them is
+      labelled `unverified` on that page rather than assumed working.*
 - [ ] Scenario suite (walkthroughs A–C) green; ≥ 1 week dogfood without a P1 issue.
-- [ ] `LICENSE`, `SECURITY.md`, privacy/data-handling statement, per-client setup
+      *Scenario half verified 2026-08-08 — `node --test "build/test/scenarios/*.test.js"`
+      → **13/13 pass, 0 fail, 0 skipped**. The dogfood week is checkpoint H4 and is
+      elapsed time, not work.*
+- [x] `LICENSE`, `SECURITY.md`, privacy/data-handling statement, per-client setup
       docs, pricing warning — all published.
-- [ ] CHANGELOG complete incl. "Platform changes absorbed"; token-file migration
+      *Verified 2026-08-07: MIT `LICENSE`, `SECURITY.md` disclosure policy,
+      [12-privacy.md](12-privacy.md), per-client setup + pricing section in the
+      README.*
+- [x] CHANGELOG complete incl. "Platform changes absorbed"; token-file migration
       and tool-deprecation policies documented.
+      *Verified 2026-08-07: the CHANGELOG carries its "Platform changes absorbed"
+      section; migration rule at [05](05-testing-and-quality.md) §8.7, deprecation
+      flow at §8.8.*
 - [ ] Final platform fact-check (`llms.txt` + changelog) dated within release week.
+      *By construction cannot be ticked early — it is dated work, part of H5.*
 - [ ] npm provenance badge + MCP registry listing verified; `server.json` lockstep
-      guard green.
+      guard green. *Guard half done: `npm run gate:manifest`
+      (`scripts/server-json-guard.mjs`) verifies version lockstep across all three
+      places, transport shape, credential marking, and that every advertised env var
+      is one `src/core/config.ts` actually reads. The npm and registry halves are
+      checkpoint H1.*
+
+## Human checkpoints
+
+Five items on the list above cannot be closed by the build, because each needs an
+account, a credit balance, a browser consent screen, or calendar time. They are
+listed here with the exact steps so that "the rest is human work" is a short,
+concrete list rather than an open question. Everything *not* in this section is
+machine-verifiable and gated by `npm run check` plus the CI legs.
+
+Order matters: **T-001 unblocks the CI legs**, which unblock everything else.
+
+### H1 — T-001: npm name and provenance placeholder
+
+Status as of 2026-08-07, measured rather than assumed: the GitHub repo **does**
+exist and is public at `github.com/IvanBBaev/x-mcp`, CodeQL and Dependabot are live,
+and CI is green. Two things are nevertheless still open.
+
+- **The npm name is not reserved.** `npm view x-mcp-ai` returns 404, so the `0.0.1`
+  placeholder publish was never done. Publish it **from CI**, not from a laptop —
+  provenance attestation requires the workflow identity — after adding an npm
+  automation token as the `NPM_TOKEN` repository secret.
+- **The current gate set has never run remotely.** The green runs are all against
+  the initial commit's simpler workflow (`coverage`, Node 22, Node 24). Everything
+  since — the four-way `check` matrix incl. Windows, `audit`, `launcher-node12`,
+  `tarball-smoke`, the fuzz schedule, and the drift/context-size gates — exists only
+  in the working tree. Until that lands on the remote, those gates are green in
+  local runs only.
+
+Naming note: the repo is `x-mcp` and the npm package is `x-mcp-ai`. That is a legal
+combination, and `server.json` now points `repository.url` at the repo that actually
+exists. If the repo is renamed to match the package, `server.json` and the README
+badges must be updated in the same change.
+
+Done when: the npm badge shows provenance, and the Actions tab shows the full gate
+set green on a commit that contains it.
+
+### H2 — T-132: live capture and fixture spot-check
+
+Blocks: the COST-6 fixture (`test/fixtures/errors/403-billing-access-level.json`)
+is marked `PROVISIONAL` — the real out-of-credits body is not publicly documented,
+so it was reconstructed. Until it is captured once, the billing-error path is
+tested against a guess.
+
+Needs: the dedicated test account (never a personal one) and a real credit balance.
+Spend rules are binding — see [05-testing-and-quality.md](05-testing-and-quality.md)
+§6: ≤ 20 read units per run, no archive endpoints, cleanup in a `finally`.
+
+Done when: the fixture's `_provenance` header records a real capture date instead of
+`PROVISIONAL`, and the spot-checked read fixtures still match live response shapes.
+
+### H3 — T-214 e2e: authorize → post → delete from a real client
+
+Blocks: `test/scenarios/` covers the same call sequences over fixtures. That is a
+different claim and must not be read as satisfying this line — it proves the tool
+logic, not that a real client can drive a real OAuth 2.0 PKCE consent screen and
+round-trip a real post.
+
+1. `npx x-mcp-ai authorize` — complete the browser consent, confirm the token lands
+   in the configured store (file or keychain).
+2. From a real MCP client, with `X_MCP_POLICY=manage`: create a post, read it back,
+   delete it.
+3. Confirm the deletion, and that no draft or media artefact is left behind.
+
+Done when: the round-trip succeeds from a client, not from a test harness.
+
+### H4 — T-321: one dogfood week
+
+Needs: seven days of ordinary use as a daily driver, no P1 issue. This is the one
+checkpoint that cannot be compressed — it is calendar time by definition, and its
+value is precisely that it is unhurried.
+
+### H5 — T-322: the release itself
+
+Walk the checklist above, bump the version in the three places that must agree
+(`package.json`, `SERVER_VERSION` in `src/mcp/server.ts`, and `server.json` — twice,
+at `version` and `packages[0].version`; the lockstep guard enforces this), tag, let
+CI publish with `--provenance`, then verify the MCP registry listing renders the
+`isSecret` env markers.
+
+### Client verification
+
+The per-client "needs a human to verify" rows live in
+[13-compatibility.md](13-compatibility.md) rather than being duplicated here — that
+document is the matrix, this section is the sequence.
 
 ## Resolved open questions (from the old roadmap)
 
@@ -170,7 +314,8 @@ above; this is the single list to walk before tagging:
 2. **Denied tools?** Registered + annotated + no unlock hint for sensitive cells +
    `X_MCP_HIDE_DENIED=1` (WP-0.4; ratified over the architect's hide-by-default).
 3. **OAuth1?** Phase 3, default **drop** unless a blocked use-case materializes
-   (WP-3.6).
+   (WP-3.6). **Resolved NO-GO 2026-07-31 (T-307)** —
+   `docs/decisions/0001-oauth1-go-no-go.md`.
 4. **npm name?** `x-mcp-ai`, reserved in WP-0.9 — this week, not "later".
 
 ## Top risks

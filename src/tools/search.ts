@@ -8,10 +8,27 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
+import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, renderPostPage } from '../core/render.js';
+import { capRawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
+
+// DRIFT-3: engagement-threshold operators X removed from the v2 syntax on 2026-01-19.
+// A query using one would be rejected server-side AFTER the paid read was already
+// spent, so both search-slice handlers pre-validate and refuse before any HTTP.
+const REMOVED_OPERATORS = ['min_likes', 'min_replies', 'min_reposts'] as const;
+
+/** DRIFT-3 pre-validation: throw a typed `validation` error for removed operators. */
+function rejectRemovedOperators(query: string): void {
+  const found = REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+  if (found.length > 0) {
+    throw validationError(
+      `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
+        'remove it from the query (the request was not sent, so no read was spent).',
+    );
+  }
+}
 
 // --- x_search_recent -------------------------------------------------------------
 
@@ -58,6 +75,8 @@ export const xSearchRecent = defineTool({
   phase: 1,
   input: searchInput,
   handler: async (input, ctx) => {
+    // DRIFT-3: refuse removed operators before anything else — never burn a paid read.
+    rejectRemovedOperators(input.query);
     const clamp =
       input.max_results !== undefined
         ? clampMaxResults(input.max_results, PAGE_BOUNDS.searchRecent)
@@ -86,7 +105,7 @@ export const xSearchRecent = defineTool({
     const res = await searchRecent(ctx.http, params);
 
     if (input.raw === true) {
-      return { data: res, summary: `${res.data?.length ?? 0} raw result(s).` };
+      return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
     }
 
     let page = renderPostPage(res);
@@ -151,6 +170,8 @@ export const xPostCountsRecent = defineTool({
   phase: 1,
   input: countsInput,
   handler: async (input, ctx) => {
+    // DRIFT-3: counts hit the same query parser, so the same pre-validation applies.
+    rejectRemovedOperators(input.query);
     const nextToken = toCursor(input.page_token);
     const res = await countsRecent(ctx.http, {
       query: input.query,
@@ -161,7 +182,7 @@ export const xPostCountsRecent = defineTool({
     });
 
     if (input.raw === true) {
-      return { data: res, summary: `${res.data?.length ?? 0} raw bucket(s).` };
+      return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw bucket(s).`) };
     }
 
     const counts: readonly CountBucket[] = (res.data ?? []).map((b) => ({

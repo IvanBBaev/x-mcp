@@ -1,6 +1,12 @@
 // Tests for core/policy (T-111): two-axis resolution as pure data. Covers the ratified
 // precedence deny > allow > preset (POL-2/3), preset expansion incl. DM exclusion (POL-4),
 // invalid-cell rejection (POL-6), and the no-unlock-hint rule for sensitive cells (POL-7).
+//
+// The "final preset semantics" section at the bottom (T-213, WP-2.4) pins the docs/04 §3.1
+// table verbatim — exact per-preset cell lists, the strict escalation chain, the DM
+// exclusion from every preset, the Phase-2 write/destructive class gating, and the exact
+// denied-tool message contract — so any future drift in preset composition or denied-tool
+// UX breaks a test here.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -213,9 +219,220 @@ test('POL-7: a denied SENSITIVE cell error names the cell but NOT the unlock env
   }
 });
 
-test('POL-7: a low-sensitivity denied cell MAY include the unlock hint', () => {
+// T-320 F2: this used to assert the OPPOSITE — that a low-sensitivity denial "MAY include the
+// unlock hint". That hint was the leaking half of a two-call escalation: the agent reads the
+// sensitive cell's name from `x_auth_status`'s policy matrix, triggers any low-sensitivity
+// denial to learn `X_MCP_POLICY_ALLOW` and its syntax, and relays the assembled recipe. The
+// withholding is only worth anything if it is total, so the hint is gone from every cell.
+test('POL-7 (F2): a low-sensitivity denial withholds the env var too — the hint was the leak', () => {
   const err = deniedToolError('write:engagement', 'read-only');
   assert.equal(err.data.cell, 'write:engagement');
-  assert.match(err.message, /X_MCP_POLICY_ALLOW/);
-  assert.ok(err.message.includes('write:engagement'));
+  assert.ok(err.message.includes('write:engagement')); // still actionable…
+  assert.equal(err.message.includes('X_MCP'), false); // …without being a recipe.
+  assert.match(err.message, /operator guide/);
+});
+
+// --- Final preset semantics (T-213, WP-2.4) --------------------------------------
+// Exact pins of the docs/04 §3.1 table. These are deliberately literal: if a preset ever
+// gains or loses a cell, or the canonical ordering changes, a deepEqual below breaks.
+
+test('T-213 pin: exact presetCells() list for each of the five presets (docs/04 §3.1)', () => {
+  assert.deepEqual(presetCells('read-only'), [
+    'read:content',
+    'read:user',
+    'read:account',
+    'read:social-graph',
+  ]);
+  assert.deepEqual(presetCells('engage'), [
+    'read:content',
+    'read:user',
+    'read:account',
+    'read:social-graph',
+    'write:engagement',
+  ]);
+  assert.deepEqual(presetCells('publish'), [
+    'read:content',
+    'read:user',
+    'read:account',
+    'read:social-graph',
+    'write:content',
+    'write:engagement',
+    'write:moderation',
+  ]);
+  assert.deepEqual(presetCells('manage'), [
+    'read:content',
+    'read:user',
+    'read:account',
+    'read:social-graph',
+    'write:content',
+    'write:engagement',
+    'write:moderation',
+    'destructive:content',
+  ]);
+  assert.deepEqual(presetCells('full'), [
+    'read:content',
+    'read:user',
+    'read:account',
+    'read:social-graph',
+    'write:content',
+    'write:engagement',
+    'write:moderation',
+    'write:social-graph',
+    'destructive:content',
+    'destructive:social-graph',
+  ]);
+});
+
+test('T-213: presetCells is canonical POLICY_CELLS order and equals the override-free allowed view', () => {
+  for (const preset of POLICY_PRESETS) {
+    const cells = new Set(presetCells(preset));
+    assert.deepEqual(
+      presetCells(preset),
+      POLICY_CELLS.filter((cell) => cells.has(cell)),
+      `${preset} must list its cells in canonical POLICY_CELLS order`,
+    );
+    // The matrix shown at startup/auth_status (resolved.allowed) equals the preset table
+    // when no overrides are applied — same cells, same order (docs/04 §3.2).
+    assert.deepEqual(
+      resolvePolicy({ preset }).allowed,
+      presetCells(preset),
+      `${preset}: resolved allowed view must equal the preset table`,
+    );
+  }
+});
+
+test('T-213: presets form a STRICT escalation chain read-only ⊂ engage ⊂ publish ⊂ manage ⊂ full', () => {
+  for (let i = 1; i < POLICY_PRESETS.length; i++) {
+    const lower = presetCells(POLICY_PRESETS[i - 1]!);
+    const higher = new Set(presetCells(POLICY_PRESETS[i]!));
+    for (const cell of lower) {
+      assert.ok(
+        higher.has(cell),
+        `${POLICY_PRESETS[i]} must contain every ${POLICY_PRESETS[i - 1]} cell (${cell})`,
+      );
+    }
+    assert.ok(
+      higher.size > lower.length,
+      `${POLICY_PRESETS[i]} must grant strictly more than ${POLICY_PRESETS[i - 1]}`,
+    );
+  }
+});
+
+test('T-213 / POL-3/4: NO preset contains a DM cell; each is reachable only via explicit allow', () => {
+  for (const preset of POLICY_PRESETS) {
+    for (const dmCell of ['read:dm', 'write:dm'] as const) {
+      assert.equal(
+        presetCells(preset).includes(dmCell),
+        false,
+        `${preset} must not grant ${dmCell}`,
+      );
+      assert.equal(
+        isCellAllowed(resolvePolicy({ preset }), dmCell),
+        false,
+        `${preset} must resolve ${dmCell} as denied without an override`,
+      );
+      // The ONLY route in: an explicit operator allow — and deny still beats it (POL-2/3).
+      assert.equal(isCellAllowed(resolvePolicy({ preset, allow: [dmCell] }), dmCell), true);
+      assert.equal(
+        isCellAllowed(resolvePolicy({ preset, allow: [dmCell], deny: [dmCell] }), dmCell),
+        false,
+      );
+    }
+  }
+});
+
+test('T-213: Phase-2 tool classes gate correctly per preset (post/like/repost/bookmark/timelines)', () => {
+  // Cells carried by the Phase-2 tools: x_post_create -> write:content, x_post_delete ->
+  // destructive:content, x_like_set / x_repost_set / x_bookmark_set -> write:engagement,
+  // timelines -> read:content.
+  const readOnly = resolvePolicy({ preset: 'read-only' });
+  const engage = resolvePolicy({ preset: 'engage' });
+  const publish = resolvePolicy({ preset: 'publish' });
+  const manage = resolvePolicy({ preset: 'manage' });
+
+  // Timelines (read:content) are readable under every preset.
+  for (const preset of POLICY_PRESETS) {
+    assert.equal(isCellAllowed(resolvePolicy({ preset }), 'read:content'), true);
+  }
+
+  // read-only: every write:* and destructive:* cell is denied.
+  for (const cell of POLICY_CELLS) {
+    if (!cell.startsWith('read:')) {
+      assert.equal(isCellAllowed(readOnly, cell), false, `read-only must deny ${cell}`);
+    }
+  }
+
+  // engage: like/repost/bookmark toggles allowed; posting and deleting are not.
+  assert.equal(isCellAllowed(engage, 'write:engagement'), true);
+  assert.equal(isCellAllowed(engage, 'write:content'), false);
+  assert.equal(isCellAllowed(engage, 'destructive:content'), false);
+
+  // publish: posting allowed; deleting still needs manage.
+  assert.equal(isCellAllowed(publish, 'write:content'), true);
+  assert.equal(isCellAllowed(publish, 'destructive:content'), false);
+
+  // manage: deleting own posts allowed without jumping to full (docs/04 §3.1).
+  assert.equal(isCellAllowed(manage, 'destructive:content'), true);
+});
+
+test('T-213 pin: exact denied-tool message contract (POL-7 / SEC-F10 / T-320 F2)', () => {
+  // One message shape for every cell — the sensitive/low-sensitivity split is gone (F2).
+  assert.equal(
+    deniedToolError('write:dm', 'publish').message,
+    'This operation is disabled by the active `publish` policy (blocked cell `write:dm`). ' +
+      'Enabling it is an operator decision made outside this session; see the operator guide.',
+  );
+  assert.equal(
+    deniedToolError('write:content', 'read-only').message,
+    'This operation is disabled by the active `read-only` policy (blocked cell `write:content`). ' +
+      'Enabling it is an operator decision made outside this session; see the operator guide.',
+  );
+});
+
+test('T-213 / POL-7: EVERY cell x every preset denies without ANY env-var mention (F2)', () => {
+  for (const preset of POLICY_PRESETS) {
+    for (const cell of POLICY_CELLS) {
+      const err = deniedToolError(cell, preset);
+      assert.equal(err.kind, 'policy');
+      assert.equal(err.retryable, false);
+      assert.equal(err.fix, 'operator');
+      assert.equal(err.data.cell, cell);
+      assert.ok(err.message.includes(cell), `message must name the blocked cell ${cell}`);
+      assert.ok(err.message.includes(preset), 'message must name the active preset');
+      // The escalation recipe is withheld wholesale: no X_MCP_* variable may appear
+      // (covers X_MCP_POLICY, _ALLOW, _DENY, and any future variable alike).
+      assert.equal(
+        err.message.includes('X_MCP'),
+        false,
+        `${cell} under ${preset} must not name any env var`,
+      );
+    }
+  }
+});
+
+// `isSensitiveCell` survives F2 — it is still the right classification, it just no longer
+// decides what a denial message says. This pins that the two are now decoupled: sensitive and
+// low-sensitivity cells produce the SAME message shape, so no denial is a probe for the other.
+test('T-213 / POL-7 (F2): sensitivity no longer changes the denial message', () => {
+  const sensitive = POLICY_CELLS.filter((c) => isSensitiveCell(c));
+  const ordinary = POLICY_CELLS.filter((c) => !isSensitiveCell(c));
+  assert.ok(sensitive.length > 0 && ordinary.length > 0, 'both classes must be non-empty');
+
+  const shapeOf = (cell: PolicyClass): string =>
+    deniedToolError(cell, 'read-only').message.replaceAll(cell, '<cell>');
+  const expected = shapeOf(sensitive[0] as PolicyClass);
+  for (const cell of POLICY_CELLS) {
+    assert.equal(shapeOf(cell), expected, `message shape must not vary with ${cell}`);
+  }
+});
+
+test('T-213 pin: deniedDescriptionSuffix for every preset, with no env-var leakage', () => {
+  assert.equal(deniedDescriptionSuffix('read-only'), ' (disabled by policy `read-only`)');
+  assert.equal(deniedDescriptionSuffix('engage'), ' (disabled by policy `engage`)');
+  assert.equal(deniedDescriptionSuffix('publish'), ' (disabled by policy `publish`)');
+  assert.equal(deniedDescriptionSuffix('manage'), ' (disabled by policy `manage`)');
+  assert.equal(deniedDescriptionSuffix('full'), ' (disabled by policy `full`)');
+  for (const preset of POLICY_PRESETS) {
+    assert.equal(deniedDescriptionSuffix(preset).includes('X_MCP'), false);
+  }
 });

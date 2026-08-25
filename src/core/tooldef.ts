@@ -132,6 +132,14 @@ export interface XApiRequest {
   readonly body?: unknown;
   /** OAuth scopes this endpoint requires. */
   readonly scopes?: readonly OAuthScope[];
+  /**
+   * Cooperative cancellation for THIS request (MCP-7). Endpoint wrappers normally leave it
+   * unset: the registry wraps the `EndpointInvoker` it hands a handler so every request
+   * automatically carries the `tools/call` signal (core/registry, T-311). A wrapper that
+   * sets it anyway (e.g. its own sub-timeout) is COMBINED with the call signal, never
+   * substituted for it — either aborting tears the request down.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /** The host-scoped endpoint invoker a handler calls. Implemented in api/http (T-114). */

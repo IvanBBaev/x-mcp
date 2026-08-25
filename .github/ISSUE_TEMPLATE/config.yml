@@ -1,0 +1,14 @@
+# Issue chooser configuration. Blank issues are disabled so every report arrives with the
+# triage fields the templates collect — and so that a security report is never filed as a
+# free-form public issue.
+blank_issues_enabled: false
+
+contact_links:
+  # Repo-relative so this file carries no hardcoded owner/repo slug. Resolved from
+  # /<owner>/<repo>/issues/new/choose, `../../security/advisories/new` is the private
+  # vulnerability report form. Requires private vulnerability reporting to be enabled in
+  # Settings → Security (part of repo bootstrap, T-001); if GitHub rejects the relative
+  # form, replace it with the absolute URL of the same page.
+  - name: Report a security vulnerability (private)
+    url: '../../security/advisories/new'
+    about: Never file an exploitable issue publicly. Opens a private GitHub Security Advisory, visible only to you and the maintainer. Scope and expectations are in SECURITY.md.

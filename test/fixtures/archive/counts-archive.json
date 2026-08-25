@@ -1,0 +1,24 @@
+{
+  "_provenance": "X API v2 GET /2/tweets/counts/all day-granularity envelope — verbatim from docs.x.com/x-api/posts/counts (full-archive counts share the recent-counts envelope; the archive variant pages via meta.next_token). Captured 2026-07-30 (DRIFT-4). Exercises: bucket mapping, meta.total_tweet_count preference over summation, counts-page next_token pass-through.",
+  "data": [
+    {
+      "start": "2014-06-20T00:00:00.000Z",
+      "end": "2014-06-21T00:00:00.000Z",
+      "tweet_count": 17
+    },
+    {
+      "start": "2014-06-21T00:00:00.000Z",
+      "end": "2014-06-22T00:00:00.000Z",
+      "tweet_count": 33
+    },
+    {
+      "start": "2014-06-22T00:00:00.000Z",
+      "end": "2014-06-23T00:00:00.000Z",
+      "tweet_count": 0
+    }
+  ],
+  "meta": {
+    "total_tweet_count": 50,
+    "next_token": "counts-next-1"
+  }
+}

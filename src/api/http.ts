@@ -16,6 +16,7 @@
 
 import type { Dispatcher, Random, Sleep } from '../core/ports.js';
 import type { EndpointInvoker, XApiRequest } from '../core/tooldef.js';
+import { isCredentialEgressHost } from '../core/egress.js';
 import { XError, apiError, networkError } from '../core/errors.js';
 
 /** The X API v2 origin. Matches the frozen test contract (test/helpers/http.ts). */
@@ -30,6 +31,15 @@ export const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 // Jittered backoff for the single GET retry: 250–750 ms (NET-3).
 const RETRY_BACKOFF_MIN_MS = 250;
 const RETRY_BACKOFF_SPAN_MS = 500;
+
+/**
+ * MCP-7 → POST-4: cancelling a write is as ambiguous as a write timing out — the request
+ * was already on the wire, so X may have applied it. Appended to the cancellation message
+ * of every non-GET so the agent never treats "cancelled" as "did not happen".
+ */
+export const CANCELLED_WRITE_AMBIGUITY =
+  ' The request had already been sent, so X may have applied the write anyway — the outcome ' +
+  'is unknown (POST-4). Do NOT blindly re-issue it; verify the effect first.';
 
 /**
  * The host-scoped credential provider — the auth injection seam (AUTH-14). Resolves the
@@ -64,7 +74,12 @@ export interface HttpClientConfig {
   readonly baseUrl?: string;
   /** Per-attempt timeout in ms. Defaults to {@link DEFAULT_TIMEOUT_MS}. */
   readonly timeoutMs?: number;
-  /** Cooperative cancellation from the MCP host (ToolContext.signal). */
+  /**
+   * Client-wide cooperative cancellation. Production composes one client PER endpoint
+   * bucket for the whole session, so this stays unset there; the per-`tools/call` signal
+   * travels with each request instead (`XApiRequest.signal`, MCP-7). Both are honoured and
+   * combined — see {@link createHttpClient}.
+   */
   readonly signal?: AbortSignal;
   /** Rich response→XError mapper (T-116). Omit to use the minimal `api` fallback. */
   readonly mapError?: ErrorMapper;
@@ -77,13 +92,24 @@ export interface HttpClientConfig {
 type FetchInit = NonNullable<Parameters<typeof fetch>[1]>;
 
 /**
- * Auth is attached ONLY when the request targets the configured API origin (AUTH-14).
- * Exported for direct unit testing of the host-scoping predicate. Because redirects are
- * never followed (see `send`), a request URL can only ever be the base origin — so the
- * token can never chase a `Location` to a foreign host.
+ * Auth is attached ONLY when the request targets the configured API origin (AUTH-14) AND
+ * that origin is on the hardcoded credential-egress allowlist (T10). Exported for direct
+ * unit testing of the predicate. Because redirects are never followed (see `send`), a
+ * request URL can only ever be the base origin — so the token can never chase a `Location`
+ * to a foreign host.
+ *
+ * The two clauses answer different questions and neither implies the other: origin equality
+ * keeps the credential off any host but the one this client was built for, and the
+ * allowlist keeps it off any host that is not X's — including one an operator named via
+ * `X_MCP_BASE_URL=…` + `X_MCP_ALLOW_INSECURE_BASE_URL=1`. Such a session still runs; it
+ * simply sends no credential (docs/04 §4.4).
  */
 export function shouldAttachAuth(requestUrl: URL, baseUrl: URL): boolean {
-  return requestUrl.protocol === baseUrl.protocol && requestUrl.host === baseUrl.host;
+  return (
+    requestUrl.protocol === baseUrl.protocol &&
+    requestUrl.host === baseUrl.host &&
+    isCredentialEgressHost(requestUrl)
+  );
 }
 
 /**
@@ -118,15 +144,33 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
     return headers;
   }
 
+  /**
+   * MCP-7: every signal that may cancel this request — the client-wide one (if configured)
+   * and the per-request one the registry attaches for the owning `tools/call`. They are
+   * COMBINED, never prioritized: a tool cannot opt out of host cancellation by setting its
+   * own signal, and the host cannot override a tool's stricter deadline.
+   */
+  function cancellers(req: XApiRequest): readonly AbortSignal[] {
+    const out: AbortSignal[] = [];
+    if (config.signal !== undefined) out.push(config.signal);
+    if (req.signal !== undefined) out.push(req.signal);
+    return out;
+  }
+
+  function isCancelled(signals: readonly AbortSignal[]): boolean {
+    return signals.some((signal) => signal.aborted);
+  }
+
   async function doFetch(
     url: URL,
     method: XApiRequest['method'],
     headers: Record<string, string>,
     bodyText: string | undefined,
+    signals: readonly AbortSignal[],
   ): Promise<Response> {
-    // A fresh timeout per attempt, combined with the host's cancellation signal (if any).
+    // A fresh timeout per attempt, combined with every cancellation signal (if any).
     const timeout = AbortSignal.timeout(timeoutMs);
-    const signal = config.signal ? AbortSignal.any([timeout, config.signal]) : timeout;
+    const signal = signals.length === 0 ? timeout : AbortSignal.any([timeout, ...signals]);
     // redirect: 'manual' — a 3xx is surfaced, never followed, so auth never leaks (AUTH-14).
     const init: FetchInit = { method, headers, redirect: 'manual', signal };
     if (bodyText !== undefined) init.body = bodyText;
@@ -175,6 +219,25 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
     });
   }
 
+  /**
+   * MCP-7: a cancelled request is a `network` error (no new taxonomy class — the transport
+   * failed before a usable response, exactly what `network` means). A cancelled WRITE is
+   * ambiguous the same way a timed-out write is: the bytes were already on the wire, so the
+   * platform may have applied it (POST-4). It therefore carries the ambiguity note and is
+   * marked NON-retryable, so nothing auto-re-issues a possibly-applied write. A cancelled
+   * GET keeps the `network` default (safely re-issuable).
+   */
+  function toCancelledError(
+    method: XApiRequest['method'],
+    phase: 'request' | 'response',
+    err: unknown,
+  ): XError {
+    const where = phase === 'request' ? 'before a response arrived' : 'while reading the response';
+    const message = `The X API request was cancelled ${where}.`;
+    if (method === 'GET') return networkError(message, { cause: err });
+    return networkError(`${message}${CANCELLED_WRITE_AMBIGUITY}`, { cause: err, retryable: false });
+  }
+
   function toNetworkError(err: unknown): XError {
     if (isTimeout(err)) {
       return networkError(`The X API request timed out after ${timeoutMs}ms.`, { cause: err });
@@ -187,6 +250,11 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
   }
 
   async function send<T>(req: XApiRequest): Promise<T> {
+    const signals = cancellers(req);
+    // MCP-7: a call cancelled before we start does NO work at all — in particular it never
+    // invokes the authorization provider, so a cancelled call cannot trigger a token refresh.
+    if (isCancelled(signals)) throw toCancelledError(req.method, 'request', undefined);
+
     const url = buildUrl(req);
     const bodyText = req.body === undefined ? undefined : JSON.stringify(req.body);
     const headers = await buildHeaders(url, bodyText !== undefined);
@@ -196,13 +264,11 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
     for (let attempt = 1; ; attempt += 1) {
       let response: Response;
       try {
-        response = await doFetch(url, req.method, headers, bodyText);
+        response = await doFetch(url, req.method, headers, bodyText, signals);
       } catch (err) {
-        // Host cancellation is never retried and is reported as such, not as a bare timeout.
-        if (config.signal?.aborted) {
-          throw networkError('The X API request was cancelled before a response arrived.', {
-            cause: err,
-          });
+        // Cancellation is never retried and is reported as such, not as a bare timeout.
+        if (isCancelled(signals)) {
+          throw toCancelledError(req.method, 'request', err);
         }
         // NET-3: a GET retries once on a transport failure; a write surfaces it immediately.
         if (isRetryable && attempt < maxAttempts) {
@@ -222,9 +288,11 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
         );
       }
 
-      // NET-3: a GET retries once on a 5xx; a write does not.
+      // NET-3: a GET retries once on a 5xx; a write does not. MCP-7: a cancellation that
+      // landed while the 5xx was arriving stops the retry — nothing is re-sent after abort.
       if (response.status >= 500 && isRetryable && attempt < maxAttempts) {
         await discardBody(response);
+        if (isCancelled(signals)) throw toCancelledError(req.method, 'request', undefined);
         await backoff();
         continue;
       }
@@ -234,10 +302,8 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
         bodyText2 = await readBody(response);
       } catch (err) {
         if (XError.is(err)) throw err; // terminal oversize `api` error — never retried
-        if (config.signal?.aborted) {
-          throw networkError('The X API request was cancelled while reading the response.', {
-            cause: err,
-          });
+        if (isCancelled(signals)) {
+          throw toCancelledError(req.method, 'response', err);
         }
         // NET-2/NET-3: a mid-stream failure (e.g. ECONNRESET) is a network error; GET retries once.
         if (isRetryable && attempt < maxAttempts) {

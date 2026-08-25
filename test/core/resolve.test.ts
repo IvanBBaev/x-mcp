@@ -96,6 +96,60 @@ test('REND-8: parsePostId rejects handles, profile URLs, and non-numeric ids as 
   assert.throws(() => parsePostId('https://x.com/user/status/abc'), isKind('validation'));
 });
 
+test('REND-8: a pathological identifier is echoed back capped, not in full', () => {
+  // Every refusal quotes the input so the agent can see what it sent — which makes the echo
+  // an amplification path: a 1 MB argument would otherwise land verbatim in the model's
+  // context, once per retry. The cap is 80 code points, with the last three spent on the
+  // ellipsis that tells the agent the value was shortened.
+  const long = 'z'.repeat(5000);
+  assert.throws(
+    () => parsePostId(long),
+    (error: unknown) => {
+      assert.ok(XError.is(error));
+      const quoted = /"([^"]*)"/.exec(error.message)?.[1];
+      assert.ok(quoted !== undefined, 'the refusal did not quote its input at all');
+      assert.equal(quoted.length, 80);
+      assert.ok(quoted.endsWith('...'));
+      return true;
+    },
+  );
+  // A value that fits is echoed WHOLE — no ellipsis, nothing shaved off the end.
+  const short = 'z'.repeat(80);
+  assert.throws(
+    () => parsePostId(short),
+    (error: unknown) => XError.is(error) && error.message.includes(`"${short}"`),
+    'an 80-character input was truncated even though it fits',
+  );
+});
+
+test('REND-8: a handle passed where a post id belongs is named as such, not lumped in with junk', () => {
+  // Both refusals are `validation`, so asserting the kind alone leaves the branch that
+  // distinguishes them free to invert unnoticed — a mutation run over this module proved it.
+  // The message IS the value here: an agent that confused the two argument kinds needs to be
+  // told which one it supplied, or its retry is a guess.
+  for (const handle of ['@jack', 'jack', 'JackDorsey_99']) {
+    assert.throws(
+      () => parsePostId(handle),
+      (error: unknown) =>
+        XError.is(error) &&
+        error.kind === 'validation' &&
+        /not a handle/.test(error.message) &&
+        error.message.includes(handle),
+      `parsePostId("${handle}") did not identify its input as a handle`,
+    );
+  }
+  // Anything that is neither a handle nor an id falls through to the generic refusal, which
+  // must NOT claim the input was a handle.
+  for (const junk of ['???', 'a b c', 'https://example.com/status/1']) {
+    assert.throws(
+      () => parsePostId(junk),
+      (error: unknown) =>
+        XError.is(error) && error.kind === 'validation' && !/not a handle/.test(error.message),
+      `parsePostId("${junk}") mislabeled a non-handle as a handle`,
+    );
+  }
+});
+
 // --- cache -----------------------------------------------------------------------
 
 test('REND-8: createResolveCache maps id↔handle both ways, case-insensitively', () => {

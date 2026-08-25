@@ -34,7 +34,7 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 
 - **CFG-3 — Profiles file and direct credentials both present** `P1` `[ARCH-F9]`
   If `X_MCP_PROFILES_FILE` is set, `X_MCP_PROFILE` is **required** and any direct
-  credential var (`X_MCP_BEARER_TOKEN`, `X_MCP_CLIENT_ID`, OAuth1 quadruple) is a
+  credential var (`X_MCP_BEARER_TOKEN`, `X_MCP_CLIENT_ID`, `X_MCP_CLIENT_SECRET`) is a
   **startup error** naming both sources. No silent precedence — ambiguity fails loud.
 
 - **CFG-4 — Env var set to empty string** `P1` `[new]`
@@ -160,7 +160,13 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
   validated and the code is consumed exactly once. The default browser flow detects
   launch failure and falls back to manual instructions instead of hanging.
 
-## 3. OA1 — OAuth 1.0a signing *(Phase 3, if kept — see roadmap Q3)*
+## 3. OA1 — OAuth 1.0a signing *(dropped — decision NO-GO)*
+
+> **Resolved 2026-07-31 (T-307):** OAuth 1.0a is **dropped** — see
+> [docs/decisions/0001-oauth1-go-no-go.md](decisions/0001-oauth1-go-no-go.md).
+> The signer is never built; OA1-1…4 below are retained for the record and apply
+> only if the decision's revisit triggers fire. The `oauth1` auth mode and the
+> credential quadruple still accepted by `core/config.ts` are removed with T-309.
 
 - **OA1-1 — RFC 5849 reference vector** `P3` `[QA-11]`
   The HMAC-SHA1 signer reproduces the RFC 5849 §3.4.1.1 reference signature and the
@@ -327,7 +333,7 @@ credits, not tiers, for post-2026-02-06 developers.)*
 
 ## 8. POST — Post creation & writes
 
-- **POST-1 — Text passes through byte-identical** `P1` `[QA-22]`
+- **POST-1 — Text passes through byte-identical** `P2` `[QA-22]`
   Unicode (NFC/NFD, ZWJ emoji, RTL) is sent exactly as provided — no normalization,
   no trimming beyond a whitespace-only rejection (`validation`). What the user
   wrote is what posts.
@@ -474,8 +480,13 @@ credits, not tiers, for post-2026-02-06 developers.)*
   server-side to ≥ 10 s in the past (v2 quirk) instead of surfacing a 400.
 
 - **REND-10 — `raw: true` is capped** `P1` `[DX-F11]`
-  With `raw: true`, `max_results` is capped at 25 and a warning is logged. The raw
-  payload is the exact API JSON including `includes`/`meta`.
+  With `raw: true`, `max_results` is capped at 25. The raw payload is the exact API
+  JSON including `includes`/`meta`.
+  The cap is applied silently: there is **no log layer** in the shipped server (§6 of
+  docs/04), so "a warning is logged" — the original wording — described a sink that does
+  not exist, and a per-result note would have had to ride on `data`, breaking the
+  byte-for-byte guarantee this rule exists to give (T-320 F10). What a `raw` read *does*
+  always carry is the REND-6 untrusted-content warning, on `summary` (see `rawSummary`).
 
 - **REND-11 — Structured content parity** `P3` `[new]`
   When tool `outputSchema`/`structuredContent` (MCP spec 2025-06) is adopted
@@ -551,11 +562,13 @@ credits, not tiers, for post-2026-02-06 developers.)*
   The CJS bin on Node < 20 prints a human-readable version message (no
   SyntaxError); the `launcher-node12` CI probe asserts it.
 
-- **MCP-7 — Cancellation aborts in-flight HTTP everywhere** `P2` `[ARCH-F7 generalized]`
+- **MCP-7 — Cancellation aborts in-flight HTTP everywhere** `P3` `[ARCH-F7 generalized]`
   MCP cancellation propagates an `AbortSignal` to the in-flight HTTP request on
   **every** tool, not just media: the request is torn down, no retry fires, and for
   writes the POST-4 ambiguity note applies (the platform may already have applied
-  the write).
+  the write). Retagged P2 → P3 on 2026-07-31 (exit-gate-2 audit, T-214): the
+  roadmap builds generalized cancellation in WP-3.8/T-311 — the original tag
+  predated that scheduling.
 
 - **MCP-8 — Parallel tool calls from one client** `P1` `[new]`
   MCP clients may issue concurrent `tools/call` requests. All shared state (budget

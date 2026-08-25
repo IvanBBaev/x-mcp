@@ -1,0 +1,9 @@
+{
+  "_provenance": "X API v2 POST /2/media/upload/{id}/finalize success envelope for a small image: no processing_info block, meaning the media is ready as-is. Shape verbatim from docs.x.com/x-api media-upload chunked flow. Captured 2026-07-31. Exercises: MEDIA-1 happy path, processing_state defaulting to succeeded, size echo.",
+  "data": {
+    "id": "7100",
+    "media_key": "3_7100",
+    "expires_after_secs": 86400,
+    "size": 12
+  }
+}

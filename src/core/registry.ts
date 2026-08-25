@@ -14,6 +14,13 @@
 //      preflight -> invoke handler -> reserve credit -> attach ResultMeta. Nothing reaches
 //      a handler except through this function.
 //
+// CANCELLATION (MCP-7, T-311): because the pipeline is the only path to a handler, it is also
+// the only place cancellation has to be wired. `buildToolContext` BINDS the call's
+// AbortSignal to the EndpointInvoker it hands the handler, so every request that handler
+// makes — including each segment of a multi-request conversation — is torn down on abort
+// without a single endpoint wrapper or tool opting in. A cancelled call always leaves as a
+// typed `network` XError, never an unhandled rejection and never a fabricated success.
+//
 // DECOUPLING: policy (T-111), budget (T-112) and rate-limit (T-115) are built in parallel,
 // so this module does NOT import them. It depends on three small COLLABORATOR interfaces
 // (PolicyGate / BudgetGate / RateLimitGate) injected at construction; production wires the
@@ -31,8 +38,9 @@ import type {
   ToolAnnotations,
   ToolContext,
   ToolOutput,
+  XApiRequest,
 } from './tooldef.js';
-import { apiError, validationError, XError } from './errors.js';
+import { apiError, networkError, validationError, XError } from './errors.js';
 
 // --- Injected collaborators (built by sibling tasks; wired by the integrator) --------
 
@@ -92,7 +100,17 @@ export interface RegistryDeps {
 
 // --- Per-call and projection shapes --------------------------------------------------
 
-/** Per-call capabilities: the auth-scoped invoker + ports + optional cancellation signal. */
+/**
+ * Per-call capabilities: the auth-scoped invoker + ports + optional cancellation signal.
+ *
+ * Every field is supplied FRESH per `tools/call` by the protocol adapter (mcp/server) and is
+ * read-only here — the registry keeps no per-call state of its own between calls, which is
+ * half of why overlapping calls cannot cross-talk (MCP-8). The other half is that the three
+ * gates are process-scoped and atomic (CONC-2/CONC-3).
+ *
+ * `signal` is the ROOT of cancellation for the whole call: the registry binds it to `http`
+ * before the handler sees it, so it reaches every request the call makes (MCP-7).
+ */
 export interface CallContext {
   readonly ports: Ports;
   readonly http: EndpointInvoker;
@@ -206,6 +224,10 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
       throw validationError(`Unknown tool "${name}".`);
     }
 
+    // (0) MCP-7: a call the host already cancelled does NOTHING — no validation, no gate,
+    //     no handler, no reservation. It leaves as a typed error like every other refusal.
+    if (ctx.signal?.aborted === true) throw cancelledError(tool);
+
     // (1) zod-validate input -> typed `validation` error on failure (before any gate/side effect).
     const parsed = tool.input.safeParse(rawInput);
     if (!parsed.success) {
@@ -232,10 +254,14 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     deps.rateLimit.preflight(tool);
 
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
-    const output = await invokeHandler(tool, input, buildToolContext(ctx));
+    const output = await invokeHandler(tool, input, buildToolContext(ctx), ctx.signal);
 
     // (6) reserve the credit cost (atomic in the gate — COST-5 / CONC-2). Only successful
     //     calls are charged; a handler throw above short-circuits before this point.
+    //     The unit is ONE TOOL CALL, not one HTTP request: a handler that sends several
+    //     (media's chunked INIT/APPEND×N/FINALIZE) is charged one estimate, and a call that
+    //     fails part-way is charged nothing despite the requests it already sent. Advisory
+    //     accounting by design — the gap is documented in docs/02 §7 (T-320 F9).
     const reservation = deps.budget.reserve(estimate);
 
     // (7) attach ResultMeta (COST-3). Compaction/sanitization already happened inside the
@@ -261,29 +287,86 @@ function resolveCost(tool: AnyToolDef, input: unknown): CostEstimate {
   return typeof tool.cost === 'function' ? tool.cost(input) : { class: tool.cost };
 }
 
-/** Thread ports + the auth-scoped invoker + optional cancellation into a ToolContext. */
+/**
+ * MCP-7 — THE cancellation choke point. Bind the `tools/call` signal to the invoker the
+ * handler receives, so EVERY request it sends is cancellable without any endpoint wrapper or
+ * tool opting in. This is what makes the guarantee structural rather than a convention: a
+ * new tool cannot forget to be cancellable, and a multi-request conversation (media's
+ * chunked INIT/APPEND×N/FINALIZE) gets the signal on every single segment request, because
+ * the binding is on the invoker, not on one call site.
+ *
+ * PRECEDENCE: an explicit `req.signal` set by an endpoint wrapper is COMBINED with the call
+ * signal (`AbortSignal.any`), never replaced by it and never allowed to replace it —
+ * whichever fires first tears the request down. "Wins" semantics were rejected deliberately:
+ * either direction of override would let one layer silently disable the other's cancellation.
+ */
+export function withCallSignal(inner: EndpointInvoker, signal: AbortSignal): EndpointInvoker {
+  return {
+    send<T>(req: XApiRequest): Promise<T> {
+      const combined = req.signal === undefined ? signal : AbortSignal.any([req.signal, signal]);
+      return inner.send<T>({ ...req, signal: combined });
+    },
+  };
+}
+
+/** Thread ports + the (cancellation-bound) invoker + the signal itself into a ToolContext. */
 function buildToolContext(ctx: CallContext): ToolContext {
   return ctx.signal === undefined
     ? { ports: ctx.ports, http: ctx.http }
-    : { ports: ctx.ports, http: ctx.http, signal: ctx.signal };
+    : { ports: ctx.ports, http: withCallSignal(ctx.http, ctx.signal), signal: ctx.signal };
+}
+
+/**
+ * MCP-7: the taxonomy answer for a cancelled call. `network` — no new class is invented; the
+ * call ended before a usable response, which is exactly what `network` means, and api/http
+ * already reports an aborted request that way. A cancelled WRITE is non-retryable and says
+ * the platform may have applied it anyway (POST-4); a cancelled read keeps the `network`
+ * default and is safely re-issuable.
+ */
+function cancelledError(tool: AnyToolDef): XError {
+  const isWrite = !tool.policy.startsWith('read:');
+  const message = `The "${tool.name}" call was cancelled by the MCP host.`;
+  if (!isWrite) return networkError(message);
+  return networkError(
+    `${message} It may nevertheless have been applied by X — the outcome is unknown ` +
+      `(POST-4). Do NOT blindly re-issue it; verify the effect first.`,
+    { retryable: false },
+  );
 }
 
 /**
  * Run the handler, letting already-typed XErrors propagate unchanged. A non-XError escaping
  * a handler is a bug: surface a generic `api` error WITHOUT the original message (which may
  * embed third-party text — REND-7) while preserving the cause for operator logs.
+ *
+ * MCP-7 exception: when the call was cancelled, a raw abort reason (a `DOMException` named
+ * `AbortError` from `signal.throwIfAborted()`, a fetch teardown, an aborted file read) is NOT
+ * "failed unexpectedly" — it is the cancellation, and it renders as the typed cancellation
+ * error. So a handler that merely honours `ctx.signal` gets the right taxonomy for free.
  */
 async function invokeHandler(
   tool: AnyToolDef,
   input: unknown,
   toolCtx: ToolContext,
+  signal: AbortSignal | undefined,
 ): Promise<ToolOutput> {
   try {
     return await tool.handler(input, toolCtx);
   } catch (err) {
     if (XError.is(err)) throw err;
+    if (signal?.aborted === true || isAbortError(err)) throw cancelledError(tool);
     throw apiError(`Tool "${tool.name}" failed unexpectedly.`, { cause: err });
   }
+}
+
+/** `AbortController.abort()` rejects with a `DOMException` named `AbortError`. */
+function isAbortError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'name' in err &&
+    (err as { name?: unknown }).name === 'AbortError'
+  );
 }
 
 /** Envelope the handler output with ResultMeta, honoring exactOptionalPropertyTypes. */

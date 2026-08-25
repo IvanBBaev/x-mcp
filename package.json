@@ -1,17 +1,17 @@
 {
   "name": "x-mcp-ai",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "mcpName": "io.github.IvanBBaev/x-mcp-ai",
-  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as 50 typed tools across 12 packages, with a two-axis policy model and 2026 pay-per-use cost controls.",
+  "description": "Safety-first MCP server exposing the X (Twitter) API v2 as typed, policy-gated tools, with a two-axis policy model and 2026 pay-per-use cost controls.",
   "license": "MIT",
   "author": "Ivan Baev <ivanbbaev@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/IvanBBaev/x-mcp-ai.git"
+    "url": "git+https://github.com/IvanBBaev/x-mcp.git"
   },
-  "homepage": "https://github.com/IvanBBaev/x-mcp-ai#readme",
+  "homepage": "https://github.com/IvanBBaev/x-mcp#readme",
   "bugs": {
-    "url": "https://github.com/IvanBBaev/x-mcp-ai/issues"
+    "url": "https://github.com/IvanBBaev/x-mcp/issues"
   },
   "type": "module",
   "engines": {
@@ -36,8 +36,27 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
-    "verify": "npm run clean && npm run build && c8 node --test \"build/test/**/*.test.js\" && npm run lint && npm run format:check"
+    "test:coverage": "node scripts/coverage-guard.mjs preflight && npm run build && c8 --check-coverage --lines 90 --branches 80 --functions 95 --reporter=text --reporter=json-summary node --test \"build/test/**/*.test.js\" && node scripts/coverage-guard.mjs floors",
+    "docs:gen": "npm run build && node scripts/docs-gen.mjs",
+    "docs:check": "npm run build && node scripts/docs-gen.mjs --check",
+    "gate:context": "npm run build && node scripts/context-gate.mjs",
+    "gate:manifest": "node scripts/server-json-guard.mjs",
+    "gates": "npm run build && node scripts/docs-gen.mjs --check && node scripts/context-gate.mjs --quiet && node scripts/server-json-guard.mjs",
+    "fuzz": "npm run build && node scripts/fuzz-tools.mjs",
+    "mutate": "npm run build && node scripts/mutate-core.mjs",
+    "verify": "npm run build && npm run lint && npm run format:check && node --test \"build/test/**/*.test.js\"",
+    "check": "npm run verify && npm run test:coverage && npm run gates && npm audit --omit=dev --audit-level=high",
+    "release:dry": "npm pack --dry-run",
+    "prepublishOnly": "npm run check"
+  },
+  "c8": {
+    "include": [
+      "build/src/**/*.js"
+    ],
+    "exclude": [
+      "build/src/index.js"
+    ],
+    "report-dir": "coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

@@ -71,7 +71,8 @@ src/
       filestore.ts    #     file TokenStore: 0600, atomic tmp+rename, O_EXCL|O_NOFOLLOW locks
       index.ts        #     integration: reload-under-lock, adopt-on-disk-pair, persist-before-use
       keychain.ts     #     OS-keychain TokenStore backend (X_MCP_TOKEN_KEYCHAIN; Phase 3)
-    oauth1.ts         #   HMAC-SHA1 request signing (Phase 3, only if kept — roadmap Q3)
+    (no oauth1.ts)    #   OAuth 1.0a: NO-GO, never built — docs/decisions/0001-oauth1-go-no-go.md
+                      #   (T-307); its mode + credential vars removed from config by T-309
     endpoints/        #   thin typed wrappers: posts.ts, users.ts, dm.ts, lists.ts, ...
   cli/                # bin subcommands, compiled into build/ so they ship
     authorize.ts      #   PKCE authorize: CSRF state, one-shot 127.0.0.1 listener, --manual
@@ -113,12 +114,11 @@ lists an `X_MCP_*` variable defers to this one.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `X_MCP_AUTH_MODE` | `oauth2` | `oauth2` \| `oauth1` \| `app-only` |
+| `X_MCP_AUTH_MODE` | `oauth2` | `oauth2` \| `app-only` |
 | `X_MCP_CLIENT_ID` | — | OAuth 2.0 app client id (public-client PKCE needs only this) |
 | `X_MCP_CLIENT_SECRET` | — | OAuth 2.0 client secret — confidential clients only |
 | `X_MCP_TOKEN_FILE` | resolved (see below) | Path to the rotating OAuth 2.0 token store (written by `x-mcp-ai authorize`) |
 | `X_MCP_TOKEN_KEYCHAIN` | `0` | `1` → store tokens in the OS keychain instead of a file (Phase 3); mutually exclusive with an explicit `X_MCP_TOKEN_FILE` |
-| `X_MCP_API_KEY` / `X_MCP_API_SECRET` / `X_MCP_ACCESS_TOKEN` / `X_MCP_ACCESS_SECRET` | — | OAuth 1.0a quadruple (Phase 3, only if kept — roadmap Q3) |
 | `X_MCP_BEARER_TOKEN` | — | App-only bearer token |
 | `X_MCP_POLICY` | `read-only` | Preset: `read-only` \| `engage` \| `publish` \| `manage` \| `full` ([04 §3](04-security.md)) |
 | `X_MCP_POLICY_ALLOW` / `X_MCP_POLICY_DENY` | — | Comma-separated `op:domain` cell overrides on top of the preset; **deny always wins** (POL-2) |
@@ -161,10 +161,39 @@ enforce (ARCH-F3). The budget lives in operator space only.
 
 **Profiles-file vs direct-credentials conflict (CFG-3):** if `X_MCP_PROFILES_FILE` is
 set, `X_MCP_PROFILE` is **required**, and any *direct* credential var present alongside
-it — `X_MCP_BEARER_TOKEN`, `X_MCP_CLIENT_ID`, or the OAuth 1.0a quadruple — is a
+it — `X_MCP_BEARER_TOKEN`, `X_MCP_CLIENT_ID`, `X_MCP_CLIENT_SECRET` — is a
 **startup error naming both sources**. No silent precedence: ambiguity fails loud (this
 is how a wrong-account write is prevented). The profiles file is a secret (POSIX `0600`,
 warn on wider perms; its policy cells are re-validated at load — CFG-6/SEC-T16).
+
+**Profile vs environment precedence (CFG-3/CFG-6).** Credentials are the only *fatal*
+overlap; the remaining profile keys resolve by a single rule — **the environment wins,
+and says so**:
+
+| Profile key | Colliding env var | Resolution |
+| --- | --- | --- |
+| any credential | `X_MCP_CLIENT_ID` / `X_MCP_CLIENT_SECRET` / `X_MCP_BEARER_TOKEN` | **startup error** naming both sources — triggered by the direct var existing at all, not by a per-key clash (above) |
+| `auth_mode` | `X_MCP_AUTH_MODE` (different value) | **startup error** — "set one, not both"; an identical value is accepted |
+| `token_file` | `X_MCP_TOKEN_FILE` | env wins, warning names the profile |
+| `token_file` | `X_MCP_TOKEN_KEYCHAIN=1` | **startup error** — mutually exclusive stores |
+| `policy` (preset) | `X_MCP_POLICY` | env wins, warning names the profile |
+| `policy` (cell list) | `X_MCP_POLICY_ALLOW` | env wins, warning names the profile |
+| — | `X_MCP_POLICY_DENY` | untouched by profiles; **deny always wins** (POL-2) |
+| unknown key | — | warning, like an unknown `X_MCP_*` var (CFG-8); never refuses |
+
+The asymmetry is deliberate. A credential collision cannot be resolved by precedence
+because the wrong choice writes to the wrong account, so it fails closed. Every other
+collision is recoverable and only needs to be *visible*, so it resolves to the more
+explicit source — the one typed into the host config — and emits a warning naming the
+profile it overrode. A profile can never *widen* what the environment denied.
+
+Empty and whitespace-only values inside the file mean *unset*, exactly as in the
+environment (CFG-4). Only the **selected** entry is validated in depth: an unrelated
+profile's typo must not stop this process from starting. Two consumers protect the
+file's contents beyond `parseConfig` — the composition root warns at startup when the
+file is group/other-readable (the same rule as the token file, a warning rather than a
+refusal because the operator authored this file and the server did not), and `doctor`
+masks profile-sourced secrets in its output just as it masks env-sourced ones (T-205).
 
 **Profiles** mirror servicenow-mcp-ai's multi-instance model: a profiles file maps
 `name → {auth mode, credentials or token file, policy}`. Exactly one profile is active
@@ -287,8 +316,11 @@ T-206):
 ## 5. Tool surface principles
 
 1. **Curated, not generated.** Tools map to *agent intents* (post something, find
-   posts about T, who follows me), not to raw endpoints. 50 tools in 12 packages
-   (49 unconditional, ~28 in a typical deployment — [03-tool-catalog.md](03-tool-catalog.md)).
+   posts about T, who follows me), not to raw endpoints. 41 tools in 12 packages
+   (all unconditional; a `read-only` deployment lists 41 and can call 21 —
+   [03-tool-catalog.md](03-tool-catalog.md)). Curation cuts both ways: nine designed rows
+   were dropped rather than shipped once they proved to be either answerable by an existing
+   tool or out of shape for a text-only server ([decisions/0002](decisions/0002-remaining-catalogued-tools.md)).
 2. **Compact outputs.** Raw v2 payloads are verbose and expansion-joined. `core/render`
    flattens each shape to what a model needs: post → `{id, author: "@handle", text,
    created_at, metrics: {...}, reply_to?, quoted?, media?: [...]}`. Full-fidelity JSON is
@@ -348,6 +380,15 @@ depends on a paid timeline read.
 - Preemptive refusal when `remaining === 0` and reset is in the future (skew-tolerant,
   `reset − 5 s`); on 429, idempotent GETs may retry once if reset ≤ 5 s away, writes
   never (RATE-2/3/5).
+- **As shipped, only non-2xx responses train the table** (T-320 F6, 2026-08-07). The
+  tracker is wired into the http client's *error mapper* (`mcp/compose`), and `api/http`
+  exposes no success-path header hook — so a bucket stays unknown until a call in it
+  fails. Consequence: the preemptive refusal is a **429-repeat suppressor**, not a
+  look-ahead. The first exhausted call in a fresh process always goes out and comes back
+  429; every subsequent call in that bucket is then refused locally until reset. Both
+  `x_rate_limit_status` and this bullet describe the same table, so the tool reports
+  nothing for a bucket that has only ever succeeded — that is the design as built, not a
+  gap in the tracker (`api/ratelimit` records whatever it is handed).
 
 **Session credit budget** (replaces the old monthly read-budget model — ARCH-F3/F4,
 X-F4; cases COST-1…7):
@@ -366,6 +407,16 @@ X-F4; cases COST-1…7):
   ("operator-set limit; cannot be changed from within this session"). check-and-reserve is
   **atomic**, so two interleaved calls near the cap cannot both pass in `hard` mode
   (COST-5, CONC-2).
+- **The unit charged is one tool call, not one HTTP request** (T-320 F9, 2026-08-07), and
+  the charge lands **after** the handler returns (`core/registry` — check before, reserve
+  after). Two consequences, both deliberate and both worth knowing before trusting the
+  running total: a handler that sends several requests is charged **once** (media's
+  chunked INIT/APPEND×N/FINALIZE is one estimate, not one per segment), and a call that
+  fails part-way is charged **nothing** even though the requests it already sent were
+  billed by X. So the counter under-reports against the operator's real invoice; it is a
+  ceiling on *tool calls* priced by the static table, not a meter on wire traffic. This
+  is consistent with the "advisory accounting, not a hard ledger" framing above — stated
+  here explicitly so the gap is not mistaken for drift.
 - Platform-side exhaustion is separate: X's own "out of credits" rejection maps to the
   `billing` error class (real body captured and locked by a Phase 1 live test — COST-6),
   and the 2M-posts/month platform hard cap is surfaced verbatim as `billing` when hit but

@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "id": "1900000000000000001",
+      "text": "@self_bot this broke for us again after the last deploy, any idea?",
+      "created_at": "2026-07-21T08:15:00.000Z",
+      "author_id": "201",
+      "referenced_tweets": [{ "type": "replied_to", "id": "1700000000000000009" }],
+      "public_metrics": {
+        "retweet_count": 0,
+        "reply_count": 3,
+        "like_count": 2,
+        "quote_count": 0
+      }
+    },
+    {
+      "id": "1900000000000000002",
+      "text": "@self_bot look at this, exactly the case I described.",
+      "created_at": "2026-07-21T09:40:00.000Z",
+      "author_id": "202",
+      "referenced_tweets": [{ "type": "quoted", "id": "1700000000000000009" }],
+      "public_metrics": {
+        "retweet_count": 1,
+        "reply_count": 0,
+        "like_count": 6,
+        "quote_count": 0
+      }
+    },
+    {
+      "id": "1900000000000000003",
+      "text": "Thanks @self_bot, the new docs page answered everything.",
+      "created_at": "2026-07-21T11:05:00.000Z",
+      "author_id": "203",
+      "public_metrics": {
+        "retweet_count": 0,
+        "reply_count": 0,
+        "like_count": 9,
+        "quote_count": 0
+      }
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "201", "username": "carla_ops", "name": "Carla", "verified": false },
+      { "id": "202", "username": "dan_reads", "name": "Dan", "verified": false },
+      { "id": "203", "username": "erin_ml", "name": "Erin", "verified": true },
+      { "id": "1526228120226357248", "username": "self_bot", "name": "My Bot", "verified": false }
+    ],
+    "tweets": [
+      {
+        "id": "1700000000000000009",
+        "text": "Release notes for the safety-first tooling update.",
+        "created_at": "2026-07-20T18:00:00.000Z",
+        "author_id": "1526228120226357248"
+      }
+    ]
+  },
+  "meta": {
+    "newest_id": "1900000000000000003",
+    "oldest_id": "1900000000000000001",
+    "result_count": 3
+  }
+}

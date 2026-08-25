@@ -39,6 +39,23 @@ test('REND-6: caps length and appends an explicit truncation marker', () => {
   assert.equal(Array.from(out).length, cap);
 });
 
+test('REND-6: a value of exactly maxLength is left whole — the cap is inclusive', () => {
+  // The `points.length <= max` boundary. A string that just fits must come back byte-for-byte:
+  // marking it truncated would tell the agent content was dropped when none was, and would
+  // also cost it real characters to make room for a marker it never needed.
+  const cap = 20;
+  const exact = 'a'.repeat(cap);
+  assert.equal(sanitizeText(exact, { maxLength: cap }), exact);
+  // One code point more is where truncation actually starts.
+  const over = sanitizeText('a'.repeat(cap + 1), { maxLength: cap });
+  assert.ok(over.endsWith(TRUNCATION_MARKER));
+  assert.equal(Array.from(over).length, cap);
+  // The same boundary in code points, not UTF-16 units: 20 emoji are 40 units but fit a
+  // 20-point cap untouched.
+  const emoji = String.fromCodePoint(0x1f600).repeat(cap);
+  assert.equal(sanitizeText(emoji, { maxLength: cap }), emoji);
+});
+
 test('REND-6: truncation counts code points and never splits a surrogate pair', () => {
   const emoji = String.fromCodePoint(0x1f600);
   const cap = 20;

@@ -39,7 +39,47 @@ export interface AuthSessionInfo {
     readonly preset: string;
     readonly cells: Readonly<Record<string, boolean>>;
   };
+  /**
+   * Where the active credential lives (docs/04 T1/T17) — the BACKEND only.
+   *
+   * Deliberately not the path and not the permission bits, and that is a correction to the
+   * older T1 wording rather than an omission (T-320 F10):
+   *
+   *  - The path is an absolute filesystem path, so it carries the operator's account name
+   *    and home layout. `x_auth_status` output goes into the model's context and from there
+   *    into transcripts, so the path is disclosed by `x-mcp-ai doctor` — an operator-facing
+   *    surface reading its own terminal — and not by a tool (docs/12 §"Unlink the account").
+   *  - The permission bits are only meaningful when read NOW. This snapshot is built once at
+   *    composition time and never refreshed, so a `mode` field here would report the perms
+   *    the file had at startup as though they were current — worse than silence. The live
+   *    checks are the ones that already act: the file store REFUSES a group/other-writable
+   *    token dir and warns once on a wider-than-`0600` token file (SEC-T13/T1), and
+   *    `doctor` re-stats both on demand.
+   *
+   * What is left is exactly the part an agent can act on: which store to tell the operator
+   * to look at.
+   */
+  readonly tokenStore: TokenStoreKind;
+  /**
+   * The active `X_MCP_BASE_URL`, present ONLY when it differs from the default (CFG-7).
+   *
+   * The startup banner already warns the operator, but the operator is not the one deciding
+   * what to send: an agent reading `x_auth_status` should be able to tell that "X" is
+   * actually some other host before it drafts a DM there. Absent means the real API — the
+   * report says nothing rather than restating a constant on every call.
+   *
+   * A host outside `*.x.com` never receives credentials (F1 egress allowlist) and, under
+   * oauth2, is refused at startup — so this is a disclosure, not the control.
+   */
+  readonly baseUrlOverride?: string;
 }
+
+/**
+ * The credential backend in use: the OAuth2 token file (`X_MCP_TOKEN_FILE`), the OS keychain
+ * (`X_MCP_TOKEN_KEYCHAIN=1`), or `env` — an app-only bearer read straight from the process
+ * environment, which is the T17 leak surface (`ps e`, `/proc/<pid>/environ`, crash dumps).
+ */
+export type TokenStoreKind = 'env' | 'file' | 'keychain';
 
 /** Supplies the current {@link AuthSessionInfo}. The composition root (T-130) implements it. */
 export interface AuthSessionProvider {
@@ -63,9 +103,11 @@ export interface AuthToolDeps {
 // only when present, so the emitted object satisfies exactOptionalPropertyTypes.
 interface AuthStatusReport {
   auth_mode: AuthSessionInfo['authMode'];
+  token_store: TokenStoreKind;
   scopes: string[];
   availability: readonly string[];
   policy: AuthSessionInfo['policy'];
+  base_url_override?: string;
   me?: { id: string; handle?: string };
   note?: string;
 }
@@ -90,8 +132,9 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
     title: 'Auth status',
     description:
       'X (Twitter): report the active auth mode, the authenticated user (in user mode), ' +
-      'granted OAuth scopes, detected availability, and the resolved policy matrix. Degrades ' +
-      'to a defined shape under app-only auth (no user; a note explains the limitation).',
+      'granted OAuth scopes, the credential backend, detected availability, and the resolved ' +
+      'policy matrix. Degrades to a defined shape under app-only auth (no user; a note ' +
+      'explains the limitation).',
     policy: 'read:account',
     availability: 'app+user',
     scopes: ['users.read'],
@@ -103,10 +146,13 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
       const snap = deps.session.snapshot();
       const report: AuthStatusReport = {
         auth_mode: snap.authMode,
+        token_store: snap.tokenStore,
         scopes: [...snap.scopes].sort(),
         availability: snap.availability,
         policy: snap.policy,
       };
+      // CFG-7: only when it is actually overridden — see AuthSessionInfo.baseUrlOverride.
+      if (snap.baseUrlOverride !== undefined) report.base_url_override = snap.baseUrlOverride;
       if (snap.authMode === 'user') {
         // User mode without a `me` snapshot is a degenerate composition-root state; we simply
         // omit `me` rather than invent one.
@@ -114,7 +160,7 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
       } else {
         report.note = APP_ONLY_NOTE; // AUTH-15 degraded shape.
       }
-      return { data: report, summary: `auth: ${snap.authMode}` };
+      return { data: report, summary: authSummary(report) };
     },
   });
 
@@ -142,6 +188,23 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
   });
 
   return [xAuthStatus, xRateLimitStatus];
+}
+
+/**
+ * The one-line summary, which LEADS WITH THE ACTING ACCOUNT in user mode (docs/04 T6).
+ *
+ * T6 is "wrong-account writes": one profile per process means the account is fixed for the
+ * session, so the defence is making it cheap for an agent to check WHICH account before it
+ * writes. The summary is the part of a result that survives compaction into a transcript, so
+ * the handle goes there and not only into `data.me`. With no handle resolvable (a failed
+ * `/2/users/me`, AUTH-15) the id still pins the identity; app-only has no acting account at
+ * all, and saying so is the point.
+ */
+function authSummary(report: AuthStatusReport): string {
+  if (report.auth_mode !== 'user') return 'auth: app-only (no acting account)';
+  const me = report.me;
+  if (me === undefined) return 'auth: user (account unresolved)';
+  return me.handle !== undefined ? `auth: user @${me.handle}` : `auth: user id ${me.id}`;
 }
 
 /**

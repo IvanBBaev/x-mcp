@@ -1,0 +1,25 @@
+{
+  "data": [
+    {
+      "id": "12",
+      "name": "NASA",
+      "username": "NASA",
+      "created_at": "2007-12-19T20:30:39.000Z",
+      "description": "There's space for everybody.",
+      "location": "Pale Blue Dot",
+      "url": "https://t.co/nasa",
+      "verified": true,
+      "protected": false,
+      "public_metrics": {
+        "followers_count": 74000000,
+        "following_count": 180,
+        "tweet_count": 65000,
+        "listed_count": 92000
+      }
+    }
+  ],
+  "meta": {
+    "result_count": 1,
+    "next_token": "user-search-cursor-3"
+  }
+}

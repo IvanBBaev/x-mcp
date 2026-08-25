@@ -1,6 +1,6 @@
 // Tests for the header-driven rate-limit tracker + preflight (T-115, src/api/ratelimit.ts).
-// Cases: RATE-1…7 and CONC-3 (docs/07-corner-cases.md §4, §13). Time is driven exclusively by
-// the injected fake Clock — the tracker never reads the wall clock.
+// Cases: RATE-1…7, CONC-3, and PLAT-4 (docs/07-corner-cases.md §4, §13, §15). Time is driven
+// exclusively by the injected fake Clock — the tracker never reads the wall clock.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,6 +83,28 @@ test('RATE-3: advancing the clock past a recorded reset flips block → allow (C
 
   clock.advance(20_000); // now == reset → beyond `reset − 5 s`
   assert.equal(rl.preflight(key), null);
+});
+
+test('PLAT-4: sleep/resume — a multi-hour one-step clock jump is recomputed on next use; the expired window no longer blocks', () => {
+  const clock = fakeClock();
+  const rl = createRateLimitTracker(clock);
+  const key = rateLimitKey('GET /2/tweets', 'user');
+
+  // A drained window resetting in the near future: preflight refuses locally.
+  rl.record(key, stdHeaders(clock, { limit: 15, remaining: 0, resetInMs: 60_000 }));
+  assert.ok(rl.preflight(key) instanceof XError, 'blocked before the sleep');
+
+  // The laptop sleeps; on resume the Clock has jumped 6 hours in ONE step. The tracker
+  // holds no timers — block/allow is recomputed from the injected Clock at the point of
+  // use, so the long-expired window simply no longer blocks.
+  clock.advance(6 * 3_600_000);
+  assert.equal(rl.preflight(key), null, 'the pre-sleep window is expired, not stale-blocking');
+  assert.equal(rl.retryDelayMs(key), 0, 'no residual delay from the pre-sleep reset');
+
+  // The status dump reflects the same recomputation (not the stale pre-sleep view).
+  const win = rl.status().buckets.find((b) => b.key === key)?.windows[0];
+  assert.equal(win?.exhausted, false);
+  assert.equal(win?.seconds_until_reset, 0);
 });
 
 test('RATE-4: a response without rate-limit headers leaves tracked state unchanged', () => {

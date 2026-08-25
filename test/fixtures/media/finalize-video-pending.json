@@ -1,0 +1,12 @@
+{
+  "_provenance": "X API v2 POST /2/media/upload/{id}/finalize success envelope for a video: processing continues asynchronously, so processing_info carries state=pending plus check_after_secs. Shape verbatim from docs.x.com/x-api media-upload chunked flow. Captured 2026-07-31. Exercises: MEDIA-3 split (upload returns immediately; the agent polls x_media_status), pending state surfacing.",
+  "data": {
+    "id": "7200",
+    "media_key": "13_7200",
+    "expires_after_secs": 86400,
+    "processing_info": {
+      "state": "pending",
+      "check_after_secs": 1
+    }
+  }
+}

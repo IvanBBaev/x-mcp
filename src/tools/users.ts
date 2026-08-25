@@ -8,7 +8,7 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import { capRawMaxResults, renderUsers } from '../core/render.js';
+import { capRawMaxResults, rawSummary, renderUsers } from '../core/render.js';
 import type { RawListResponse, RawUser } from '../core/render.js';
 import type { BatchResult, CompactUser, Missing } from '../core/render-shapes.js';
 import { classifyUserRef } from '../core/resolve.js';
@@ -73,7 +73,7 @@ export const xUserGet = defineTool({
         data: capped,
         ...(errors.length > 0 ? { errors } : {}),
       };
-      return { data: envelope, summary: `${capped.length} raw user record(s)` };
+      return { data: envelope, summary: rawSummary(`${capped.length} raw user record(s)`) };
     }
 
     // Compact each response, concatenating items + missing and de-duping items by id.
