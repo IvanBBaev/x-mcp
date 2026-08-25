@@ -8,6 +8,10 @@ development chronology lives in `WORKLOG.md`.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-25
+
+First published release on npm as `x-mcp-ai`.
+
 ### Added
 
 - Infrastructure layer for the MCP server: configuration contract (20 `X_MCP_*` environment

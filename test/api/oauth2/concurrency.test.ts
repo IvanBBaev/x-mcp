@@ -401,7 +401,14 @@ test('AUTH-5/CONC-4: SIGKILL between refresh and persist — a fresh process rec
   assert.equal(disk['access_token'], 'rotated-access-2');
   assert.equal(disk['refresh_token'], 'rotated-refresh-2');
   await assert.rejects(fsp.access(lockPath));
-  assert.deepEqual(warnings, []);
+  // This store runs on the REAL `process.platform`, so on Windows it legitimately emits its
+  // two PLAT-2 degradation notices (no POSIX mode bits, no O_NOFOLLOW). Those are the
+  // platform speaking, not this scenario; what the assertion is about is that recovery
+  // itself — reclaim, refresh, persist, release — warned about nothing.
+  assert.deepEqual(
+    warnings.filter((w) => !w.includes('(PLAT-2)')),
+    [],
+  );
 });
 
 // ---------------------------------------------------------------------------

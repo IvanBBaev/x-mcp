@@ -19,7 +19,7 @@ import { renderStructuredResult, toolOutputSchema } from './structured.js';
 
 export const SERVER_NAME = 'x-mcp-ai';
 /** Kept in sync with package.json manually — NodeNext offers no assert-free JSON import. */
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '0.8.0';
 
 /**
  * Server-level usage guidance (MCP-5): identifier forms, the pagination bridge, `raw`

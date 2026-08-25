@@ -8,7 +8,7 @@
 
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { constants as FSC, promises as fsp } from 'node:fs';
+import { constants as FSC, promises as fsp, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
@@ -27,6 +27,87 @@ import {
 import type { FileTokenStoreOptions, TokenFs } from '../../../src/api/oauth2/filestore.js';
 import type { TokenPair } from '../../../src/core/ports.js';
 
+/**
+ * Windows has no POSIX permission bits at all: `stat()` reports a synthetic 0666 for every
+ * entry and `chmod` only toggles the read-only attribute. This suite pins `platform: 'linux'`
+ * on purpose — the POSIX branches are the ones worth exercising on every OS — so on win32 the
+ * MODE dimension, and only that dimension, is simulated through the `TokenFs` seam: modes are
+ * tracked from the `mode` argument the store itself passes to `open`/`mkdir`, `stat` reports
+ * the tracked value, and `h.chmod` updates it. Everything else stays on the real filesystem
+ * exactly as on POSIX — real files, real renames, real `O_EXCL` races, real directory reads.
+ *
+ * Without this the pinned POSIX branch would inspect a directory that always looks
+ * group/other-writable, and every test in the file would fail on the one platform whose
+ * filesystem semantics it is not trying to test.
+ */
+const SIMULATED_MODES = process.platform === 'win32';
+
+/** Mode assumed for a path the suite created directly; every such write uses 0600. */
+const DEFAULT_SIMULATED_MODE = 0o600;
+
+/** `nodeTokenFs` with the mode dimension tracked in `modes` (win32 only — see above). */
+function modeTrackingFs(modes: Map<string, number>): TokenFs {
+  return {
+    async open(path, flags, mode) {
+      const handle = await nodeTokenFs.open(path, flags, mode);
+      if (mode !== undefined && (flags & FSC.O_CREAT) !== 0) modes.set(path, mode);
+      return {
+        readFile: (options) => handle.readFile(options),
+        writeFile: (data, options) => handle.writeFile(data, options),
+        stat: () => Promise.resolve({ mode: modes.get(path) ?? DEFAULT_SIMULATED_MODE }),
+        sync: () => handle.sync(),
+        close: () => handle.close(),
+      };
+    },
+    async rename(oldPath, newPath) {
+      await nodeTokenFs.rename(oldPath, newPath);
+      const mode = modes.get(oldPath);
+      modes.delete(oldPath);
+      modes.set(newPath, mode ?? DEFAULT_SIMULATED_MODE);
+    },
+    async unlink(path) {
+      await nodeTokenFs.unlink(path);
+      modes.delete(path);
+    },
+    async stat(path) {
+      await nodeTokenFs.stat(path); // a genuinely missing path must still throw ENOENT
+      return { mode: modes.get(path) ?? DEFAULT_SIMULATED_MODE };
+    },
+    async mkdir(path, options) {
+      const result = await nodeTokenFs.mkdir(path, options);
+      if (!modes.has(path)) modes.set(path, options.mode);
+      return result;
+    },
+  };
+}
+
+/**
+ * `fs.constants.O_NOFOLLOW` does not exist on win32 — Node defines it only where the kernel
+ * does. The axes that assert refusal-BY-`O_NOFOLLOW` are asserting a kernel guarantee that
+ * platform does not have, so they skip there rather than assert a fiction. The win32
+ * degradation itself is not lost: the PLAT-2 axes cover it by injecting `platform: 'win32'`.
+ */
+const noFollowSkip = process.platform === 'win32' ? 'win32 has no O_NOFOLLOW' : false;
+
+/**
+ * Symlink creation needs a privilege on Windows that CI accounts may not have; probe once so
+ * the symlink axes skip with a reason instead of failing for the wrong cause.
+ */
+const symlinkSkip = ((): string | false => {
+  const target = join(os.tmpdir(), 'x-mcp-filestore-symlink-probe');
+  const link = `${target}-link`;
+  try {
+    writeFileSync(target, 'x');
+    symlinkSync(target, link);
+    return false;
+  } catch {
+    return 'this platform/account cannot create symlinks';
+  } finally {
+    rmSync(link, { force: true });
+    rmSync(target, { force: true });
+  }
+})();
+
 interface Harness {
   readonly dir: string;
   readonly path: string;
@@ -34,6 +115,12 @@ interface Harness {
   readonly clock: ReturnType<typeof fakeClock>;
   readonly sleep: ReturnType<typeof fakeSleep>;
   readonly warnings: string[];
+  /** The `TokenFs` the harness's own stores use — wrap THIS, not `nodeTokenFs`, to inject faults. */
+  readonly fs: TokenFs;
+  /** Permission bits of a path as the store sees them (real on POSIX, tracked on win32). */
+  mode(path: string): Promise<number>;
+  /** Change those bits (a real `chmod` on POSIX, a tracked one on win32). */
+  chmod(path: string, mode: number): Promise<void>;
   store(overrides?: Partial<FileTokenStoreOptions>): ReturnType<typeof createFileTokenStore>;
 }
 
@@ -46,6 +133,9 @@ async function makeHarness(t: TestContext): Promise<Harness> {
   const clock = fakeClock(1_000_000);
   const sleep = fakeSleep(clock);
   const warnings: string[] = [];
+  // mkdtemp already made the directory 0700; seed it so the store's first stat agrees.
+  const modes = new Map<string, number>([[dir, 0o700]]);
+  const fs = SIMULATED_MODES ? modeTrackingFs(modes) : nodeTokenFs;
   return {
     dir,
     path,
@@ -53,12 +143,25 @@ async function makeHarness(t: TestContext): Promise<Harness> {
     clock,
     sleep,
     warnings,
+    fs,
+    async mode(target) {
+      if (SIMULATED_MODES) return modes.get(target) ?? DEFAULT_SIMULATED_MODE;
+      return (await fsp.stat(target)).mode & 0o777;
+    },
+    async chmod(target, mode) {
+      if (SIMULATED_MODES) {
+        modes.set(target, mode);
+        return;
+      }
+      await fsp.chmod(target, mode);
+    },
     store(overrides) {
       return createFileTokenStore({
         path,
         clock,
         sleep: sleep.fn,
         platform: 'linux',
+        fs,
         warn: (message) => warnings.push(message),
         ...overrides,
       });
@@ -92,10 +195,6 @@ async function assertAuthError(promise: Promise<unknown>, ...fragments: string[]
   return caught;
 }
 
-async function fileMode(path: string): Promise<number> {
-  return (await fsp.stat(path)).mode & 0o777;
-}
-
 async function writeLockFile(lockPath: string, content: string): Promise<void> {
   await fsp.writeFile(lockPath, content, { encoding: 'utf8', mode: 0o600 });
 }
@@ -108,7 +207,7 @@ test('T1: persist writes the token file with mode 0600 and load round-trips the 
   const h = await makeHarness(t);
   const store = h.store();
   await store.persist(PAIR);
-  assert.equal(await fileMode(h.path), 0o600);
+  assert.equal(await h.mode(h.path), 0o600);
   const loaded = await store.load();
   assert.ok(loaded !== null);
   assert.equal(loaded.access_token, PAIR.access_token);
@@ -157,7 +256,7 @@ test('T1: token file wider than 0600 warns once across repeated loads', async (t
   const h = await makeHarness(t);
   const store = h.store();
   await store.persist(PAIR);
-  await fsp.chmod(h.path, 0o644);
+  await h.chmod(h.path, 0o644);
   await store.load();
   await store.load();
   const permWarnings = h.warnings.filter((w) => w.includes('chmod 600'));
@@ -170,12 +269,12 @@ test('SEC-T13: group/other-writable token directory is refused by load and persi
   const h = await makeHarness(t);
   const store = h.store();
   await store.persist(PAIR);
-  await fsp.chmod(h.dir, 0o770);
+  await h.chmod(h.dir, 0o770);
   await assertAuthError(store.load(), h.dir, 'chmod 700');
   await assertAuthError(store.persist(PAIR), h.dir, 'chmod 700');
-  await fsp.chmod(h.dir, 0o777);
+  await h.chmod(h.dir, 0o777);
   await assertAuthError(store.load(), h.dir, 'chmod 700');
-  await fsp.chmod(h.dir, 0o700); // restore for cleanup
+  await h.chmod(h.dir, 0o700); // restore for cleanup
 });
 
 // ---------------------------------------------------------------------------
@@ -186,8 +285,8 @@ test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warni
   const h = await makeHarness(t);
   const store = h.store({ platform: 'win32' });
   await store.persist(PAIR);
-  await fsp.chmod(h.dir, 0o777); // would be refused on POSIX
-  await fsp.chmod(h.path, 0o644); // would warn on POSIX
+  await h.chmod(h.dir, 0o777); // would be refused on POSIX
+  await h.chmod(h.path, 0o644); // would warn on POSIX
   assert.ok((await store.load()) !== null); // no refusal on win32
   await store.load();
   const permsWarnings = h.warnings.filter((w) => w.includes('POSIX permission checks'));
@@ -196,87 +295,117 @@ test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warni
     h.warnings.filter((w) => w.includes('chmod 600')).length,
     0, // the file-perms warning must not fire on win32
   );
-  await fsp.chmod(h.dir, 0o700);
+  await h.chmod(h.dir, 0o700);
 });
 
-test('PLAT-2: O_NOFOLLOW is omitted from open flags on win32 with a one-time warning', async (t) => {
-  const h = await makeHarness(t);
-  const openFlags: number[] = [];
-  const recordingFs: TokenFs = {
-    ...nodeTokenFs,
-    open: (path, flags, mode) => {
-      openFlags.push(flags);
-      return nodeTokenFs.open(path, flags, mode);
-    },
-  };
+test(
+  'PLAT-2: O_NOFOLLOW is omitted from open flags on win32 with a one-time warning',
+  {
+    skip: noFollowSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const openFlags: number[] = [];
+    const recordingFs: TokenFs = {
+      ...h.fs,
+      open: (path, flags, mode) => {
+        openFlags.push(flags);
+        return h.fs.open(path, flags, mode);
+      },
+    };
 
-  const posixStore = h.store({ fs: recordingFs });
-  await posixStore.persist(PAIR);
-  assert.ok(openFlags.every((f) => (f & FSC.O_NOFOLLOW) !== 0));
+    const posixStore = h.store({ fs: recordingFs });
+    await posixStore.persist(PAIR);
+    assert.ok(openFlags.every((f) => (f & FSC.O_NOFOLLOW) !== 0));
 
-  openFlags.length = 0;
-  const winStore = h.store({ platform: 'win32', fs: recordingFs });
-  await winStore.persist(PAIR);
-  await winStore.load();
-  assert.ok(openFlags.length > 0);
-  assert.ok(openFlags.every((f) => (f & FSC.O_NOFOLLOW) === 0));
-  assert.equal(h.warnings.filter((w) => w.includes('O_NOFOLLOW')).length, 1);
-});
+    openFlags.length = 0;
+    const winStore = h.store({ platform: 'win32', fs: recordingFs });
+    await winStore.persist(PAIR);
+    await winStore.load();
+    assert.ok(openFlags.length > 0);
+    assert.ok(openFlags.every((f) => (f & FSC.O_NOFOLLOW) === 0));
+    assert.equal(h.warnings.filter((w) => w.includes('O_NOFOLLOW')).length, 1);
+  },
+);
 
 // ---------------------------------------------------------------------------
 // SEC-T13: symlink refusal on the token path
 // ---------------------------------------------------------------------------
 
-test('SEC-T13: a symlinked token file is refused on load and the target is never read', async (t) => {
-  const h = await makeHarness(t);
-  const target = join(h.dir, 'victim.json');
-  await fsp.writeFile(target, JSON.stringify({ version: 1, access_token: 'stolen' }), {
-    mode: 0o600,
-  });
-  await fsp.symlink(target, h.path);
-  await assertAuthError(h.store().load(), h.path, 'symbolic link', 'refusing');
-});
+test(
+  'SEC-T13: a symlinked token file is refused on load and the target is never read',
+  {
+    skip: noFollowSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const target = join(h.dir, 'victim.json');
+    await fsp.writeFile(target, JSON.stringify({ version: 1, access_token: 'stolen' }), {
+      mode: 0o600,
+    });
+    await fsp.symlink(target, h.path);
+    await assertAuthError(h.store().load(), h.path, 'symbolic link', 'refusing');
+  },
+);
 
-test('SEC-T13: persist over a symlinked token path replaces the link and never writes through it', async (t) => {
-  const h = await makeHarness(t);
-  const target = join(h.dir, 'victim.txt');
-  await fsp.writeFile(target, 'victim-content', { mode: 0o600 });
-  await fsp.symlink(target, h.path);
-  const store = h.store();
-  await store.persist(PAIR);
-  // rename() replaced the symlink itself with the real tmp file...
-  const stat = await fsp.lstat(h.path);
-  assert.equal(stat.isSymbolicLink(), false);
-  // ...and the symlink target was never written through.
-  assert.equal(await fsp.readFile(target, 'utf8'), 'victim-content');
-  const loaded = await store.load();
-  assert.equal(loaded?.access_token, PAIR.access_token);
-});
+test(
+  'SEC-T13: persist over a symlinked token path replaces the link and never writes through it',
+  {
+    skip: symlinkSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const target = join(h.dir, 'victim.txt');
+    await fsp.writeFile(target, 'victim-content', { mode: 0o600 });
+    await fsp.symlink(target, h.path);
+    const store = h.store();
+    await store.persist(PAIR);
+    // rename() replaced the symlink itself with the real tmp file...
+    const stat = await fsp.lstat(h.path);
+    assert.equal(stat.isSymbolicLink(), false);
+    // ...and the symlink target was never written through.
+    assert.equal(await fsp.readFile(target, 'utf8'), 'victim-content');
+    const loaded = await store.load();
+    assert.equal(loaded?.access_token, PAIR.access_token);
+  },
+);
 
-test('SEC-T13: a symlink planted at the first tmp candidate is skipped, its target untouched', async (t) => {
-  const h = await makeHarness(t);
-  const target = join(h.dir, 'plant-target.txt');
-  await fsp.writeFile(target, 'plant-content', { mode: 0o600 });
-  // The first candidate name is deterministic: `${path}.${pid}.0.tmp`.
-  await fsp.symlink(target, `${h.path}.${process.pid}.0.tmp`);
-  const store = h.store();
-  await store.persist(PAIR); // O_EXCL|O_NOFOLLOW refuses the plant; the next seq succeeds
-  assert.equal(await fsp.readFile(target, 'utf8'), 'plant-content');
-  const loaded = await store.load();
-  assert.equal(loaded?.access_token, PAIR.access_token);
-});
+test(
+  'SEC-T13: a symlink planted at the first tmp candidate is skipped, its target untouched',
+  {
+    skip: symlinkSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const target = join(h.dir, 'plant-target.txt');
+    await fsp.writeFile(target, 'plant-content', { mode: 0o600 });
+    // The first candidate name is deterministic: `${path}.${pid}.0.tmp`.
+    await fsp.symlink(target, `${h.path}.${process.pid}.0.tmp`);
+    const store = h.store();
+    await store.persist(PAIR); // O_EXCL|O_NOFOLLOW refuses the plant; the next seq succeeds
+    assert.equal(await fsp.readFile(target, 'utf8'), 'plant-content');
+    const loaded = await store.load();
+    assert.equal(loaded?.access_token, PAIR.access_token);
+  },
+);
 
-test('SEC-T13: persist fails closed when every tmp candidate is occupied, targets untouched', async (t) => {
-  const h = await makeHarness(t);
-  const target = join(h.dir, 'plant-target.txt');
-  await fsp.writeFile(target, 'plant-content', { mode: 0o600 });
-  for (let seq = 0; seq < 3; seq += 1) {
-    await fsp.symlink(target, `${h.path}.${process.pid}.${seq}.tmp`);
-  }
-  await assertAuthError(h.store().persist(PAIR), 'NOT saved', '*.tmp');
-  assert.equal(await fsp.readFile(target, 'utf8'), 'plant-content');
-  await assert.rejects(fsp.access(h.path)); // the token file was never created
-});
+test(
+  'SEC-T13: persist fails closed when every tmp candidate is occupied, targets untouched',
+  {
+    skip: symlinkSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const target = join(h.dir, 'plant-target.txt');
+    await fsp.writeFile(target, 'plant-content', { mode: 0o600 });
+    for (let seq = 0; seq < 3; seq += 1) {
+      await fsp.symlink(target, `${h.path}.${process.pid}.${seq}.tmp`);
+    }
+    await assertAuthError(h.store().persist(PAIR), 'NOT saved', '*.tmp');
+    assert.equal(await fsp.readFile(target, 'utf8'), 'plant-content');
+    await assert.rejects(fsp.access(h.path)); // the token file was never created
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Atomicity of persist (crash / failure between tmp write and rename)
@@ -286,13 +415,13 @@ test('a rename failure leaves the previous pair intact and the store recovers on
   const h = await makeHarness(t);
   let failNext = false;
   const faultyFs: TokenFs = {
-    ...nodeTokenFs,
+    ...h.fs,
     rename: (oldPath, newPath) => {
       if (failNext) {
         failNext = false;
         return Promise.reject(Object.assign(new Error('injected'), { code: 'EIO' }));
       }
-      return nodeTokenFs.rename(oldPath, newPath);
+      return h.fs.rename(oldPath, newPath);
     },
   };
   const store = h.store({ fs: faultyFs });
@@ -329,22 +458,22 @@ test('stray tmp leftovers from a dead process never block persist or load', asyn
 // PLAT-1: win32 rename-over-open-file semantics
 // ---------------------------------------------------------------------------
 
-function renameFailingFs(codes: string[]): TokenFs {
+function renameFailingFs(base: TokenFs, codes: string[]): TokenFs {
   return {
-    ...nodeTokenFs,
+    ...base,
     rename: (oldPath, newPath) => {
       const code = codes.shift();
       if (code !== undefined) {
         return Promise.reject(Object.assign(new Error(`injected ${code}`), { code }));
       }
-      return nodeTokenFs.rename(oldPath, newPath);
+      return base.rename(oldPath, newPath);
     },
   };
 }
 
 test('PLAT-1: win32 rename EPERM is retried briefly and then succeeds', async (t) => {
   const h = await makeHarness(t);
-  const store = h.store({ platform: 'win32', fs: renameFailingFs(['EPERM', 'EBUSY']) });
+  const store = h.store({ platform: 'win32', fs: renameFailingFs(h.fs, ['EPERM', 'EBUSY']) });
   await store.persist(PAIR);
   assert.deepEqual(h.sleep.calls, [WIN32_RENAME_DELAY_MS, WIN32_RENAME_DELAY_MS]);
   assert.equal((await store.load())?.access_token, PAIR.access_token);
@@ -353,7 +482,7 @@ test('PLAT-1: win32 rename EPERM is retried briefly and then succeeds', async (t
 test('PLAT-1: persistent win32 rename failure surfaces a typed auth error after bounded retries', async (t) => {
   const h = await makeHarness(t);
   const codes = Array.from({ length: WIN32_RENAME_ATTEMPTS }, () => 'EPERM');
-  const store = h.store({ platform: 'win32', fs: renameFailingFs(codes) });
+  const store = h.store({ platform: 'win32', fs: renameFailingFs(h.fs, codes) });
   await assertAuthError(
     store.persist(PAIR),
     h.path,
@@ -370,7 +499,7 @@ test('PLAT-1: persistent win32 rename failure surfaces a typed auth error after 
 
 test('PLAT-1: rename failures are NOT retried on POSIX platforms', async (t) => {
   const h = await makeHarness(t);
-  const store = h.store({ platform: 'linux', fs: renameFailingFs(['EPERM']) });
+  const store = h.store({ platform: 'linux', fs: renameFailingFs(h.fs, ['EPERM']) });
   await assertAuthError(store.persist(PAIR), h.path);
   assert.equal(h.sleep.calls.length, 0); // one attempt, no retry sleeps
 });
@@ -384,7 +513,7 @@ test('withLock creates the lock 0600 with {pid, timestamp}, removes it on succes
   const store = h.store();
   let observed: { pid: number; timestamp: number } | undefined;
   const result = await store.withLock(async () => {
-    assert.equal(await fileMode(h.lockPath), 0o600);
+    assert.equal(await h.mode(h.lockPath), 0o600);
     observed = JSON.parse(await fsp.readFile(h.lockPath, 'utf8')) as {
       pid: number;
       timestamp: number;
@@ -537,21 +666,27 @@ test('AUTH-5: release leaves a lock that no longer looks like ours and warns ins
   assert.equal(h.warnings.filter((w) => w.includes('not removing the refresh lock')).length, 1);
 });
 
-test('SEC-T13: a symlinked lock file is never followed — fail closed, target intact', async (t) => {
-  const h = await makeHarness(t);
-  const target = join(h.dir, 'lock-target.json');
-  const targetContent = JSON.stringify({ pid: 99999, timestamp: 0 }); // would look stale+dead
-  await fsp.writeFile(target, targetContent, { mode: 0o600 });
-  await fsp.symlink(target, h.lockPath);
-  const store = h.store({ isPidAlive: () => false });
-  // O_NOFOLLOW makes the read fail → 'unreadable' → never reclaimed, fail closed.
-  await assertAuthError(
-    store.withLock(() => Promise.resolve()),
-    'failing closed',
-  );
-  assert.equal(await fsp.readFile(target, 'utf8'), targetContent);
-  assert.equal((await fsp.lstat(h.lockPath)).isSymbolicLink(), true);
-});
+test(
+  'SEC-T13: a symlinked lock file is never followed — fail closed, target intact',
+  {
+    skip: noFollowSkip,
+  },
+  async (t) => {
+    const h = await makeHarness(t);
+    const target = join(h.dir, 'lock-target.json');
+    const targetContent = JSON.stringify({ pid: 99999, timestamp: 0 }); // would look stale+dead
+    await fsp.writeFile(target, targetContent, { mode: 0o600 });
+    await fsp.symlink(target, h.lockPath);
+    const store = h.store({ isPidAlive: () => false });
+    // O_NOFOLLOW makes the read fail → 'unreadable' → never reclaimed, fail closed.
+    await assertAuthError(
+      store.withLock(() => Promise.resolve()),
+      'failing closed',
+    );
+    assert.equal(await fsp.readFile(target, 'utf8'), targetContent);
+    assert.equal((await fsp.lstat(h.lockPath)).isSymbolicLink(), true);
+  },
+);
 
 test('withLock returns the callback value and rethrows its error unchanged', async (t) => {
   const h = await makeHarness(t);

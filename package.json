@@ -1,6 +1,6 @@
 {
   "name": "x-mcp-ai",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "mcpName": "io.github.IvanBBaev/x-mcp-ai",
   "description": "Safety-first MCP server exposing the X (Twitter) API v2 as typed, policy-gated tools, with a two-axis policy model and 2026 pay-per-use cost controls.",
   "license": "MIT",

@@ -167,20 +167,30 @@ test('MCP-3: stdin EOF flushes a large buffered response instead of truncating i
   assert.equal(listResponse.result?.tools?.length, 41);
 });
 
-test('MCP-3: SIGTERM after startup exits cleanly with code 0', async () => {
-  const child = spawnServer(['serve'], VALID_ENV);
-  const reader = lineReader(child.stdout);
+// Windows has no POSIX signals: `child.kill('SIGTERM')` there is an unconditional
+// `TerminateProcess`, so the server's handler can never run and the child always dies
+// by-signal. Nothing in this repo can change that — the axis asserts a POSIX kernel
+// guarantee, so it skips rather than assert a fiction (docs/13 §Windows).
+test(
+  'MCP-3: SIGTERM after startup exits cleanly with code 0',
+  {
+    skip: process.platform === 'win32' ? 'win32 kills unconditionally — no SIGTERM handler' : false,
+  },
+  async () => {
+    const child = spawnServer(['serve'], VALID_ENV);
+    const reader = lineReader(child.stdout);
 
-  // Wait for the initialize response so the signal lands on a fully-started server.
-  child.stdin.write(frame(INITIALIZE));
-  await responseWithId(reader, 1);
+    // Wait for the initialize response so the signal lands on a fully-started server.
+    child.stdin.write(frame(INITIALIZE));
+    await responseWithId(reader, 1);
 
-  child.kill('SIGTERM');
-  const [code, signal] = (await once(child, 'exit')) as [number | null, string | null];
-  // The handler exits deliberately (process.exit(0)) — NOT death-by-signal.
-  assert.equal(code, 0);
-  assert.equal(signal, null);
-});
+    child.kill('SIGTERM');
+    const [code, signal] = (await once(child, 'exit')) as [number | null, string | null];
+    // The handler exits deliberately (process.exit(0)) — NOT death-by-signal.
+    assert.equal(code, 0);
+    assert.equal(signal, null);
+  },
+);
 
 test('CFG-5: an invalid environment yields one fatal stderr line, empty stdout, exit 1', async () => {
   const child = spawnServer(['serve'], {

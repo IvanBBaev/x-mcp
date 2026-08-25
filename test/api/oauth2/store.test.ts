@@ -88,8 +88,14 @@ test('CFG-2: oauth2 + X_MCP_TOKEN_FILE builds a FILE store at exactly that path'
 
 test('CFG-2: oauth2 with no explicit file still gets a store, on the resolved default path', () => {
   const { clock, sleep } = ports();
-  const config = parseConfig({ XDG_CONFIG_HOME: '/tmp/x-mcp-does-not-need-to-exist' });
-  assert.equal(config.tokenFile, join('/tmp/x-mcp-does-not-need-to-exist', 'x-mcp', 'tokens.json'));
+  // The default base is per-platform (PLAT-3): %APPDATA% on win32, $XDG_CONFIG_HOME
+  // elsewhere. Assert whichever branch THIS platform takes — hardcoding the POSIX answer
+  // only ever proved that the runner was POSIX, and fails on the one OS where the other
+  // branch is the code under test.
+  const win32 = process.platform === 'win32';
+  const base = win32 ? 'C:\\x-mcp-does-not-need-to-exist' : '/tmp/x-mcp-does-not-need-to-exist';
+  const config = parseConfig(win32 ? { APPDATA: base } : { XDG_CONFIG_HOME: base });
+  assert.equal(config.tokenFile, join(base, 'x-mcp', 'tokens.json'));
   // Construction alone touches no filesystem, so this is safe to assert without writing.
   assert.ok(createConfiguredTokenStore(config, clock, sleep) !== undefined);
 });
