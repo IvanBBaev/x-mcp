@@ -55,7 +55,7 @@ for **every** finding in the six reviews.
 | WP-0.6 | M | **Security fold-in.** T10–T17 into docs/04; authorize-flow spec (CSRF `state`, loopback one-shot listener); Authorization host-scoping; media default-deny + realpath/`O_NOFOLLOW`/same-fd; untrusted-content hardening (all third-party text, zero-width/bidi stripping, length caps, honest "does not prevent injection" note); redaction list expansion; kill-chain scenarios as appendix. | SEC-F3/F4/F6/F7/F8/F11 |
 | WP-0.7 | S | **Testing doc update.** Injection seams (Clock/Sleep/Random/TokenStore/dispatcher/parseConfig/registry-as-data); MCP-protocol layer (InMemoryTransport + spawn smoke); per-file coverage + coverage-guard port; fixture provenance + monthly refresh; live-suite spend rules under pay-per-use. | QA-F1/F3/F5/F8/F9 |
 | WP-0.8 | S | **Release/versioning policy into docs/05 + README.** Public-API definition, 0.x plan, CHANGELOG with "Platform changes absorbed" section, tag-gated publish with provenance, `server.json` lockstep guard, bin subcommand dispatcher (`server` default / `authorize` / `doctor`), "Where are the logs?" table, README pins exact versions during 0.x. Plus: token-file `version` migration rule (file newer than the server understands → refuse with an upgrade instruction, never guess) and the post-1.0 tool **deprecation flow** (deprecation note in the description for ≥ 1 minor, removal only at the next major). | OPS-F2/F3/F4/F8/F9 |
-| WP-0.9 | S | **Reserve the npm name — do not wait for Phase 1.** Create the GitHub repo, `git init` (harness files into `.git/info/exclude` first), add the MIT `LICENSE` file (README promises it; npm needs it), minimal CI, publish `x-mcp-ai@0.0.1` placeholder (README-only, "design phase — do not use") **from CI with `--provenance`**. Name verified available 2026-07-21; availability is perishable. | OPS-F13 |
+| WP-0.9 | S | **Reserve the npm name — do not wait for Phase 1.** Create the GitHub repo, `git init` (harness files into `.git/info/exclude` first), add the MIT `LICENSE` file (README promises it; npm needs it), minimal CI, publish `x-mcp-ai@0.0.1` placeholder (README-only, "design phase — do not use") **from CI with `--provenance`**. Name verified available 2026-07-21; availability is perishable. **Closed 2026-08-25 by outcome, not execution** — the `0.0.1` placeholder was never published; the name was claimed by the real `v0.8.0` release from `publish.yml` with provenance. | OPS-F13 |
 | WP-0.10 | S | **Availability-detection spec.** Pay-per-use killed 403-based tier inference (old docs/01 §3), but WP-3.5 still needs to know what the account can reach. Define the mechanism: explicit `X_MCP_AVAILABILITY` env (conservative default), surfaced in `auth_status`, consumed by the registry to gate `pilot`/`premium-user`/`enterprise` registration (archive & `user_search` are `app+user`, budget-guarded — not gated); `doctor` may probe one gated endpoint on request. Include a fact-check: does `GET /2/usage/tweets` (or a credits/usage endpoint) still exist under pay-per-use → feeds WP-3.11. | X-F1 follow-up |
 
 **Exit gate 0R:** every review finding dispositioned; docs/01–06 internally
@@ -83,9 +83,9 @@ endpoint**, and every Phase-1 testability seam is in from day one.
 
 **Exit gate 1:** all `P1` corner cases referenced by passing tests; coverage gate at
 family thresholds; CI green on all four OS legs incl. Windows; spawn smoke +
-InMemoryTransport suites green; `billing` fixture is real, not guessed; tag
-`v0.1.0` published over the placeholder via the tag-gated pipeline (exercises
-release chain early — OPS-F2).
+InMemoryTransport suites green; `billing` fixture is real, not guessed; release
+chain exercised end to end — satisfied 2026-08-25 by `v0.8.0`, the first publish
+of the name, from the tag-gated pipeline with provenance (OPS-F2).
 
 ---
 
@@ -125,12 +125,14 @@ waiter-adopts-disk-pair) plus kill-9 recovery green on all OS legs; changelog's
 | WP-3.10 | M | **Operator docs & repo hygiene.** README rewritten for users, not designers: per-client setup (Claude Desktop, Claude Code, VS Code, Cursor), troubleshooting, an explicit "this server spends real money" pricing section; privacy/data-handling statement (fetched content incl. DM bodies reaches the model host — SEC-F7); `SECURITY.md` vulnerability-disclosure policy; issue templates; client compatibility matrix verified against MCP Inspector + at least two real clients. | 3.9 |
 | WP-3.11 | S | **Usage/credits tool go/no-go.** If WP-0.10's fact-check confirms a usage/credits endpoint under pay-per-use, ship `x_usage_get` (real platform spend beside the local session estimate — closes the loop on COST-1); otherwise drop it from the catalog with a dated note. | 0.10, Phase 2 |
 | WP-3.12 | M | **Acceptance & hardening.** The three agent-DX walkthroughs (thread+image, mentions triage, most-engaged) scripted as e2e scenario tests over fixtures; scheduled fuzz job on tool inputs (QA-F15) + one informational mutation-testing run over `core/*` (QA-F14); **implementation re-audit against the threat model** — walk T1–T17 and kill-chains A–D against the real code, not the design; ≥ 1 week of dogfooding as a daily driver. | 3.1–3.10 |
-| WP-3.13 | S | **1.0.0 release.** Full chain: tag → publish `--provenance` → `publish-mcp.yml` → MCP registry with `isSecret` env markers; `server.json` lockstep guard green; contract-fixture suite frozen as the semver baseline; placeholder README replaced; version pins in README dropped (1.0 floats). | 3.1–3.12 |
+| WP-3.13 | S | **1.0.0 release.** Full chain: tag → publish `--provenance` → `publish-mcp.yml` → MCP registry with `isSecret` env markers; `server.json` lockstep guard green; contract-fixture suite frozen as the semver baseline; the tag → npm-with-provenance half is already proven by `v0.8.0`; 1.0.0 adds the `publish-mcp.yml` → MCP-registry link and drops the README version pins (1.0 floats). | 3.1–3.12 |
 
 **Exit gate 3:** all `P3` corner cases referenced; drift and context-size CI gates
 green; compatibility matrix documented; scenario suite and threat-model re-audit
-done; 1.0.0 on npm with provenance badge and the registry listing verified. The
-"1.0 acceptance checklist" below is the gate's full definition.
+done; 1.0.0 on npm with provenance badge and the registry listing verified (the
+provenance pipeline itself is verified as of `v0.8.0`; what remains for the gate is
+the 1.0.0 tag and the registry listing). The "1.0 acceptance checklist" below is
+the gate's full definition.
 
 > **Closed against this gate (2026-08-09).** The gate said nothing explicit about
 > tool-surface completeness while the phase tables implied the full catalogue ships in P3 —
@@ -217,11 +219,14 @@ above; this is the single list to walk before tagging:
 - [ ] Final platform fact-check (`llms.txt` + changelog) dated within release week.
       *By construction cannot be ticked early — it is dated work, part of H5.*
 - [ ] npm provenance badge + MCP registry listing verified; `server.json` lockstep
-      guard green. *Guard half done: `npm run gate:manifest`
+      guard green. *Guard green: `npm run gate:manifest`
       (`scripts/server-json-guard.mjs`) verifies version lockstep across all three
       places, transport shape, credential marking, and that every advertised env var
-      is one `src/core/config.ts` actually reads. The npm and registry halves are
-      checkpoint H1.*
+      is one `src/core/config.ts` actually reads. The npm provenance half is done —
+      `x-mcp-ai@0.8.0` published 2026-08-25 from `publish.yml` with `--provenance`.
+      Only the MCP Registry listing remains: it needs `publish-mcp.yml` or one
+      manual `mcp-publisher` run, plus human verification of the `isSecret`
+      markers.*
 
 ## Human checkpoints
 
@@ -233,30 +238,26 @@ machine-verifiable and gated by `npm run check` plus the CI legs.
 
 Order matters: **T-001 unblocks the CI legs**, which unblock everything else.
 
-### H1 — T-001: npm name and provenance placeholder
+### H1 — T-001: npm name and provenance publish *(closed 2026-08-25)*
 
-Status as of 2026-08-07, measured rather than assumed: the GitHub repo **does**
-exist and is public at `github.com/IvanBBaev/x-mcp`, CodeQL and Dependabot are live,
-and CI is green. Two things are nevertheless still open.
+Status as of 2026-08-25: **closed**.
 
-- **The npm name is not reserved.** `npm view x-mcp-ai` returns 404, so the `0.0.1`
-  placeholder publish was never done. Publish it **from CI**, not from a laptop —
-  provenance attestation requires the workflow identity — after adding an npm
-  automation token as the `NPM_TOKEN` repository secret.
-- **The current gate set has never run remotely.** The green runs are all against
-  the initial commit's simpler workflow (`coverage`, Node 22, Node 24). Everything
-  since — the four-way `check` matrix incl. Windows, `audit`, `launcher-node12`,
-  `tarball-smoke`, the fuzz schedule, and the drift/context-size gates — exists only
-  in the working tree. Until that lands on the remote, those gates are green in
-  local runs only.
+- **The npm name is owned.** `x-mcp-ai@0.8.0` was published 2026-08-25 from CI
+  (tag `v0.8.0`) with `--provenance` and the `NPM_TOKEN` repository secret. The
+  `0.0.1` placeholder step was skipped as overtaken by events — the name was
+  claimed directly by the real release.
+- **The full gate set now runs remotely.** The four-way `check` matrix incl.
+  Windows, `audit`, `launcher-node12`, `tarball-smoke` and the drift gates are
+  green on `main`, and the publish job re-ran the whole `check` gate via
+  `prepublishOnly`.
 
 Naming note: the repo is `x-mcp` and the npm package is `x-mcp-ai`. That is a legal
 combination, and `server.json` now points `repository.url` at the repo that actually
 exists. If the repo is renamed to match the package, `server.json` and the README
 badges must be updated in the same change.
 
-Done when: the npm badge shows provenance, and the Actions tab shows the full gate
-set green on a commit that contains it.
+Done: 2026-08-25 — `x-mcp-ai@0.8.0` on npm with a provenance attestation, and the
+full gate set green on `main`.
 
 ### H2 — T-132: live capture and fixture spot-check
 
@@ -295,11 +296,11 @@ value is precisely that it is unhurried.
 
 ### H5 — T-322: the release itself
 
-Walk the checklist above, bump the version in the three places that must agree
-(`package.json`, `SERVER_VERSION` in `src/mcp/server.ts`, and `server.json` — twice,
-at `version` and `packages[0].version`; the lockstep guard enforces this), tag, let
-CI publish with `--provenance`, then verify the MCP registry listing renders the
-`isSecret` env markers.
+Walk the checklist above, bump the version everywhere it is written
+(`package.json` + `package-lock.json`, `SERVER_VERSION` in `src/mcp/server.ts`, and
+`server.json` — twice, at `version` and `packages[0].version`; the lockstep guard
+enforces this), tag, let CI publish with `--provenance` (mechanics proven by
+`v0.8.0`), then verify the MCP registry listing renders the `isSecret` env markers.
 
 ### Client verification
 
@@ -316,7 +317,8 @@ document is the matrix, this section is the sequence.
 3. **OAuth1?** Phase 3, default **drop** unless a blocked use-case materializes
    (WP-3.6). **Resolved NO-GO 2026-07-31 (T-307)** —
    `docs/decisions/0001-oauth1-go-no-go.md`.
-4. **npm name?** `x-mcp-ai`, reserved in WP-0.9 — this week, not "later".
+4. **npm name?** `x-mcp-ai` — owned and published; first release `0.8.0` on
+   2026-08-25.
 
 ## Top risks
 

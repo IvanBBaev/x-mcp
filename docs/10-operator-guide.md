@@ -24,10 +24,32 @@ itself authenticated.
 
 ## 2. Install
 
-> **Not published to npm yet.** The name `x-mcp-ai` is reserved pending the 1.0.0 release,
-> so `npx -y x-mcp-ai` does **not** work today. Install from the repository. Once the
-> package is published, the client snippets below become
-> `"command": "npx", "args": ["-y", "x-mcp-ai@<version>"]` with nothing else changed.
+> **Published on npm as `x-mcp-ai`** (currently `0.8.0`, released from CI with npm
+> provenance). The fastest install is `npx -y x-mcp-ai@0.8.0` — pin the exact version while
+> the project is on `0.x`, because an unpinned `npx -y x-mcp-ai` fetches the newest publish
+> on every cold start. Installing from the repository remains supported for development.
+
+Nothing to clone or build — `npx` fetches the pinned version on first spawn. Smoke test,
+no API calls and no billing:
+
+```bash
+npx -y x-mcp-ai@0.8.0 doctor
+```
+
+Four equivalent ways to invoke the server — pick one and use it consistently in
+your client config:
+
+| Invocation | When to use |
+|---|---|
+| `npx -y x-mcp-ai@0.8.0` | Recommended. No checkout, no build, pinned version. |
+| `node /abs/path/to/x-mcp/build/src/index.js` | Local checkout. Fewest moving parts, no npm resolution at spawn time. |
+| `node /abs/path/to/x-mcp/bin/x-mcp-ai.cjs` | Local checkout through the packaged launcher (adds the Node-version guard). |
+| `npx /abs/path/to/x-mcp` | Resolves the `bin` entry from the local checkout; slower to start. |
+
+On Windows use the native path form and escape backslashes in JSON
+(`"C:\\path\\to\\x-mcp\\build\\src\\index.js"`).
+
+### From source
 
 ```bash
 git clone https://github.com/IvanBBaev/x-mcp.git
@@ -36,19 +58,7 @@ npm ci
 npm run build          # tsc → build/src/index.js
 ```
 
-Three equivalent ways to invoke the built server — pick one and use it consistently in
-your client config:
-
-| Invocation | When to use |
-|---|---|
-| `node /abs/path/to/x-mcp/build/src/index.js` | Recommended. Fewest moving parts, no npm resolution at spawn time. |
-| `node /abs/path/to/x-mcp/bin/x-mcp-ai.cjs` | Same thing through the packaged launcher (adds the Node-version guard). |
-| `npx /abs/path/to/x-mcp` | Resolves the `bin` entry from the local checkout; slower to start. |
-
-On Windows use the native path form and escape backslashes in JSON
-(`"C:\\path\\to\\x-mcp\\build\\src\\index.js"`).
-
-Quick smoke test, no API calls and no billing:
+Quick smoke test against the built tree, no API calls and no billing:
 
 ```bash
 node build/src/index.js doctor
@@ -114,8 +124,8 @@ Windows: `%APPDATA%\Claude\claude_desktop_config.json`.
 {
   "mcpServers": {
     "x": {
-      "command": "node",
-      "args": ["/abs/path/to/x-mcp/build/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "x-mcp-ai@0.8.0"],
       "env": {
         "X_MCP_AUTH_MODE": "oauth2",
         "X_MCP_CLIENT_ID": "your-oauth2-client-id",
@@ -127,6 +137,10 @@ Windows: `%APPDATA%\Claude\claude_desktop_config.json`.
   }
 }
 ```
+
+This and every snippet below spawn the published package. The local-checkout form —
+`"command": "node", "args": ["/abs/path/to/x-mcp/build/src/index.js"]` — still works for
+development, with the same `env` map.
 
 Restart Claude Desktop after editing. The server writes nothing to stdout except JSON-RPC;
 diagnostics go to stderr and land in the client's MCP log.
@@ -141,7 +155,7 @@ claude mcp add x \
   --env X_MCP_POLICY=read-only \
   --env X_MCP_CREDIT_BUDGET=5.00 \
   --env X_MCP_BUDGET_MODE=hard \
-  -- node /abs/path/to/x-mcp/build/src/index.js
+  -- npx -y x-mcp-ai@0.8.0
 ```
 
 Everything after `--` is the command line to spawn. Use `--scope project` to write a
@@ -154,8 +168,8 @@ Project-scoped `.mcp.json` has the same shape as the Claude Desktop file:
 {
   "mcpServers": {
     "x": {
-      "command": "node",
-      "args": ["/abs/path/to/x-mcp/build/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "x-mcp-ai@0.8.0"],
       "env": { "X_MCP_POLICY": "read-only" }
     }
   }
@@ -182,8 +196,8 @@ and an explicit transport `type`, and can prompt for secrets via `inputs`:
   "servers": {
     "x": {
       "type": "stdio",
-      "command": "node",
-      "args": ["/abs/path/to/x-mcp/build/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "x-mcp-ai@0.8.0"],
       "env": {
         "X_MCP_AUTH_MODE": "oauth2",
         "X_MCP_CLIENT_ID": "${input:x-client-id}",
@@ -204,8 +218,8 @@ and an explicit transport `type`, and can prompt for secrets via `inputs`:
 {
   "mcpServers": {
     "x": {
-      "command": "node",
-      "args": ["/abs/path/to/x-mcp/build/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "x-mcp-ai@0.8.0"],
       "env": {
         "X_MCP_AUTH_MODE": "oauth2",
         "X_MCP_CLIENT_ID": "your-oauth2-client-id",
