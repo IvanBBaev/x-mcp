@@ -83,11 +83,12 @@ statement that this server has been seen working inside any of them.
 
 ## 4. Configuration snippets
 
-These are the same snippets as [10-operator-guide.md §4](10-operator-guide.md) — that page
-is the source of truth for setup; this page repeats the shapes only so the matrix rows are
-self-contained. Replace `/abs/path/to/x-mcp` with the checkout path. `npx -y x-mcp-ai` does
-**not** work yet (the npm name is reserved for 1.0.0), so every snippet spawns Node against
-the built entry point.
+These are the snippets from [10-operator-guide.md §4](10-operator-guide.md) — that page is
+the source of truth for setup; this page repeats the shapes only so the matrix rows are
+self-contained. Replace `/abs/path/to/x-mcp` with the checkout path. `npx -y x-mcp-ai@0.8.0`
+works now that the package is published; the snippets below still spawn Node against the
+built entry point, because that is the form the probes on this page were run against — the
+npx form is the same process with npm resolution in front of it.
 
 Two equivalent launch commands, both `probe-verified`:
 

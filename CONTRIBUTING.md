@@ -85,14 +85,21 @@ and no credentials are needed to run the suite.
 
 ## Releasing
 
-> **Placeholder — to be finalized once release automation lands.** There is no publish/release
-> workflow in the repo yet; the steps below are the intended manual runbook.
+> **Releases are automated.** Pushing a `v*` tag runs
+> [`.github/workflows/publish.yml`](.github/workflows/publish.yml), which enforces that the tag
+> matches the `package.json` version, re-runs the full `npm run check` gate via `prepublishOnly`,
+> and publishes to npm with provenance. Never `npm publish` from a laptop — a laptop publish
+> permanently lacks the provenance attestation.
 
 1. Ensure `main` is green (`npm run verify`).
-2. Bump the version in `package.json` **and** `server.json` in lockstep (they must match).
+2. Bump the version everywhere it lives, in lockstep: `package.json` (and `package-lock.json`,
+   via `npm install --package-lock-only`), `server.json` (both `version` fields), and
+   `SERVER_VERSION` in [`src/mcp/server.ts`](src/mcp/server.ts). The manifest guard fails the
+   build if the three sites it can see disagree.
 3. Move the `## [Unreleased]` entries in [`CHANGELOG.md`](CHANGELOG.md) under a new dated,
    versioned heading.
-4. Tag `vX.Y.Z` and publish to npm (`npm publish`), then to the MCP Registry from `server.json`.
+4. Push the tag `vX.Y.Z` — the Publish workflow does the rest. Publishing the MCP Registry
+   entry from `server.json` is still a manual step.
 
 Versioning follows [SemVer](https://semver.org/). While on `0.x` the public API may change in
 any minor release; consumers should pin an exact version.

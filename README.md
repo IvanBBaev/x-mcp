@@ -2,9 +2,9 @@
 
 <div align="center">
 
-| | | | | |
-|:--:|:--:|:--:|:--:|:--:|
-| [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-41-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
+| | | | | | |
+|:--:|:--:|:--:|:--:|:--:|:--:|
+| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-41-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
 
 </div>
 
@@ -13,8 +13,9 @@ MCP clients — Claude Code, Claude Desktop, VS Code, Cursor, or any MCP-compati
 a curated set of **typed tools**, gated by a two-axis policy model and aware of the 2026
 pay-per-use pricing so an agent can never quietly overspend.
 
-> **Status: pre-1.0, under active development, not yet published to npm.** The package name
-> `x-mcp-ai` is reserved pending the 1.0.0 release — install from this repository
+> **Status: pre-1.0, under active development, published on npm as
+> [`x-mcp-ai`](https://www.npmjs.com/package/x-mcp-ai)** (currently `0.8.0`, published from
+> CI with npm provenance). Pin an exact version while the project is on `0.x`
 > ([Setup](#setup)). **41 tools across 12 packages** are registered today; the full designed
 > surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and is landing
 > package by package. The public API is unstable until `1.0.0`.
@@ -95,25 +96,22 @@ model picks the tool. Three representative asks:
 
 ## Setup
 
-The package is **not on npm yet**, so install from source:
+The recommended install is the published package, pinned to an exact version while the
+project is on `0.x` — nothing to clone or build:
 
 ```bash
-git clone https://github.com/IvanBBaev/x-mcp.git
-cd x-mcp
-npm ci
-npm run build          # tsc → build/src/index.js
-node build/src/index.js doctor   # sanity check; makes no billable calls
+npx -y x-mcp-ai@0.8.0 doctor   # sanity check; makes no billable calls
 ```
 
-Then point your MCP client at the built entry point:
+Then point your MCP client at it:
 
 ```jsonc
 // claude_desktop_config.json (Claude Desktop) / .mcp.json (Claude Code) / .cursor/mcp.json
 {
   "mcpServers": {
     "x": {
-      "command": "node",
-      "args": ["/abs/path/to/x-mcp/build/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "x-mcp-ai@0.8.0"],
       "env": {
         "X_MCP_AUTH_MODE": "oauth2",
         "X_MCP_CLIENT_ID": "your-oauth2-client-id",
@@ -126,16 +124,31 @@ Then point your MCP client at the built entry point:
 }
 ```
 
+Running from a local checkout instead? Use `"command": "node"` with
+`"args": ["/abs/path/to/x-mcp/build/src/index.js"]` and the same `env` map.
+
 Claude Code from the CLI:
 
 ```bash
-claude mcp add x --env X_MCP_POLICY=read-only -- node /abs/path/to/x-mcp/build/src/index.js
+claude mcp add x --env X_MCP_POLICY=read-only -- npx -y x-mcp-ai@0.8.0
 ```
 
 **Per-client instructions** — Claude Desktop, Claude Code, VS Code (`.vscode/mcp.json`),
 Cursor and MCP Inspector — are in
 [`docs/10-operator-guide.md`](docs/10-operator-guide.md) §4, together with the `authorize`
 flow and ready-made env recipes.
+
+### From source (development)
+
+Still fully supported — build the entry point and spawn it with `node` instead of `npx`:
+
+```bash
+git clone https://github.com/IvanBBaev/x-mcp.git
+cd x-mcp
+npm ci
+npm run build          # tsc → build/src/index.js
+node build/src/index.js doctor   # sanity check; makes no billable calls
+```
 
 ## Configure credentials
 
@@ -390,6 +403,10 @@ A summary; the full threat model and operator checklist live in
   `X_MCP_MEDIA_DIR`.
 - **Cost is model-immutable.** The session credit budget is operator-set; the model cannot
   raise or disable it.
+- **Supply chain: pin the exact version.** An unpinned `npx -y x-mcp-ai` executes the
+  newest publish on every client cold-start — in a process holding your tokens. Releases
+  are published from CI with npm provenance. The npm package name is `x-mcp-ai`; `x-mcp`
+  is only the repository name.
 
 ## Data handling
 

@@ -258,10 +258,11 @@ between majors.
 ### 8.3 0.x → 1.0.0 plan
 
 **0.x through Phases 1–2**, with the stated convention "0.MINOR bumps may break".
-**1.0.0 at Phase 3 exit** (tool-catalog parity), matching the roadmap. `v0.1.0`
-publishes over the WP-0.9 placeholder via the tag-gated pipeline, exercising the
-release chain early. From 1.0.0 on, a tool rename keeps the old name registered as a
-deprecated alias for at least one full major (see §8.8).
+**1.0.0 at Phase 3 exit** (tool-catalog parity), matching the roadmap. The release
+chain was first exercised by `v0.8.0` (2026-08-25) — the first publish of the name,
+straight from the tag-gated pipeline with provenance; the planned placeholder
+publishes (`0.0.1`/`0.1.0`) were skipped. From 1.0.0 on, a tool rename keeps the old
+name registered as a deprecated alias for at least one full major (see §8.8).
 
 ### 8.4 CHANGELOG
 
@@ -286,7 +287,8 @@ attestations).
    over a stored `NPM_TOKEN`; if a token is unavoidable, scope a granular automation
    token to this one package. `prepublishOnly: npm run check` remains the backstop.
 3. `publish-mcp.yml` chained via `workflow_run` → `mcp-publisher login github-oidc`
-   → `publish`, marking secret env vars `isSecret: true` so registry UIs mask them.
+   → `publish`, marking secret env vars `isSecret: true` so registry UIs mask them
+   *(not yet built — 0.8.0 shipped without it)*.
 4. **Dist-tags**: `latest` = stable only; pre-releases (`1.1.0-rc.0`) go to `next`
    and are never what `npx -y x-mcp-ai` resolves.
 
@@ -343,6 +345,8 @@ Deprecating a tool after 1.0.0 is a two-release process:
 the quick start pins an exact version or `~0.N` during 0.x, and `x-mcp-ai@^1` once
 1.0.0 exists, with an explicit sentence that an unpinned `npx -y x-mcp-ai` means
 silent upgrades on every client cold-start. Pins are dropped at 1.0.0 (1.x floats).
+In effect since `0.8.0` (the first publish, 2026-08-25): the README quick start pins
+`x-mcp-ai@0.8.0`.
 
 **"Where are the logs?"** — a fatal startup error emits one plain-text (not JSON)
 `x-mcp-ai: fatal: <reason>` line to stderr and exits non-zero immediately (CFG-5,

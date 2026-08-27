@@ -21,7 +21,7 @@ body:
     attributes:
       label: x-mcp-ai version
       description: The exact published version — `npm ls x-mcp-ai`, or the version pinned in your MCP client config.
-      placeholder: 0.1.0
+      placeholder: 0.8.0
     validations:
       required: true
 
