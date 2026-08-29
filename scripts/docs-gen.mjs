@@ -1019,7 +1019,7 @@ async function main() {
   let drifted = 0;
   let written = 0;
   for (const output of outputs) {
-    let committed = null;
+    let committed;
     try {
       committed = readRepoFile(output.file);
     } catch {
