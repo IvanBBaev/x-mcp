@@ -311,33 +311,43 @@ function formatIssues(error: z.ZodError): string {
 
 // --- Reusable field validators (zod) ---------------------------------------------------
 
+/**
+ * Enum whose rejection diagnostic echoes the received value alongside the accepted ones
+ * (zod v4 dropped the `received` clause from its stock message; the operator needs it to
+ * spot a typo in the env var, so it is restored here).
+ */
+function enumField<const T extends readonly string[]>(values: T) {
+  return z.enum(values, {
+    error: (issue) =>
+      `Invalid option: expected one of ${values
+        .map((v) => `"${v}"`)
+        .join('|')}, received "${String(issue.input)}"`,
+  });
+}
+
 /** `0` | `1` flag with a default; kept as a string, coerced to boolean in the transform. */
 function flag() {
-  return z.enum(['0', '1']);
+  return enumField(['0', '1']);
 }
 
 /** Comma-separated policy cells; every entry must be a known cell (POL-6 lists them). */
 function cellListField() {
-  return z.string().refine(
-    (v) => splitList(v).every((c) => KNOWN_CELL.has(c)),
-    (v) => ({
-      message: `invalid policy cell(s): ${splitList(v)
+  return z.string().refine((v) => splitList(v).every((c) => KNOWN_CELL.has(c)), {
+    error: (issue) =>
+      `invalid policy cell(s): ${splitList(String(issue.input))
         .filter((c) => !KNOWN_CELL.has(c))
         .join(', ')}; valid cells: ${POLICY_CELLS.join(', ')}`,
-    }),
-  );
+  });
 }
 
 /** Comma-separated availability classes; every entry must be a known class. */
 function availabilityField() {
-  return z.string().refine(
-    (v) => splitList(v).every((a) => KNOWN_AVAILABILITY.has(a)),
-    (v) => ({
-      message: `invalid availability class(es): ${splitList(v)
+  return z.string().refine((v) => splitList(v).every((a) => KNOWN_AVAILABILITY.has(a)), {
+    error: (issue) =>
+      `invalid availability class(es): ${splitList(String(issue.input))
         .filter((a) => !KNOWN_AVAILABILITY.has(a))
         .join(', ')}; valid classes: ${AVAILABILITY_CLASSES.join(', ')}`,
-    }),
-  );
+  });
 }
 
 /** Positive USD decimal for `X_MCP_CREDIT_BUDGET`. */
@@ -347,18 +357,15 @@ function usdAmountField() {
       const n = Number(v);
       return Number.isFinite(n) && n > 0;
     },
-    () => ({ message: 'X_MCP_CREDIT_BUDGET must be a positive USD amount' }),
+    { error: 'X_MCP_CREDIT_BUDGET must be a positive USD amount' },
   );
 }
 
 /** Positive integer milliseconds for `X_MCP_TIMEOUT_MS`. */
 function timeoutField() {
-  return z.string().refine(
-    (v) => /^\d+$/.test(v) && Number(v) > 0,
-    () => ({
-      message: 'X_MCP_TIMEOUT_MS must be a positive integer number of milliseconds',
-    }),
-  );
+  return z.string().refine((v) => /^\d+$/.test(v) && Number(v) > 0, {
+    error: 'X_MCP_TIMEOUT_MS must be a positive integer number of milliseconds',
+  });
 }
 
 const KNOWN_CELL: ReadonlySet<string> = new Set(POLICY_CELLS);
@@ -367,18 +374,18 @@ const KNOWN_AVAILABILITY: ReadonlySet<string> = new Set(AVAILABILITY_CLASSES);
 // --- The env schema (keyed by real var names so error paths are operator-facing) -------
 
 const EnvObject = z.object({
-  X_MCP_AUTH_MODE: z.enum(AUTH_MODES).default(DEFAULT_AUTH_MODE),
+  X_MCP_AUTH_MODE: enumField(AUTH_MODES).default(DEFAULT_AUTH_MODE),
   X_MCP_CLIENT_ID: z.string().optional(),
   X_MCP_CLIENT_SECRET: z.string().optional(),
   X_MCP_BEARER_TOKEN: z.string().optional(),
   X_MCP_TOKEN_FILE: z.string().optional(),
   X_MCP_TOKEN_KEYCHAIN: flag().default('0'),
-  X_MCP_POLICY: z.enum(POLICY_PRESETS).default('read-only'),
+  X_MCP_POLICY: enumField(POLICY_PRESETS).default('read-only'),
   X_MCP_POLICY_ALLOW: cellListField().optional(),
   X_MCP_POLICY_DENY: cellListField().optional(),
   X_MCP_HIDE_DENIED: flag().default('0'),
   X_MCP_CREDIT_BUDGET: usdAmountField().optional(),
-  X_MCP_BUDGET_MODE: z.enum(BUDGET_MODES).default('warn'),
+  X_MCP_BUDGET_MODE: enumField(BUDGET_MODES).default('warn'),
   X_MCP_AVAILABILITY: availabilityField().optional(),
   X_MCP_MEDIA_DIR: z.string().optional(),
   X_MCP_PROFILES_FILE: z.string().optional(),
@@ -386,7 +393,7 @@ const EnvObject = z.object({
   X_MCP_BASE_URL: z.string().default(DEFAULT_BASE_URL),
   X_MCP_ALLOW_INSECURE_BASE_URL: flag().default('0'),
   X_MCP_TIMEOUT_MS: timeoutField().default(String(DEFAULT_TIMEOUT_MS)),
-  X_MCP_LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
+  X_MCP_LOG_LEVEL: enumField(LOG_LEVELS).default('info'),
 });
 
 const EnvSchema = EnvObject.superRefine((d, ctx) => {
@@ -453,7 +460,7 @@ const EnvSchema = EnvObject.superRefine((d, ctx) => {
  */
 const ProfileEntrySchema = z
   .object({
-    auth_mode: z.enum(AUTH_MODES).optional(),
+    auth_mode: enumField(AUTH_MODES).optional(),
     client_id: z.string().optional(),
     client_secret: z.string().optional(),
     bearer_token: z.string().optional(),
