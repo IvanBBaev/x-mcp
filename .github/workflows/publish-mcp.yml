@@ -33,7 +33,7 @@ jobs:
     steps:
       # Chained runs check out the exact commit the npm publish built; backfill
       # runs check out the tag named in the dispatch input.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_sha }}
 
