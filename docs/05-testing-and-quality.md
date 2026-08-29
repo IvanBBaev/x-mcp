@@ -288,7 +288,10 @@ attestations).
    token to this one package. `prepublishOnly: npm run check` remains the backstop.
 3. `publish-mcp.yml` chained via `workflow_run` → `mcp-publisher login github-oidc`
    → `publish`, marking secret env vars `isSecret: true` so registry UIs mask them
-   *(not yet built — 0.8.0 shipped without it)*.
+   *(built: runs only on a successful "Publish" so a listing can never precede the
+   npm artifact, re-runs the lockstep guard, verifies the listing via the registry
+   read API, and takes a `workflow_dispatch` tag input to backfill releases that
+   shipped before it existed — 0.8.0)*.
 4. **Dist-tags**: `latest` = stable only; pre-releases (`1.1.0-rc.0`) go to `next`
    and are never what `npx -y x-mcp-ai` resolves.
 
