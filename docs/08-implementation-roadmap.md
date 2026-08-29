@@ -125,14 +125,14 @@ waiter-adopts-disk-pair) plus kill-9 recovery green on all OS legs; changelog's
 | WP-3.10 | M | **Operator docs & repo hygiene.** README rewritten for users, not designers: per-client setup (Claude Desktop, Claude Code, VS Code, Cursor), troubleshooting, an explicit "this server spends real money" pricing section; privacy/data-handling statement (fetched content incl. DM bodies reaches the model host — SEC-F7); `SECURITY.md` vulnerability-disclosure policy; issue templates; client compatibility matrix verified against MCP Inspector + at least two real clients. | 3.9 |
 | WP-3.11 | S | **Usage/credits tool go/no-go.** If WP-0.10's fact-check confirms a usage/credits endpoint under pay-per-use, ship `x_usage_get` (real platform spend beside the local session estimate — closes the loop on COST-1); otherwise drop it from the catalog with a dated note. | 0.10, Phase 2 |
 | WP-3.12 | M | **Acceptance & hardening.** The three agent-DX walkthroughs (thread+image, mentions triage, most-engaged) scripted as e2e scenario tests over fixtures; scheduled fuzz job on tool inputs (QA-F15) + one informational mutation-testing run over `core/*` (QA-F14); **implementation re-audit against the threat model** — walk T1–T17 and kill-chains A–D against the real code, not the design; ≥ 1 week of dogfooding as a daily driver. | 3.1–3.10 |
-| WP-3.13 | S | **1.0.0 release.** Full chain: tag → publish `--provenance` → `publish-mcp.yml` → MCP registry with `isSecret` env markers; `server.json` lockstep guard green; contract-fixture suite frozen as the semver baseline; the tag → npm-with-provenance half is already proven by `v0.8.0`; 1.0.0 adds the `publish-mcp.yml` → MCP-registry link and drops the README version pins (1.0 floats). | 3.1–3.12 |
+| WP-3.13 | S | **1.0.0 release.** Full chain: tag → publish `--provenance` → `publish-mcp.yml` → MCP registry with `isSecret` env markers; `server.json` lockstep guard green; contract-fixture suite frozen as the semver baseline; the whole chain is already proven by `v0.8.0` — npm with provenance 2026-08-25, MCP Registry listing 2026-08-29 (`publish-mcp.yml` backfill) — so 1.0.0 re-runs it at the new tag and drops the README version pins (1.0 floats). | 3.1–3.12 |
 
 **Exit gate 3:** all `P3` corner cases referenced; drift and context-size CI gates
 green; compatibility matrix documented; scenario suite and threat-model re-audit
-done; 1.0.0 on npm with provenance badge and the registry listing verified (the
-provenance pipeline itself is verified as of `v0.8.0`; what remains for the gate is
-the 1.0.0 tag and the registry listing). The "1.0 acceptance checklist" below is
-the gate's full definition.
+done; 1.0.0 on npm with provenance badge and the registry listing verified (both
+pipelines are verified as of `v0.8.0` — provenance on 2026-08-25, registry listing
+on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). The
+"1.0 acceptance checklist" below is the gate's full definition.
 
 > **Closed against this gate (2026-08-09).** The gate said nothing explicit about
 > tool-surface completeness while the phase tables implied the full catalogue ships in P3 —
@@ -222,11 +222,13 @@ above; this is the single list to walk before tagging:
       guard green. *Guard green: `npm run gate:manifest`
       (`scripts/server-json-guard.mjs`) verifies version lockstep across all three
       places, transport shape, credential marking, and that every advertised env var
-      is one `src/core/config.ts` actually reads. The npm provenance half is done —
-      `x-mcp-ai@0.8.0` published 2026-08-25 from `publish.yml` with `--provenance`.
-      Only the MCP Registry listing remains: it needs `publish-mcp.yml` or one
-      manual `mcp-publisher` run, plus human verification of the `isSecret`
-      markers.*
+      is one `src/core/config.ts` actually reads. Both machine legs are proven —
+      `x-mcp-ai@0.8.0` published 2026-08-25 from `publish.yml` with `--provenance`,
+      and `io.github.IvanBBaev/x-mcp-ai@0.8.0` listed on the MCP Registry
+      2026-08-29 via `publish-mcp.yml` (backfill dispatch; listing verified
+      against the registry read API, status `active`). What remains is 1.0.0
+      itself: re-run the chain at the 1.0.0 tag, plus human verification that
+      the listing renders the `isSecret` markers.*
 
 ## Human checkpoints
 
@@ -299,8 +301,9 @@ value is precisely that it is unhurried.
 Walk the checklist above, bump the version everywhere it is written
 (`package.json` + `package-lock.json`, `SERVER_VERSION` in `src/mcp/server.ts`, and
 `server.json` — twice, at `version` and `packages[0].version`; the lockstep guard
-enforces this), tag, let CI publish with `--provenance` (mechanics proven by
-`v0.8.0`), then verify the MCP registry listing renders the `isSecret` env markers.
+enforces this), tag, let CI publish with `--provenance` and chain the MCP Registry
+listing via `publish-mcp.yml` (both legs proven by `v0.8.0`), then verify the
+listing renders the `isSecret` env markers.
 
 ### Client verification
 
