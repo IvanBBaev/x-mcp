@@ -4,11 +4,12 @@
 blank_issues_enabled: false
 
 contact_links:
-  # Repo-relative so this file carries no hardcoded owner/repo slug. Resolved from
-  # /<owner>/<repo>/issues/new/choose, `../../security/advisories/new` is the private
-  # vulnerability report form. Requires private vulnerability reporting to be enabled in
-  # Settings → Security (part of repo bootstrap, T-001); if GitHub rejects the relative
-  # form, replace it with the absolute URL of the same page.
+  # Absolute URL on purpose. The repo-relative form (`../../security/advisories/new`)
+  # was tried first to avoid a hardcoded owner/repo slug, but GitHub rejects it: with the
+  # relative URL the repository's rendered `contactLinks` (GraphQL) came back EMPTY, so
+  # the chooser silently dropped the security link entirely (verified 2026-08-29).
+  # Requires private vulnerability reporting to be enabled in Settings → Security
+  # (enabled 2026-08-29).
   - name: Report a security vulnerability (private)
-    url: '../../security/advisories/new'
+    url: 'https://github.com/IvanBBaev/x-mcp/security/advisories/new'
     about: Never file an exploitable issue publicly. Opens a private GitHub Security Advisory, visible only to you and the maintainer. Scope and expectations are in SECURITY.md.
