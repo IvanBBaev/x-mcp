@@ -83,6 +83,12 @@ Mitigations that *are* in the server:
   reach the model. The default preset (`read-only`) cannot read DMs at all: `read:dm` is in
   no preset, including `full`, and needs an explicit operator opt-in.
 
+**Bookmarks.** `x_bookmarks_list` returns the account's own bookmark list — a private
+curation of **public** posts, classified `read:content` and therefore available in the
+default preset (decision 0002). What it reveals is the owner's reading interests, not
+third-party private content; the listed posts get the same untrusted-content marking as
+any other read.
+
 **Third-party data.** Posts, profiles and especially DMs are other people's personal data.
 If you enable `read:dm`, you are routing private correspondence — including messages
 written by people who never consented to an AI reading them — into a model context. Treat
