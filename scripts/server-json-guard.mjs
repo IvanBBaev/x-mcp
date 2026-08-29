@@ -28,6 +28,9 @@
 //      actually recognizes. The converse is deliberately NOT asserted: the manifest is a
 //      curated discovery aid for operators, not an exhaustive table of every knob (the full
 //      table is docs/02 §4), so vars like `X_MCP_LOG_LEVEL` may legitimately be omitted.
+//   6. Description length — the registry caps `description` at 100 and rejects the publish
+//      with HTTP 422 `expected length <= 100` past that. The v0.8.0 backfill found out in
+//      the pipeline; this guard fails before the pipeline can.
 //
 // THE SECRET RULE, AND WHY IT IS NOT A SUBSTRING MATCH. The obvious rule — "the name contains
 // TOKEN, KEY or SECRET" — is wrong here, and wrong in a way that would have to be silenced
@@ -57,6 +60,7 @@
 // the deliberate case — a name whose head noun this list has not learned yet — should not
 // break the build. Under-marking is the security bug, and that fails.
 
+import { Buffer } from 'node:buffer';
 import fs from 'node:fs';
 import process from 'node:process';
 import { URL } from 'node:url';
@@ -88,6 +92,14 @@ const CREDENTIAL_HEADS = new Set([
   'COOKIE',
   'PAT',
 ]);
+
+/**
+ * The registry's hard cap on the manifest description, learned the honest way: the v0.8.0
+ * backfill publish came back HTTP 422 `expected length <= 100` for a 155-character
+ * description. Measured here in UTF-8 bytes — the strictest reading of "length" — so a
+ * multi-byte character cannot pass a code-point count locally and still trip the registry.
+ */
+const MAX_DESCRIPTION_BYTES = 100;
 
 /** The transport shape this server actually implements (MCP-2). */
 const EXPECTED_TRANSPORT = 'stdio';
@@ -155,6 +167,21 @@ function checkLockstep(findings, manifest, pkg, entry) {
       `${MANIFEST} name is "${manifest.name ?? '(missing)'}", ` +
         `${MANIFEST_PACKAGE} mcpName is "${pkg.mcpName ?? '(missing)'}" — npm rejects the ` +
         `publish when those disagree`,
+    );
+  }
+}
+
+function checkDescription(findings, manifest) {
+  const description = manifest.description;
+  if (typeof description !== 'string' || description.trim().length === 0) {
+    findings.push(`${MANIFEST} has no description — the registry listing would say nothing`);
+    return;
+  }
+  const bytes = Buffer.byteLength(description, 'utf8');
+  if (bytes > MAX_DESCRIPTION_BYTES) {
+    findings.push(
+      `${MANIFEST} description is ${bytes} bytes, the MCP Registry rejects anything over ` +
+        `${MAX_DESCRIPTION_BYTES} (HTTP 422 "expected length <= 100")`,
     );
   }
 }
@@ -251,6 +278,7 @@ function main() {
   }
 
   checkLockstep(findings, manifest, pkg, entry);
+  checkDescription(findings, manifest);
   checkTransport(findings, entry);
   const vars = checkEnvironment(findings, warnings, entry, recognized);
 
