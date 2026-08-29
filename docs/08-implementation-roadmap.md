@@ -192,7 +192,11 @@ above; this is the single list to walk before tagging:
       `X_MCP_BASE_URL` anywhere, so an operator-set or profile-set base URL could
       exfiltrate the token) is closed by an independent hardcoded egress allowlist in
       `src/core/egress.ts`, plus a startup refusal under `oauth2`. §1–§6 of the audit
-      are deliberately left unedited as the point-in-time record.*
+      are deliberately left unedited as the point-in-time record. The delta since that
+      baseline — the two decisions/0002 tools (39 → 41) and the two later src/ commits —
+      was audited 2026-08-30 in
+      [reviews/08-delta-audit-2026-08-30.md](reviews/08-delta-audit-2026-08-30.md):
+      clean, no new findings at MEDIUM or above.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
@@ -203,9 +207,10 @@ above; this is the single list to walk before tagging:
       other three rows need a GUI client a human has to drive; every one of them is
       labelled `unverified` on that page rather than assumed working.*
 - [ ] Scenario suite (walkthroughs A–C) green; ≥ 1 week dogfood without a P1 issue.
-      *Scenario half verified 2026-08-08 — `node --test "build/test/scenarios/*.test.js"`
-      → **13/13 pass, 0 fail, 0 skipped**. The dogfood week is checkpoint H4 and is
-      elapsed time, not work.*
+      *Scenario half first verified 2026-08-08; re-run 2026-08-30 as part of the delta
+      audit — `node --test "build/test/scenarios/*.test.js"` → **13 tests, 13 pass,
+      0 fail, 0 skipped**. The dogfood week is checkpoint H4 and is elapsed time, not
+      work.*
 - [x] `LICENSE`, `SECURITY.md`, privacy/data-handling statement, per-client setup
       docs, pricing warning — all published.
       *Verified 2026-08-07: MIT `LICENSE`, `SECURITY.md` disclosure policy,
