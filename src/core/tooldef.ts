@@ -251,5 +251,8 @@ export function defineTool<S extends z.ZodType>(def: {
   readonly phase: 1 | 2 | 3;
   readonly conditional?: boolean;
 }): ToolDef<z.infer<S>> {
-  return def;
+  // zod v4's `ZodType` carries its internals in a third type parameter, so TypeScript
+  // cannot prove the generic `S` is a `ZodType<z.infer<S>>` inside this body; the cast
+  // bridges that variance gap only — call sites stay fully inferred and checked.
+  return def as ToolDef<z.infer<S>>;
 }
