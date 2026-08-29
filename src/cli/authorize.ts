@@ -413,7 +413,7 @@ function parseCallbackQuery(rawUrl: string): URLSearchParams | null {
 
 async function tryOpenBrowser(deps: AuthorizeDeps, url: string): Promise<void> {
   if (deps.openBrowser === undefined) return; // default: the URL is already printed
-  let launched = false;
+  let launched: boolean;
   try {
     launched = await deps.openBrowser(url);
   } catch {
