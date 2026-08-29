@@ -1,0 +1,98 @@
+name: Publish MCP Registry
+
+# MCP Registry listing chained after the npm publish (docs/05 §8.5 step 3). The
+# chaining is the point: this runs only when a "Publish" run has already succeeded,
+# so a registry listing can never precede the npm artifact it points at — the
+# registry validates ownership against the published npm package (its `mcpName`
+# field must equal the server.json name), so listing first would fail, and listing
+# a version npm never got would be worse. `workflow_dispatch` exists for backfill:
+# listing an already-published tag, e.g. v0.8.0, which shipped before this
+# workflow was built.
+on:
+  workflow_run:
+    workflows: [Publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish to the MCP Registry, e.g. v0.8.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write # github-oidc login proves this repo's identity for the io.github.IvanBBaev namespace
+
+jobs:
+  publish:
+    name: publish to MCP Registry
+    runs-on: ubuntu-latest
+    # workflow_run fires on failure and cancellation too — never list a release
+    # whose npm leg did not land.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      # Chained runs check out the exact commit the npm publish built; backfill
+      # runs check out the tag named in the dispatch input.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_sha }}
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # publish.yml's tag guard, one link down the chain. For a tag-triggered
+      # Publish run, workflow_run.head_branch carries the tag name.
+      - name: Tag matches package.json
+        env:
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          tag="${TAG#v}"
+          if [ "$pkg" != "$tag" ]; then
+            echo "tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+
+      # WP-0.8 manifest guard — Node stdlib only, so no npm ci is needed: version
+      # and name in lockstep with package.json, stdio/npx transport, credentials
+      # marked isSecret, every advertised env var actually read by the config.
+      - name: server.json is in lockstep with package.json
+        run: node scripts/server-json-guard.mjs
+
+      # Pinned to the release this workflow was verified against, checksum and all —
+      # `releases/latest` (the guide's default) would silently swap the binary under
+      # the release pipeline. Bump the version and hash together, deliberately.
+      - name: Install mcp-publisher v1.8.1
+        run: |
+          curl -fsSLO "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz"
+          echo "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc  mcp-publisher_linux_amd64.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+
+      # OIDC: GitHub mints a short-lived workflow identity token, the registry
+      # verifies it and grants the io.github.IvanBBaev/* namespace — no stored
+      # registry credential to leak or rotate.
+      - name: Log in to the MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json to the MCP Registry
+        run: ./mcp-publisher publish
+
+      # Trust, then verify: ask the registry's read API for the exact name@version
+      # just published. A publish that "succeeded" without a queryable listing is a
+      # failure this step refuses to paper over.
+      - name: Listing is live
+        run: |
+          name=$(node -p 'require("./server.json").name')
+          version=$(node -p 'require("./server.json").version')
+          encoded=$(node -p 'encodeURIComponent(require("./server.json").name)')
+          curl -fsS --retry 3 --retry-delay 5 \
+            "https://registry.modelcontextprotocol.io/v0.1/servers/${encoded}/versions/${version}" \
+            -o listing.json
+          got=$(node -p 'const l = require("./listing.json"); l.server.name + "@" + l.server.version')
+          if [ "$got" != "${name}@${version}" ]; then
+            echo "registry returned $got, expected ${name}@${version}" >&2
+            exit 1
+          fi
+          echo "listed: $got"
