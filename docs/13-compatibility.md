@@ -9,10 +9,13 @@ kind of document that gets an operator stuck at 2 a.m. Companion pages:
 [02-architecture.md](02-architecture.md) (why the protocol surface looks like this).
 
 > **Disclosure.** No third-party GUI client was launched while writing this page. Claude
-> Desktop, Claude Code, VS Code, Cursor, Zed and Continue.dev were **not** run against this
-> server. The rows for those clients describe an expectation derived from the protocol
-> surface plus each client's published configuration format — nothing more. Section 7 is
-> the checklist that turns those rows into observations.
+> Desktop, VS Code, Cursor, Zed and Continue.dev were **not** run against this server. The
+> rows for those clients describe an expectation derived from the protocol surface plus
+> each client's published configuration format — nothing more. The one exception is
+> Claude Code: its **headless CLI** (`claude -p`, 2.1.251) was run against the built
+> server on 2026-08-31 — see §4.2.1 — but its interactive client was not; the cells only
+> a GUI can show stay expectations. Section 7 is the checklist that turns the remaining
+> rows into observations.
 
 ## 1. Evidence vocabulary
 
@@ -71,15 +74,15 @@ is fixed at startup.
 | **MCP Inspector 2.1.0 — `--cli`** | yes | yes | yes | yes | yes | exp | n/a | `probe-verified` | Returned 41 tools, 41 with `outputSchema`, 41 with `annotations`; rendered a policy refusal for `x_post_create` under `read-only`. CLI mode does not display `instructions`. Re-probed 2026-08-09 at the 41-tool surface — see §4.5.1. |
 | **MCP Inspector 2.1.0 — GUI** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Same binary as the row above, different front end. Not launched — no browser in this environment. |
 | **Claude Desktop** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Config format matches [10-operator-guide §4.1](10-operator-guide.md). Not launched. |
-| **Claude Code** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Config format matches [10-operator-guide §4.2](10-operator-guide.md). Not launched. |
+| **Claude Code 2.1.251** | yes | yes | yes | yes | exp | exp | yes | `probe-verified` (headless CLI) | Probed 2026-08-31 on macOS via `claude -p --mcp-config --strict-mcp-config` — see §4.2.1. Env arrived (`x_auth_status` echoed `app-only` + `read-only`); 41 `mcp__x__*` tools registered; `x_rate_limit_status` succeeded; `x_post_create` refused with the typed `policy` error and no post; `instructions` surfaced without a tool call. 2.1.251 defers MCP tool schemas behind an in-client ToolSearch step. `structuredContent` and cancellation are not observable headlessly — those cells stay `exp`, and the interactive client was not run. |
 | **VS Code** (Copilot agent mode) | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Needs `"type": "stdio"`; supports `inputs` prompts for secrets — see [10-operator-guide §4.3](10-operator-guide.md). Not launched. |
 | **Cursor** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Claude Desktop config shape — see [10-operator-guide §4.4](10-operator-guide.md). Not launched. |
 | **Zed** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Zed calls stdio MCP servers "context servers" and configures them under `context_servers` in `settings.json`. Format not confirmed against a running Zed. |
 | **Continue.dev** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Configured as an MCP block in the assistant/`config.yaml`. Format not confirmed against a running Continue. |
 
-**Seven rows are `unverified`.** They are, in matrix order: Inspector GUI, Claude Desktop,
-Claude Code, VS Code, Cursor, Zed, Continue.dev. Nothing on this page should be read as a
-statement that this server has been seen working inside any of them.
+**Six rows are `unverified`.** They are, in matrix order: Inspector GUI, Claude Desktop,
+VS Code, Cursor, Zed, Continue.dev. Nothing on this page should be read as a statement
+that this server has been seen working inside any of them.
 
 ## 4. Configuration snippets
 
@@ -134,6 +137,54 @@ claude mcp add x \
 ```
 
 Project scope writes a `.mcp.json` with the Claude Desktop shape; keep secrets out of it.
+
+#### 4.2.1 Headless CLI probe record (2026-08-31, Claude Code 2.1.251, macOS)
+
+Claude Code has a non-interactive mode — `claude -p` — that loads MCP servers from an
+explicit config file, which makes part of the §7.2 checklist automatable. Four probes were
+run against the built tree at the cheapest possible blast radius: a config file in the
+Claude Desktop shape (§4.1) carrying `X_MCP_AUTH_MODE=app-only`, a dummy
+`X_MCP_BEARER_TOKEN`, `X_MCP_POLICY=read-only`, `X_MCP_CREDIT_BUDGET=1.00`,
+`X_MCP_BUDGET_MODE=hard`, `X_MCP_LOG_LEVEL=silent` — no live credential existed and none
+was needed; every probed tool is offline. The first probe, verbatim:
+
+```bash
+claude -p "Call the x_auth_status tool and report exactly which auth mode and policy preset it returns." \
+  --mcp-config mcp-config.json --strict-mcp-config \
+  --allowedTools "mcp__x__x_auth_status" \
+  --output-format stream-json --verbose
+```
+
+Observed, from the stream-json transcripts:
+
+- **Env arrived (§7.2 step 2).** The `x_auth_status` tool result carried
+  `"auth_mode":"app-only"` and `"policy":{"preset":"read-only", ...}` — the configured
+  env reached the server intact.
+- **Tool exposure (§7.2 step 3, headless variant).** Every session's `init` event listed
+  the server as `{"name":"x","status":"connected"}` and exactly **41** `mcp__x__*` tools.
+  Worth recording: 2.1.251 defers MCP tool schemas behind an in-client ToolSearch step —
+  the model fetched each tool's schema on demand before calling it — so the ~78 KB list is
+  not injected into the prompt wholesale, but all 41 names registered.
+- **`tools/call` (§7.2 step 4).** Same pattern with `x_rate_limit_status` → success:
+  `{"data":{"buckets":[]},"summary":"rate-limit: 0 bucket(s) tracked","meta":{"cost_usd":0,"session_total_usd":0}}`.
+- **Policy refusal (§7.2 step 6).** `x_post_create` with
+  `--allowedTools "mcp__x__x_post_create"` → a tool result with `is_error: true` carrying
+  `{"kind":"policy","retryable":false,"fix":"operator","cell":"write:content"}` and the
+  message naming the `read-only` preset. **No post was created** — the refusal fires at
+  the policy layer before any network call, and the dummy token could not have posted
+  anyway: two independent layers, both held.
+- **`instructions` (§7.2 step 7).** A fresh session with every `mcp__x__*` tool
+  disallowed, asked what the server's usage guidance says about pagination and `raw`,
+  answered without a single tool call — correctly paraphrasing the `next_token` →
+  `page_token` bridge and the `raw: true` same-cost/larger-output semantics. The
+  944-character `instructions` block surfaces in headless context.
+
+Not observable headlessly, so their matrix cells stay **exp**: `structuredContent` (the
+transcript shows only the rendered text block — it cannot tell whether the client parsed
+the structured field), cancellation (`-p` mode has no stop control), and the interactive
+tool-panel count. Those are the steps §7.2 still leaves to a human in interactive Claude
+Code. The `claude mcp add` command in §4.2 was likewise not exercised — the probes passed
+the same JSON shape via `--mcp-config` instead.
 
 ### 4.3 VS Code
 
@@ -276,30 +327,36 @@ npm run build
 node --test "build/test/mcp/**/*.test.js"
 ```
 
-**Expected:** `# fail 0`. The pass count grows as tools are added (52 at the time of
+**Expected:** `# fail 0`. The pass count grows as tools are added (60 at the time of
 writing) — the count is not the assertion, the zero is. A failure here is a server
 regression: stop and fix it before touching any client.
 
-Then confirm the tool count that the matrix quotes:
+Then confirm the tool count that the matrix quotes (the `node <entry>` command must come
+immediately after `--cli`, before the `-e` pairs — the §4.5 argument-order caveat applies
+here too, and the `-e`-first order fails with `No servers found in config file` on
+Inspector 2.4.0):
 
 ```bash
 npx @modelcontextprotocol/inspector --cli \
+  node "$PWD/build/src/index.js" \
   -e X_MCP_AUTH_MODE=app-only -e X_MCP_BEARER_TOKEN=AAAA -e X_MCP_LOG_LEVEL=silent \
-  node "$PWD/build/src/index.js" --method tools/list 2>/dev/null | node -e '
+  --method tools/list 2>/dev/null | node -e '
 let s="";process.stdin.on("data",c=>s+=c).on("end",()=>{const t=JSON.parse(s).tools;
 console.log("tools",t.length,
 "| outputSchema",t.filter(x=>x.outputSchema).length,
 "| annotations",t.filter(x=>x.annotations).length);});'
 ```
 
-**Expected output, exactly:** `tools 39 | outputSchema 39 | annotations 39`.
+**Expected output, exactly:** `tools 41 | outputSchema 41 | annotations 41`.
 
 The `2>/dev/null` is required — npm deprecation warnings otherwise mix into the JSON.
 
 ### 7.2 Promote each GUI client from `unverified` — 10 minutes each
 
 Run this identically for **Claude Desktop, Claude Code, VS Code, Cursor, Zed,
-Continue.dev, Inspector GUI**. Do not skip step 2; a client that starts the server but
+Continue.dev, Inspector GUI**. (For Claude Code, §4.2.1 already covers steps 2, 4, 6
+and 7 headlessly; steps 3, 5 and 8 remain for the interactive client.) Do not skip
+step 2; a client that starts the server but
 silently drops `env` will still list tools, and the failure only shows up as a confusing
 auth error much later.
 
@@ -312,7 +369,7 @@ auth error much later.
    to start with `X_MCP_AUTH_MODE must be set`, the client is not passing `env` — record
    **env passing: no** and stop for that client.
 3. **Prove `tools/list`.** Open the client's tool/MCP panel and count the tools it shows.
-   Expected: **39** (with `X_MCP_HIDE_DENIED` unset). Fewer means the client paginates,
+   Expected: **41** (with `X_MCP_HIDE_DENIED` unset). Fewer means the client paginates,
    caps, or filters the list — record the number in the Notes column; it is a real
    compatibility limit worth documenting.
 4. **Prove `tools/call`.** Ask for `x_rate_limit_status`. Expected: a successful result. No
@@ -334,7 +391,7 @@ auth error much later.
    `x_search_recent` with a broad query and a large `max_results` — and press the client's
    stop/interrupt control. Expected: the call rejects promptly (well under a second in the
    in-repo probe, versus a 60 s upstream delay) and **the session remains usable** — the
-   next `tools/list` still returns 39. A client that has no stop control is **exp**, not
+   next `tools/list` still returns 41. A client that has no stop control is **exp**, not
    **no**.
 9. **Record the result** by editing the matrix row: change `unverified` to
    `protocol-verified` only if you add a test, otherwise `probe-verified`, and put the
