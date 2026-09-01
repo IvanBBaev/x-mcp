@@ -4,3 +4,4 @@
 export * from './fakes.js';
 export * from './http.js';
 export * from './fixtures.js';
+export * from './prop.js';
