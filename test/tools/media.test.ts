@@ -29,7 +29,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, join, parse, sep } from 'node:path';
 
 import { MEDIA_SEGMENT_BYTES, MEDIA_SIZE_CAPS } from '../../src/api/endpoints/media.js';
 import { mapHttpError } from '../../src/api/errors.js';
@@ -1658,9 +1658,12 @@ test('MEDIA-5: a media directory of exactly `~` names the real home directory', 
 test('MEDIA-5: a media directory that already ends with the separator still contains its files', async () => {
   // The containment prefix must not become `//` (or `dir//`) when the configured root
   // already ends with the path separator — that malformed prefix would refuse EVERY file
-  // inside the directory. The filesystem root is the natural always-trailing spelling.
+  // inside the directory. The filesystem root is the natural always-trailing spelling;
+  // it must be the root of the VOLUME holding the temp file (`parse().root`), because on
+  // win32 a bare `sep` resolves against the current drive, which CI keeps separate from
+  // the temp directory's drive.
   const path = tempFile('sep-root.png', mediaBytes('png', 12));
-  const file = await openMediaFile(path, { mediaDir: sep });
+  const file = await openMediaFile(path, { mediaDir: parse(path).root });
   try {
     assert.equal(file.mediaType, 'image/png');
     assert.equal(basename(file.resolvedPath), 'sep-root.png');
