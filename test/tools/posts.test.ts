@@ -15,7 +15,7 @@ import {
   xPostHideReply,
   postsTools,
 } from '../../src/tools/posts.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
 import type { ErrorClass } from '../../src/core/errors.js';
 import type { ToolContext } from '../../src/core/tooldef.js';
 import type { BatchResult, CompactPost } from '../../src/core/render-shapes.js';
@@ -892,6 +892,86 @@ test('a non-XError rejection propagates unchanged through the create and hide ca
   await assert.rejects(
     () => xPostHideReply.handler({ reply_id: '777', action: 'hide' }, ctx),
     (err: unknown) => err === sentinel,
+  );
+});
+
+test('raw: a data-less envelope (all ids missing) counts 0 and keeps the warning', async () => {
+  const mock = mockHttp();
+  // /2/tweets answers 200 with only `errors[]` when every requested id is gone — no
+  // `data` array at all. The raw path must render that as an honest empty list.
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('999') })
+    .reply(200, { errors: [{ value: '999', title: 'Not Found Error' }] });
+
+  const out = await xPostGet.handler({ ids: ['999'], raw: true }, contextFor(mock));
+  const raw = out.data as RawListResponse<RawTweet>;
+
+  assert.deepEqual(raw.data, []); // normalized to [] for the cap, never a crash
+  // Zero results still carry the REND-6 warning: `errors[]` titles are platform text too.
+  assert.equal(out.summary, `0 raw post(s) ${UNTRUSTED_CONTENT_NOTE}`);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-10: a raw batch larger than 25 is capped in order and says so', async () => {
+  // The batch endpoint takes up to 100 ids in ONE request, so unlike the paged readers the
+  // cap cannot be enforced on the wire — the response itself is truncated to RAW_MAX_RESULTS.
+  const ids = Array.from({ length: 30 }, (_, i) => String(i + 1));
+  const tweets = ids.map((id) => ({ id, text: `post ${id}` }));
+
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor(ids.join(',')) })
+    .reply(200, { data: tweets });
+
+  const out = await xPostGet.handler({ ids, raw: true }, contextFor(mock));
+  const raw = out.data as RawListResponse<RawTweet>;
+
+  // First 25 in response order survive; the tail is dropped, not sampled.
+  assert.equal(raw.data?.length, 25);
+  assert.equal(raw.data?.[0]?.id, '1');
+  assert.equal(raw.data?.[24]?.id, '25');
+  // The summary states the truncation so the agent knows the envelope is not complete.
+  assert.equal(out.summary, `25 raw post(s) (capped at 25) ${UNTRUSTED_CONTENT_NOTE}`);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_post_create: a degraded 201 without a body id still resolves, never crashes', async () => {
+  // NET-4 asymmetry: once the platform says 201 the post EXISTS, so a malformed success
+  // envelope must degrade (empty id, base permalink) rather than throw after the write.
+  const mock = mockHttp();
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, {});
+
+  const out = await xPostCreate.handler({ text: 'hello' }, contextFor(mock));
+
+  assert.deepEqual(out.data, { id: '', url: 'https://x.com/i/status/' });
+  assert.equal(out.summary, 'Post created: https://x.com/i/status/');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('NET-4: an api error WITHOUT an http_status is not treated as write-ambiguous', async () => {
+  // isAmbiguousWriteFailure keys on `http_status >= 500`; when the status is absent the
+  // outcome is NOT unknown-outcome territory, so the error must pass through unchanged —
+  // same object, no "may nevertheless have been created" hedge invented for it.
+  const original = apiError('malformed platform response');
+  const ctx: ToolContext = {
+    ports: makePorts(),
+    http: { send: () => Promise.reject(original) },
+  };
+
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'hello' }, ctx),
+    (err: unknown) => {
+      assert.equal(err, original); // identity: mapCreateFailure returned it untouched
+      assert.ok(XError.is(err));
+      assert.doesNotMatch(err.message, /may nevertheless have been created/);
+      return true;
+    },
   );
 });
 

@@ -320,6 +320,113 @@ test('x_post_counts_archive: maps buckets to numeric counts, prefers meta total,
   await http.close();
 });
 
+test('REND-10: raw search WITHOUT max_results sends no cap on the wire and counts a data-less page as 0', async () => {
+  const http = mockHttp();
+  // The raw ceiling only rewrites a max_results the caller actually asked for; with none
+  // given the request must carry none — the API's own default applies, not an invented 25.
+  // The intercept pins the exact sorted query, so a smuggled max_results fails the match.
+  http.pool
+    .intercept({
+      path: '/2/tweets/search/all',
+      method: 'GET',
+      query: { query: 'nothing-matches-this', ...ARCHIVE_FIELD_PARAMS },
+    })
+    .reply(200, { meta: { result_count: 0 } });
+
+  const out = await xSearchArchive.handler(
+    { query: 'nothing-matches-this', raw: true },
+    makeCtx(http),
+  );
+
+  // The envelope passes through untouched, and the absent `data` array counts as 0 —
+  // still with the REND-6 warning, since even `meta` is platform-controlled JSON.
+  assert.deepEqual(out.data, { meta: { result_count: 0 } });
+  assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('x_post_counts_archive: raw:true returns the exact envelope with the bucket count and warning', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/counts/all', method: 'GET', query: { query: 'x' } })
+    .reply(200, loadFixture<RawCountsResponse>('archive/counts-archive.json'));
+
+  const out = await xPostCountsArchive.handler({ query: 'x', raw: true }, makeCtx(http));
+
+  // Raw path: no compaction — the fixture envelope survives verbatim (meta included)…
+  assert.deepEqual(out.data, loadFixture<RawCountsResponse>('archive/counts-archive.json'));
+  // …and counts-only or not, raw JSON is platform-controlled, so the warning stays.
+  assert.equal(out.summary, `3 raw bucket(s). ${UNTRUSTED_CONTENT_NOTE}`);
+
+  // A degraded 200 with no data array counts 0 buckets instead of crashing.
+  http.pool
+    .intercept({ path: '/2/tweets/counts/all', method: 'GET', query: { query: 'y' } })
+    .reply(200, { meta: {} });
+  const empty = await xPostCountsArchive.handler({ query: 'y', raw: true }, makeCtx(http));
+  assert.equal(empty.summary, `0 raw bucket(s). ${UNTRUSTED_CONTENT_NOTE}`);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('x_post_counts_archive: with no meta total the buckets are summed, and bare buckets stay honest', async () => {
+  const http = mockHttp();
+  // No `meta` at all: total must come from summing the buckets — never NaN or a silent 0 —
+  // and a bucket missing its timestamps/count still renders as a zero-count bucket with
+  // the timestamp keys ABSENT (exactOptionalPropertyTypes), not `undefined`-valued.
+  http.pool
+    .intercept({ path: '/2/tweets/counts/all', method: 'GET', query: { query: 'x' } })
+    .reply(200, {
+      data: [
+        {
+          start: '2014-06-20T00:00:00.000Z',
+          end: '2014-06-21T00:00:00.000Z',
+          tweet_count: 17,
+        },
+        { tweet_count: 2 },
+        {},
+      ],
+    });
+
+  const out = await xPostCountsArchive.handler({ query: 'x' }, makeCtx(http));
+  const data = out.data as CountsResult;
+
+  assert.deepEqual(data, {
+    counts: [
+      {
+        start: '2014-06-20T00:00:00.000Z',
+        end: '2014-06-21T00:00:00.000Z',
+        count: 17,
+      },
+      { count: 2 },
+      { count: 0 },
+    ],
+    total: 19, // summed from the buckets — meta.total_tweet_count was absent
+  });
+  assert.equal(Object.hasOwn(data, 'next_token'), false); // no cursor invented either
+  assert.equal(out.summary, '19 posts across 3 buckets.');
+
+  http.assertDone();
+  await http.close();
+});
+
+test('x_post_counts_archive: a data-less compact envelope renders an empty histogram, total 0', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/counts/all', method: 'GET', query: { query: 'x' } })
+    .reply(200, {});
+
+  const out = await xPostCountsArchive.handler({ query: 'x' }, makeCtx(http));
+
+  assert.deepEqual(out.data, { counts: [], total: 0 });
+  assert.equal(out.summary, '0 posts across 0 buckets.');
+
+  http.assertDone();
+  await http.close();
+});
+
 test('x_post_counts_archive: granularity, time window, and page_token (PAGE-1) reach the wire verbatim', async () => {
   const http = mockHttp();
   http.pool
