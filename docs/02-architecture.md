@@ -22,7 +22,8 @@ content.
 
 Identical to the servicenow-mcp-ai family conventions:
 
-- TypeScript **strict**, ESM (`"type": "module"`), Node ≥ 20.
+- TypeScript **strict**, ESM (`"type": "module"`), Node ≥ 22 (raised from the family's
+  Node 20 floor — `engines` is `>=22`).
 - **Runtime dependencies — exactly two, and this is the authoritative statement for the
   whole corpus:** `@modelcontextprotocol/sdk` (^1.x, stdio transport) and `zod` (config
   validation + tool input schemas). Nothing else ships at runtime. **`undici` is *not* a

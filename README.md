@@ -17,8 +17,8 @@ pay-per-use pricing so an agent can never quietly overspend.
 > [`x-mcp-ai`](https://www.npmjs.com/package/x-mcp-ai)** (currently `0.8.0`, published from
 > CI with npm provenance). Pin an exact version while the project is on `0.x`
 > ([Setup](#setup)). **41 tools across 12 packages** are registered today; the full designed
-> surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and is landing
-> package by package. The public API is unstable until `1.0.0`.
+> surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and has landed
+> in full. The public API is unstable until `1.0.0`.
 
 Contents: [Quick demo](#quick-demo) · [Features](#features) · [Requirements](#requirements) ·
 [Setup](#setup) · [Configure credentials](#configure-credentials) · [Cost](#cost) ·
@@ -277,8 +277,8 @@ gate.
 The 41 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
 callable under the default preset (DM reads excepted: they need an explicit allow).
 "User" marks `user-only` tools, which require OAuth 2.0 user context and are unreachable
-with an app-only bearer token. The designed surface, including tools not yet implemented,
-is [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md); the full per-tool reference —
+with an app-only bearer token. The designed surface is
+[`docs/03-tool-catalog.md`](docs/03-tool-catalog.md); the full per-tool reference —
 schemas, scopes, cost class, availability — is
 [`docs/reference/tools.md`](docs/reference/tools.md).
 
