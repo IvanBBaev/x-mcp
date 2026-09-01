@@ -366,3 +366,147 @@ test('F3: an oversized platform reason is capped rather than flooding the contex
   http.assertDone();
   await http.close();
 });
+
+// --- DRIFT-1 hard cases: every optional/ill-typed field the endpoint can send ----------
+
+test('DRIFT-1: a degraded 200 with no errors[] at all (or an empty error object) invents no platform reason', async () => {
+  // REND-2 quoting is best-effort: when the platform explains nothing, the note must say
+  // UNKNOWN and stop — a fabricated "Platform reason:" line would be worse than silence.
+  const http = mockHttp();
+
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, {});
+  const bare = await usageTool({ budget: fakeBudget(0.02, 1) }).handler({}, makeCtx(http));
+  assert.match((bare.data as UsageReport).note, /UNKNOWN, not zero/);
+  assert.doesNotMatch((bare.data as UsageReport).note, /Platform reason/);
+  assert.equal(bare.summary, 'platform usage unknown; local session estimate $0.02.');
+
+  // An `errors: [{}]` entry sanitizes to an empty reason — same outcome as no entry.
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, { errors: [{}] });
+  const empty = await usageTool({ budget: fakeBudget(0.02, 1) }).handler({}, makeCtx(http));
+  assert.match((empty.data as UsageReport).note, /UNKNOWN, not zero/);
+  assert.doesNotMatch((empty.data as UsageReport).note, /Platform reason/);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('a zero platform cap (and a zero budget limit) is reported as stated but never divided by', async () => {
+  // COST-7 says the cap is surfaced exactly as the platform states it — even a nonsense 0.
+  // A 0 denominator must simply drop percent_used (both platform- and budget-side), never
+  // yield Infinity/NaN into a JSON report.
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, { data: { project_usage: '125000', project_cap: '0' } });
+
+  const out = await usageTool({ budget: fakeBudget(0.5, 0, 'hard') }).handler({}, makeCtx(http));
+  const report = out.data as UsageReport;
+
+  assert.equal(report.platform.posts_read, 125_000);
+  assert.equal(report.platform.cap, 0); // stated, not "corrected"
+  assert.equal(Object.hasOwn(report.platform, 'percent_used'), false);
+  // A limit of $0 renders the full budget block with everything already spent-through —
+  // and no percent_used key rather than a division by zero.
+  assert.deepEqual(report.session_budget, {
+    spent_usd: 0.5,
+    mode: 'hard',
+    limit_usd: 0,
+    remaining_usd: 0,
+  });
+  // The summary keeps the "of 0" wording and just omits the percentage.
+  assert.equal(out.summary, '125000 of 0 posts read; local session estimate $0.5.');
+
+  http.assertDone();
+  await http.close();
+});
+
+test('DRIFT-1: counters already typed as JSON numbers are accepted; a non-finite one never leaks', async () => {
+  const http = mockHttp();
+
+  // The docs say the counters come back as strings, but a number-typed counter must not
+  // be refused if the platform drifts to proper JSON numbers.
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, { data: { project_usage: 125, project_cap: 200 } });
+  const typed = await usageTool({ budget: fakeBudget(0) }).handler({}, makeCtx(http));
+  const typedReport = typed.data as UsageReport;
+  assert.equal(typedReport.platform.posts_read, 125);
+  assert.equal(typedReport.platform.cap, 200);
+  assert.equal(typedReport.platform.percent_used, 62.5);
+  assert.equal(typed.summary, '125 of 200 posts read (62.5%); local session estimate $0.');
+
+  // `1e999` parses to Infinity — a raw string body so the mock cannot re-serialize it.
+  // Infinity must not surface in the report (it is not JSON-encodable) nor feed a percent.
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, '{"data":{"project_usage":1e999,"project_cap":"200"}}');
+  const inf = await usageTool({ budget: fakeBudget(0) }).handler({}, makeCtx(http));
+  const infReport = inf.data as UsageReport;
+  assert.equal(Number.isFinite(infReport.platform.posts_read), true);
+  assert.equal(infReport.platform.posts_read, 0);
+  assert.equal(infReport.platform.cap, 200);
+  assert.equal(Object.hasOwn(infReport.platform, 'percent_used'), false);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('DRIFT-1: an unparseable cap string drops the cap — the summary falls back to posts read alone', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, { data: { project_usage: '125000', project_cap: 'unlimited' } });
+
+  const out = await usageTool({ budget: fakeBudget(0) }).handler({}, makeCtx(http));
+  const report = out.data as UsageReport;
+
+  // "unlimited" is not a number: the cap key is ABSENT (never 0, never NaN)…
+  assert.equal(Object.hasOwn(report.platform, 'cap'), false);
+  assert.equal(report.platform.posts_read, 125_000);
+  // …and with data present but no cap, the summary states the count without an "of".
+  assert.equal(out.summary, '125000 posts read; local session estimate $0.');
+
+  http.assertDone();
+  await http.close();
+});
+
+test('REND-9 / DRIFT-1: malformed daily and per-app entries are skipped or zeroed, never invented', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, {
+      data: {
+        project_usage: '10',
+        daily_project_usage: [
+          { date: 'not-a-date', usage: '5' }, // no ISO date → the whole entry is dropped
+          { date: '2026-08-30' }, // valid date, absent usage → an honest 0
+        ],
+        daily_client_app_usage: [
+          { usage: [{ date: '2026-08-30', usage: '7' }] }, // no client_app_id → dropped
+          { client_app_id: 'app-1' }, // no usage array → total 0
+          {
+            client_app_id: 'app-2',
+            usage: [{ date: '2026-08-30' }, { date: '2026-08-31', usage: '3' }],
+          }, // a day without usage adds 0, the parseable day still counts
+        ],
+      },
+    });
+
+  const report = (await usageTool({ budget: fakeBudget(0) }).handler({}, makeCtx(http)))
+    .data as UsageReport;
+
+  // REND-9: only the entry with a real date survives, normalised to ISO-8601 UTC.
+  assert.deepEqual(report.platform.daily, [{ date: '2026-08-30T00:00:00.000Z', posts_read: 0 }]);
+  // An unattributable per-app row is dropped; missing usage never becomes NaN.
+  assert.deepEqual(report.platform.by_app, [
+    { client_app_id: 'app-1', posts_read: 0 },
+    { client_app_id: 'app-2', posts_read: 3 },
+  ]);
+
+  http.assertDone();
+  await http.close();
+});

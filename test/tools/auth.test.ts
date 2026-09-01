@@ -275,6 +275,25 @@ test('x_rate_limit_status returns the tracker status verbatim', async () => {
   assert.equal(result.summary, 'rate-limit: 1 bucket(s) tracked');
 });
 
+test('a snapshot that already carries the handle is used verbatim — no /2/users/me call', async () => {
+  const info: AuthSessionInfo = {
+    authMode: 'user',
+    me: { id: '9', handle: 'preset_handle' }, // handle known at composition time
+    scopes: [],
+    availability: ['app+user'],
+    policy: { preset: 'default-write', cells: { 'read:account': true } },
+    tokenStore: 'file',
+  };
+  const tools = createAuthTools(fakeDeps(info, SAMPLE_RATE_LIMIT));
+  // NO_HTTP proves the short-circuit: with the handle already in the snapshot the handler
+  // must not spend a request (or a rate-limit hit, or a failure risk) on enrichment.
+  const ctx: ToolContext = { ports: makePorts(), http: NO_HTTP };
+
+  const result = await getTool(tools, 'x_auth_status').handler({}, ctx);
+  assert.deepEqual((result.data as AuthStatusData).me, { id: '9', handle: 'preset_handle' });
+  assert.equal(result.summary, 'auth: user @preset_handle');
+});
+
 // Statically pins the INT-6 dependency contract the integrator (T-130) must satisfy.
 test('AuthToolDeps shape is the INT-6 seam createAuthTools consumes', () => {
   const tracker: Pick<RateLimitTracker, 'status'> = { status: () => SAMPLE_RATE_LIMIT };

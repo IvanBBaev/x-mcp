@@ -29,7 +29,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, join, parse, sep } from 'node:path';
 
 import { MEDIA_SEGMENT_BYTES, MEDIA_SIZE_CAPS } from '../../src/api/endpoints/media.js';
 import { mapHttpError } from '../../src/api/errors.js';
@@ -1628,6 +1628,134 @@ test('an INIT 200 without a media id aborts with a typed api error before any AP
       return true;
     },
   );
+  mock.assertDone();
+  await mock.close();
+});
+
+// --- MEDIA-5: media-directory spellings (~ and /) ---------------------------------
+
+test('MEDIA-5: a media directory of exactly `~` names the real home directory', async () => {
+  // `expandTilde` must treat a bare `~` as the home directory itself (docs/04 §7 lets the
+  // operator write `~/x-media`; plain `~` is the degenerate spelling). If it were taken
+  // literally, `resolve("~")` would name a `./~` that does not exist and every upload
+  // would refuse with the operator-fix "directory does not exist" error. Instead the
+  // (existing) home directory passes the root check and the failure is the ordinary
+  // file-open one for a file that is not there.
+  await assert.rejects(
+    () => openMediaFile('x-mcp-no-such-file-2f4a1c.png', { mediaDir: '~' }),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'validation');
+      assert.match(err.message, /Cannot open media file/);
+      // NOT the unconfigured/missing-directory refusal: `~` resolved to a real root.
+      assert.doesNotMatch(err.message, /does not exist or is not readable by the server/);
+      assert.doesNotMatch(err.message, /resolves outside/);
+      return true;
+    },
+  );
+});
+
+test('MEDIA-5: a media directory that already ends with the separator still contains its files', async () => {
+  // The containment prefix must not become `//` (or `dir//`) when the configured root
+  // already ends with the path separator — that malformed prefix would refuse EVERY file
+  // inside the directory. The filesystem root is the natural always-trailing spelling;
+  // it must be the root of the VOLUME holding the temp file (`parse().root`), because on
+  // win32 a bare `sep` resolves against the current drive, which CI keeps separate from
+  // the temp directory's drive.
+  const path = tempFile('sep-root.png', mediaBytes('png', 12));
+  const file = await openMediaFile(path, { mediaDir: parse(path).root });
+  try {
+    assert.equal(file.mediaType, 'image/png');
+    assert.equal(basename(file.resolvedPath), 'sep-root.png');
+  } finally {
+    await file.handle.close();
+  }
+});
+
+// --- MEDIA-3: alt_text failure classes --------------------------------------------
+
+test('MEDIA-3: a programming error during the alt_text call is NOT swallowed into the note', async () => {
+  // Only TYPED (XError) metadata failures downgrade to the best-effort note; a
+  // programming error or torn invariant must surface as the SAME object — hiding it
+  // behind "media_id is still usable" would bury a real bug.
+  const path = tempFile('alt-crash.png', mediaBytes('png', 12));
+  const sentinel = new TypeError('metadata serializer broke');
+  const http: EndpointInvoker = {
+    send: <T>(req: XApiRequest): Promise<T> => {
+      if (req.path === '/2/media/upload/initialize') {
+        return Promise.resolve({ data: { id: '7100' } } as T);
+      }
+      if (req.path === '/2/media/upload/7100/append') {
+        return Promise.resolve(undefined as T);
+      }
+      if (req.path === '/2/media/upload/7100/finalize') {
+        return Promise.resolve({ data: { id: '7100' } } as T);
+      }
+      if (req.path === '/2/media/metadata') return Promise.reject(sentinel);
+      return Promise.reject(new Error(`unexpected request: ${req.path}`));
+    },
+  };
+
+  await assert.rejects(
+    () => upload.handler({ path, alt_text: 'desc' }, { ports: makePorts(), http }),
+    (err: unknown) => err === sentinel,
+  );
+});
+
+// --- MEDIA-4: failure-reason fallbacks --------------------------------------------
+
+test('MEDIA-4: a failed STATUS whose error has only a name still quotes it as the reason', async () => {
+  // The platform error object may carry `name` without `message`; the reason line must
+  // fall back to the name rather than claiming the platform gave no detail.
+  const mock = mockHttp();
+  mock.pool
+    .intercept({
+      path: '/2/media/upload',
+      method: 'GET',
+      query: { command: 'STATUS', media_id: '7202' },
+    })
+    .reply(200, {
+      data: { id: '7202', processing_info: { state: 'failed', error: { name: 'InvalidMedia' } } },
+    });
+
+  await assert.rejects(
+    () => xMediaStatus.handler({ media_id: '7202' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'api');
+      assert.match(err.message, /Reason: InvalidMedia\./);
+      assert.doesNotMatch(err.message, /no failure detail/);
+      assert.equal(err.data.platform_title, 'InvalidMedia');
+      // No `message` from the platform → no platform_detail key at all.
+      assert.equal(Object.hasOwn(err.data, 'platform_detail'), false);
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('status: an in-progress state WITHOUT check_after_secs states the state and stops there', async () => {
+  // No poll-again hint can be given when the platform sends none — the summary must not
+  // invent a delay, only name the state.
+  const mock = mockHttp();
+  mock.pool
+    .intercept({
+      path: '/2/media/upload',
+      method: 'GET',
+      query: { command: 'STATUS', media_id: '7203' },
+    })
+    .reply(200, {
+      data: { id: '7203', processing_info: { state: 'in_progress', progress_percent: 10 } },
+    });
+
+  const out = await xMediaStatus.handler({ media_id: '7203' }, contextFor(mock));
+  assert.deepEqual(out.data, {
+    media_id: '7203',
+    processing_state: 'in_progress',
+    progress_percent: 10,
+  });
+  assert.equal(out.summary, 'Media 7203 processing state: in_progress.');
   mock.assertDone();
   await mock.close();
 });
