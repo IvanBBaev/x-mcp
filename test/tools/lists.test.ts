@@ -269,6 +269,28 @@ test('update: PUT /2/lists/:id sends only the provided fields; accepts a list UR
   await mock.close();
 });
 
+test('update: a description-only change sends exactly that field in the PUT body', async () => {
+  const mock = mockHttp();
+  // The body pin proves name/private are OMITTED, not sent as null/undefined placeholders.
+  mock.pool
+    .intercept({
+      path: `/2/lists/${LIST_ID}`,
+      method: 'PUT',
+      body: '{"description":"Now with a blurb."}',
+    })
+    .reply(200, { data: { updated: true } });
+
+  const out = await xListUpdate.handler(
+    { list_id: LIST_ID, description: 'Now with a blurb.' },
+    contextFor(mock),
+  );
+
+  assert.deepEqual(out.data, { list_id: LIST_ID, updated: true });
+  assert.equal(out.summary, `Updated list ${LIST_ID}.`);
+  mock.assertDone();
+  await mock.close();
+});
+
 test('update with no fields is a validation error before any request', async () => {
   await assert.rejects(
     () => xListUpdate.handler({ list_id: LIST_ID }, noHttpCtx()),
@@ -370,6 +392,21 @@ test('REND-10: get with raw:true returns the exact API envelope', async () => {
   await mock.close();
 });
 
+test('DRIFT-1: get with a data-less 200 renders an empty compact list, no crash', async () => {
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}`, method: 'GET', query: LIST_PROJECTION })
+    .reply(200, {});
+
+  const out = await xListGet.handler({ list_id: LIST_ID }, contextFor(mock));
+
+  // Every optional field is omitted; the required id/name degrade to empty strings.
+  assert.deepEqual(out.data, { id: '', name: '' });
+  assert.equal(out.summary, `List "" (id ${LIST_ID}).`);
+  mock.assertDone();
+  await mock.close();
+});
+
 // --- x_lists_owned ---------------------------------------------------------------
 
 test('owned: user defaults to "me", renders a compact list page (REND-8/REND-6)', async () => {
@@ -438,6 +475,30 @@ test('REND-8: an unknown handle is not-found and the owned-lists read is never s
   await mock.close();
 });
 
+test('REND-10: owned raw:true without max_results sends no cap and returns the exact page', async () => {
+  const fixture = loadFixture<RawListResponse<RawList>>('lists/owned-page.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/users/me', method: 'GET', query: USERS_PROJECTION })
+    .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/me.json'));
+  // The intercept carries the projection ONLY — the raw cap applies just when the caller
+  // asked for a size, so no max_results param goes out.
+  mock.pool
+    .intercept({
+      path: `/2/users/${USERS_ME_ID}/owned_lists`,
+      method: 'GET',
+      query: LIST_PROJECTION,
+    })
+    .reply(200, fixture);
+
+  const out = await xListsOwned.handler({ raw: true }, contextFor(mock));
+
+  assert.deepEqual(out.data, fixture); // exact envelope: includes/meta and all
+  assert.equal(out.summary, `2 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  mock.assertDone();
+  await mock.close();
+});
+
 test('owned: a me response without an id maps to a typed api error', async () => {
   const mock = mockHttp();
   mock.pool
@@ -483,6 +544,22 @@ test('PAGE-3: members clamps max_results above the 1-100 window down to 100 and 
     /max_results adjusted to 100 \(this endpoint accepts 1-100; requested 150\)/,
   );
   assert.match(page.note, /third-party text/); // clamp note is PREFIXED to the REND-6 note
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-10: members raw:true returns the envelope; a data-less 200 counts as 0', async () => {
+  const mock = mockHttp();
+  // DRIFT-1: a degraded envelope with no `data` array still summarizes rather than crash.
+  const envelope = { meta: { result_count: 0 } };
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}/members`, method: 'GET', query: MEMBERS_PROJECTION })
+    .reply(200, envelope);
+
+  const out = await xListMembers.handler({ list_id: LIST_ID, raw: true }, contextFor(mock));
+
+  assert.deepEqual(out.data, envelope);
+  assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });

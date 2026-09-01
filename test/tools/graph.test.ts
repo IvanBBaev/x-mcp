@@ -556,6 +556,32 @@ test('REND-10: raw:true returns the exact API JSON and caps max_results at 25', 
   await mock.close();
 });
 
+test('x_following_list: cursor rides as pagination_token; raw without max_results sends no cap', async () => {
+  const mock = mockHttp();
+  // PAGE-1: the following read bridges page_token to pagination_token like the followers
+  // read does; REND-10: a raw call with no requested size puts NO max_results on the wire.
+  // The intercept pins exactly the projection + cursor and nothing else.
+  const envelope = { meta: { result_count: 0 } };
+  mock.pool
+    .intercept({
+      path: '/2/users/12/following',
+      method: 'GET',
+      query: { ...USERS_PROJECTION, pagination_token: 'graph-cursor-7' },
+    })
+    .reply(200, envelope);
+
+  const out = await xFollowingList.handler(
+    { user: '12', page_token: 'graph-cursor-7', raw: true },
+    contextFor(mock),
+  );
+
+  // DRIFT-1: a data-less envelope still summarizes as 0 rather than crashing.
+  assert.deepEqual(out.data, envelope);
+  assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  mock.assertDone();
+  await mock.close();
+});
+
 // --- x_user_search ----------------------------------------------------------------
 
 test('x_user_search: one GET renders a compact user page (REND-6/COST-3)', async () => {

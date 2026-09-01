@@ -10,6 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
 import { createHandleLookup } from '../../src/api/endpoints/users.js';
 import { xUserGet, usersTools } from '../../src/tools/users.js';
@@ -49,12 +50,29 @@ const NASA_BODY: RawListResponse<RawUser> = {
   ],
 };
 
+/** The wrapper shape of the error fixtures under test/fixtures/errors/. */
+interface ErrorFixture {
+  readonly status: number;
+  readonly headers: Record<string, string>;
+  readonly body: unknown;
+}
+
 /** Build a real `EndpointInvoker` over the mock dispatcher. */
 function invokerFor(mock: MockHttp): EndpointInvoker {
   return createHttpClient({
     sleep: fakeSleep().fn,
     random: fakeRandom(),
     dispatcher: mock.dispatcher,
+  });
+}
+
+/** Same, but with the production error mapper — needed where a typed 404 must surface. */
+function mappedInvokerFor(mock: MockHttp): EndpointInvoker {
+  return createHttpClient({
+    sleep: fakeSleep().fn,
+    random: fakeRandom(),
+    dispatcher: mock.dispatcher,
+    mapError: mapHttpError,
   });
 }
 
@@ -181,6 +199,58 @@ test('x_user_get raw:true returns the uncompacted envelope, capped', async () =>
   await mock.close();
 });
 
+test('x_user_get raw:true merges @handle + me batches and carries the API errors[]', async () => {
+  const mock = mockHttp();
+  // No plain ids in the input at all — only the /by and /me endpoints may fire.
+  const byFixture = loadFixture<RawListResponse<RawUser>>('users/missing-user.json');
+  const meFixture = loadFixture<RawSingleResponse<RawUser>>('users/me.json');
+  mock.pool
+    .intercept({
+      path: '/2/users/by',
+      method: 'GET',
+      query: { usernames: 'jack', 'user.fields': USER_FIELDS },
+    })
+    .reply(200, byFixture);
+  mock.pool
+    .intercept({ path: '/2/users/me', method: 'GET', query: { 'user.fields': USER_FIELDS } })
+    .reply(200, meFixture);
+
+  const out = await xUserGet.handler({ users: ['@jack', 'me'], raw: true }, ctxFor(mock));
+  const envelope = out.data as RawListResponse<RawUser>;
+
+  // The by-handle records and the single me record are concatenated, uncompacted…
+  assert.deepEqual(
+    envelope.data?.map((u) => u.username),
+    ['NASA', 'self_bot'],
+  );
+  assert.ok(envelope.data?.[0]?.public_metrics);
+  // …and the partial-failure errors[] from the response survive into the merged envelope.
+  assert.deepEqual(envelope.errors, byFixture.errors);
+  assert.equal(out.summary, `2 raw user record(s) ${UNTRUSTED_CONTENT_NOTE}`);
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_user_get: a degraded me response (errors[], no data) lands in missing[], not items', async () => {
+  const mock = mockHttp();
+  // DRIFT-1: a 200 whose body carries only errors[] must not fabricate a user — the entry
+  // is reported through the REND-2 missing[] channel instead.
+  const errors = loadFixture<RawListResponse<RawUser>>('users/missing-user.json').errors;
+  mock.pool
+    .intercept({ path: '/2/users/me', method: 'GET', query: { 'user.fields': USER_FIELDS } })
+    .reply(200, { errors });
+
+  const out = await xUserGet.handler({ users: ['me'] }, ctxFor(mock));
+  const batch = out.data as BatchResult<CompactUser>;
+
+  assert.equal(batch.items.length, 0);
+  assert.equal(batch.missing?.length, 1);
+  assert.equal(batch.missing?.[0]?.reason, 'not-found');
+  assert.equal(out.summary, '0 user(s), 1 missing');
+  mock.assertDone();
+  await mock.close();
+});
+
 test('createHandleLookup resolves a handle to an identity on a hit', async () => {
   const mock = mockHttp();
   mock.pool
@@ -210,6 +280,26 @@ test('createHandleLookup returns null for a not-found handle (200 + errors[])', 
     .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/handle-lookup-miss.json'));
 
   const identity = await createHandleLookup(invokerFor(mock))('ghost');
+
+  assert.equal(identity, null);
+  mock.assertDone();
+  await mock.close();
+});
+
+test('createHandleLookup returns null for a hard HTTP 404 (typed not-found)', async () => {
+  const mock = mockHttp();
+  const fx = loadFixture<ErrorFixture>('errors/404-not-found.json');
+  mock.pool
+    .intercept({
+      path: '/2/users/by/username/ghost',
+      method: 'GET',
+      query: { 'user.fields': USER_FIELDS },
+    })
+    .reply(fx.status, fx.body as Record<string, unknown>, { headers: fx.headers });
+
+  // The production mapper turns the 404 into a typed `not-found` XError, which the lookup
+  // swallows into `null` — a missing user is a resolution miss, never a thrown failure.
+  const identity = await createHandleLookup(mappedInvokerFor(mock))('ghost');
 
   assert.equal(identity, null);
   mock.assertDone();

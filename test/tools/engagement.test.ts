@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
 import { XError } from '../../src/core/errors.js';
+import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
 import type { ToolContext } from '../../src/core/tooldef.js';
 import {
@@ -489,6 +490,43 @@ test('REND-10: raw: true returns the exact envelope with max_results capped at 2
   const out = await xBookmarksList.handler({ max_results: 100, raw: true }, contextFor(mock));
   assert.deepEqual(out.data, fixture); // exact envelope: includes/meta and all
   assert.match(out.summary ?? '', /raw/i);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-10: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  // The intercept carries the field params ONLY — the raw cap applies just when the caller
+  // asked for a size. A degraded envelope with no `data` must still summarize (DRIFT-1).
+  const envelope = { meta: { result_count: 0 } };
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks', method: 'GET', query: BOOKMARK_FIELD_PARAMS })
+    .reply(200, envelope);
+
+  const out = await xBookmarksList.handler({ raw: true }, contextFor(mock));
+
+  assert.deepEqual(out.data, envelope);
+  assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-1: an empty last page has no "more available" and carries the zero-results note', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks', method: 'GET', query: BOOKMARK_FIELD_PARAMS })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-empty.json'));
+
+  const out = await xBookmarksList.handler({}, contextFor(mock));
+  const page = out.data as CompactPageResult;
+
+  assert.equal(page.result_count, 0);
+  assert.equal(page.next_token, undefined);
+  assert.equal(out.summary, '0 result(s).');
 
   mock.assertDone();
   await mock.close();

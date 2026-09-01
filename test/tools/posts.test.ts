@@ -875,6 +875,26 @@ test('NET-4: a 5xx on hide states the ambiguity AND that re-issuing is safe', as
   await mock.close();
 });
 
+test('a non-XError rejection propagates unchanged through the create and hide catches', async () => {
+  // The guidance mappers (mapCreateFailure / withGuidance) only dress TYPED failures; a
+  // programming error or torn transport must surface as the SAME object, not be rewrapped
+  // into misleading API guidance.
+  const sentinel = new Error('socket torn mid-write');
+  const ctx: ToolContext = {
+    ports: makePorts(),
+    http: { send: () => Promise.reject(sentinel) },
+  };
+
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'hello' }, ctx),
+    (err: unknown) => err === sentinel,
+  );
+  await assert.rejects(
+    () => xPostHideReply.handler({ reply_id: '777', action: 'hide' }, ctx),
+    (err: unknown) => err === sentinel,
+  );
+});
+
 test('x_post_hide_reply: the input schema is strict and the action enum is closed', () => {
   assert.equal(xPostHideReply.input.safeParse({ reply_id: '1', action: 'hide' }).success, true);
   assert.equal(xPostHideReply.input.safeParse({ reply_id: '1', action: 'unhide' }).success, true);
