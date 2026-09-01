@@ -401,6 +401,28 @@ test('REND-10: raw:true returns the exact API JSON and caps max_results at 25', 
   await http.close();
 });
 
+test('REND-10: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+  const http = mockHttp();
+  // The intercept carries the field params ONLY — the raw cap applies just when the caller
+  // asked for a size. A degraded envelope with no `data` must still summarize (DRIFT-1).
+  const envelope = { meta: { result_count: 0 } };
+  http.pool
+    .intercept({
+      path: '/2/users/50393960/tweets',
+      method: 'GET',
+      query: TIMELINE_FIELD_PARAMS,
+    })
+    .reply(200, envelope);
+
+  const out = await xTimelineUser.handler({ user: '50393960', raw: true }, makeCtx(http));
+
+  assert.deepEqual(out.data, envelope);
+  assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+
+  http.assertDone();
+  await http.close();
+});
+
 test('REND-8: a malformed user reference is a validation error before any request', async () => {
   await assert.rejects(
     () => xTimelineUser.handler({ user: 'not a user!!' }, noHttpCtx()),

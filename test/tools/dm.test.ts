@@ -181,6 +181,25 @@ test('DM-2: the 30-day retention note is on EVERY DM read — even an empty page
   await mock.close();
 });
 
+test('REND-5/DRIFT-1: a degraded event minimizes to id + sender only — no fabricated fields', async () => {
+  const mock = mockHttp();
+  // The event carries no created_at, no dm_conversation_id, and no user expansion: the
+  // minimized item must OMIT the missing fields (never emit null/undefined placeholders)
+  // and fall back to the numeric sender id for the handle.
+  mock.pool.intercept({ path: '/2/dm_events', method: 'GET', query: DM_PROJECTION }).reply(200, {
+    data: [{ id: '1900000000000000003', event_type: 'MessageCreate', sender_id: '777' }],
+    meta: { result_count: 1 },
+  });
+
+  const out = await xDmEventsList.handler({}, contextFor(mock));
+  const page = out.data as Page<Record<string, unknown>>;
+
+  assert.deepEqual(page.items, [{ id: '1900000000000000003', sender: '777' }]);
+  assert.equal(out.summary, '1 DM event(s).');
+  mock.assertDone();
+  await mock.close();
+});
+
 test('DM-3: include_text: true returns sanitized bodies under the REND-6 untrusted note', async () => {
   const mock = mockHttp();
   mock.pool

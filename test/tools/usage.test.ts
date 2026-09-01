@@ -244,6 +244,23 @@ test('x_usage_get: an under-range `days` is raised to 1 on the wire', async () =
   await http.close();
 });
 
+test('x_usage_get: an in-range `days` rides the wire verbatim with no clamp note', async () => {
+  const http = mockHttp();
+  // The intercept pins days=30 exactly as requested: nothing was rewritten.
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS, days: '30' } })
+    .reply(200, loadFixture<RawUsageResponse>(FIXTURE));
+
+  const report = (await usageTool({ budget: fakeBudget(0) }).handler({ days: 30 }, makeCtx(http)))
+    .data as UsageReport;
+
+  // No clamp happened, so the note must not claim one.
+  assert.doesNotMatch(report.note, /raised|lowered/);
+
+  http.assertDone();
+  await http.close();
+});
+
 test('x_usage_get: a fractional `days` is a typed validation error and no request is sent', async () => {
   const tool = usageTool({ budget: fakeBudget(0) });
   const ctx: ToolContext = { ports: makePorts(), http: NO_HTTP };
