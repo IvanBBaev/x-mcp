@@ -15,14 +15,14 @@ in parentheses (`T-1xx`) are from
 
 | Layer | Scope | Doubles | Where |
 |---|---|---|---|
-| **Unit — core** | `core/*`: policy resolution, config/zod parsing, session budget math, render/sanitize shapes, field presets, error taxonomy, pagination clamp | none (pure) | `test/core-*.test.js` |
-| **Unit — api** | endpoint wrappers, oauth2 refresh/rotation/locking, rate-limit table, retry policy *(oauth1 signing dropped — decision 0001, T-307)* | `undici` `MockAgent` (built into Node ≥ 20) | `test/api-*.test.js` |
+| **Unit — core** | `core/*`: policy resolution, config/zod parsing, session budget math, render/sanitize shapes, field presets, error taxonomy, pagination clamp | none (pure) | `test/core/` |
+| **Unit — api** | endpoint wrappers, oauth2 refresh/rotation/locking, rate-limit table, retry policy *(oauth1 signing dropped — decision 0001, T-307)* | `undici` `MockAgent` (pinned dev dependency — docs/02 §2) | `test/api/**` |
 | **Property-based (fast-check)** | encoding/ordering/algebra invariants: policy resolution (deny-wins, idempotent), `max_results` clamping across arbitrary integers *(oauth1 signature base string dropped — decision 0001)* | none / `MockAgent` | `test/prop-*.test.js` |
-| **Tool-level** | each tool end-to-end inside the process: input schema → pipeline → rendered output / typed error | `MockAgent` fixtures | `test/tools-*.test.js` |
+| **Tool-level** | each tool end-to-end inside the process: input schema → pipeline → rendered output / typed error | `MockAgent` fixtures | `test/tools/` |
 | **Contract fixtures** | recorded real v2 response JSON (sanitized) per endpoint, asserted against render output — catches API drift when refreshed (DRIFT-1/4) | fixture files w/ provenance | `test/fixtures/**` |
-| **MCP integration** | a real `@modelcontextprotocol/sdk` `Client` connected to the real server object over `InMemoryTransport`: `tools/list` schemas + annotations + `instructions`, representative `tools/call` round-trips, denied-tool-as-result, parallel calls (MCP-2/4/5/8) | `InMemoryTransport` + `MockAgent` | `test/mcp-*.test.js` |
-| **Spawn smoke** | spawn the CJS `bin` over real stdio, `initialize` + `tools/list`; assert **every stdout byte is a JSON-RPC frame** at the most verbose log level (MCP-1); a second job runs it through the packed tarball, not the repo layout | real process, no HTTP | `test/mcp-spawn.test.js` |
-| **Live (gated, spend real money)** | `npm run inspector` / tagged tests behind `X_MCP_LIVE_TEST=1` against a **dedicated pay-per-use test account** — never in CI, spend-capped (§6) | real API | `test/live/**` |
+| **MCP integration** | a real `@modelcontextprotocol/sdk` `Client` connected to the real server object over `InMemoryTransport`: `tools/list` schemas + annotations + `instructions`, representative `tools/call` round-trips, denied-tool-as-result, parallel calls (MCP-2/4/5/8) | `InMemoryTransport` + `MockAgent` | `test/mcp/` |
+| **Spawn smoke** | spawn the CJS `bin` over real stdio, `initialize` + `tools/list`; assert **every stdout byte is a JSON-RPC frame** at the most verbose log level (MCP-1); a second job runs it through the packed tarball, not the repo layout | real process, no HTTP | `test/mcp/spawn.test.ts` |
+| **Live (gated, spend real money)** | tagged tests behind `X_MCP_LIVE_TEST=1` against a **dedicated pay-per-use test account** — never in CI, spend-capped (§6) | real API | `test/live/**` |
 
 The MCP integration and spawn-smoke layers close the gap the QA review flagged
 ([reviews/04-qa-review.md](reviews/04-qa-review.md) F1): every other layer stops
@@ -214,14 +214,16 @@ probe (docs/08 WP-1.1; T-101 owns `ci.yml`):
 
 | Leg | OS | Node | Runs |
 |---|---|---|---|
-| 1 | ubuntu-latest | 20 | full `check` |
-| 2 | ubuntu-latest | 24 | full `check` + coverage-guard ratchet + Codecov upload |
+| 1 | ubuntu-latest | 22 | full `check` |
+| 2 | ubuntu-latest | 24 | full `check` |
 | 3 | macOS-latest | 22 | full `check` |
 | 4 | **windows-latest** | 22 | full `check` **incl.** the token-store persistence / locking / perms suite — rotation, tmp+rename atomicity, `0600` warning, `.lock` semantics, two-process interleave (PLAT-1/2/3, AUTH-5/7/12, CONC-4). Not skipped — this is the platform where the highest-risk module is most likely to break. |
 | probe | ubuntu-latest | **12** | **launcher-node12**: the CJS `bin` on ancient Node prints a human-readable version message, not a `SyntaxError` (MCP-6 / OPS-F1) — asserted, not assumed. |
 
-Node **20 / 22 / 24** are all covered across legs 1–4; the ubuntu leg also uploads
-coverage and drives the ratchet. One CI job additionally runs the §1 spawn smoke
+Node **22 / 24** are covered across legs 1–4 — `engines` is `>=22` with
+`engine-strict`, so the matrix floor is 22, not the family's 20. Every leg drives the
+coverage-guard ratchet inside `check`; a separate ubuntu (Node 22) job uploads
+coverage to Codecov. One CI job additionally runs the §1 spawn smoke
 through the **packed tarball** (`npm pack` + run from the tarball) so the published
 artifact — not the repo layout — is what is smoke-tested (F16). No live tests in CI.
 

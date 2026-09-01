@@ -185,7 +185,7 @@ Three different mechanisms, in order of likelihood:
    hidden, if `X_MCP_HIDE_DENIED=1`).
 3. **Availability class-gating.** `X_MCP_AVAILABILITY` gates only the specially-provisioned
    classes (`pilot`, `premium-user`, `enterprise`); such tools are absent from the listing
-   entirely, not annotated. **No tool in the current surface uses those classes** — all 38
+   entirely, not annotated. **No tool in the current surface uses those classes** — all 41
    are `app+user` or `user-only` and always register. So if a tool is missing today, it is
    (1) or (2), not this.
 
