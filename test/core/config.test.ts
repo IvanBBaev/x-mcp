@@ -251,6 +251,13 @@ test('CFG-3: a profile whose credentials contradict its auth_mode is fatal', () 
   );
 });
 
+test('CFG-3: selecting a profile from an EMPTY profiles file says "(none)", not an empty list', () => {
+  assertFatal(
+    () => parseConfig({ X_MCP_PROFILES_FILE: '~/p.json', X_MCP_PROFILE: 'work' }, {}),
+    /profile "work" not found in profiles file; available profiles: \(none\)/,
+  );
+});
+
 // --- CFG-4: empty string is treated as unset -------------------------------------------
 
 test('CFG-4: empty/whitespace values are treated as unset (defaults apply)', () => {
@@ -521,6 +528,20 @@ test('CFG-6: profile secrets never leak into warnings or fatal messages (SEC-T16
 
 test('CFG-7: base URL must use https', () => {
   assertFatal(() => parseConfig({ X_MCP_BASE_URL: 'http://api.x.com' }), /must use https/);
+});
+
+test('CFG-7: a base URL that does not parse at all is fatal, reported once', () => {
+  // Under oauth2 both value rules inspect the URL; the credential-egress check stays quiet
+  // on a malformed value so the operator sees exactly one issue, not two for one typo.
+  assertFatal(
+    () =>
+      parseConfig({
+        X_MCP_AUTH_MODE: 'oauth2',
+        X_MCP_CLIENT_ID: 'CID',
+        X_MCP_BASE_URL: 'not-a-url',
+      }),
+    /X_MCP_BASE_URL must be a valid absolute URL \(got "not-a-url"\)/,
+  );
 });
 
 test('CFG-7: a non-x.com host is refused unless the insecure flag is set', () => {

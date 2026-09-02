@@ -11,9 +11,16 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
+import { z } from 'zod';
+
 import { parseConfig } from '../../src/core/config.js';
 import { composeServer } from '../../src/mcp/compose.js';
 import type { Composition } from '../../src/mcp/compose.js';
+import { buildMcpServer } from '../../src/mcp/server.js';
+import { defineTool } from '../../src/core/tooldef.js';
+import type { EndpointInvoker } from '../../src/core/tooldef.js';
+import type { Ports } from '../../src/core/ports.js';
+import type { Registry } from '../../src/core/registry.js';
 import type { RateLimitStatus } from '../../src/api/ratelimit.js';
 
 import { mockHttp, loadFixture } from '../helpers/index.js';
@@ -541,4 +548,65 @@ test('MCP-2: unknown arguments surface as a typed validation tool result, not a 
   mock.assertDone();
   await client.close();
   await mock.close();
+});
+
+test('MCP-2: a non-XError escapes as a JSON-RPC internal error, and a schema-less tool lists without outputSchema', async () => {
+  // The adapter's two defensive arms need a registry the real catalog cannot produce: a
+  // tool with no published output schema, whose call throws a plain Error. Both are wiring
+  // bugs by definition (REND-11 pins schema coverage; the choke point only throws XError),
+  // so the adapter must NOT disguise them as tool outcomes — the SDK surfaces the throw as
+  // a protocol-level internal error instead.
+  const probe = defineTool({
+    name: 'x_probe_stub',
+    title: 'probe',
+    description: 'Test stand-in tool outside the real catalog.',
+    policy: 'read:content',
+    availability: 'app+user',
+    scopes: [],
+    cost: 'local',
+    annotations: { title: 'probe', readOnlyHint: true },
+    input: z.object({}).strict(),
+    handler: () => Promise.resolve({ data: null }),
+    phase: 1,
+  });
+  const registry: Registry = {
+    all: () => [probe],
+    get: (name) => (name === probe.name ? probe : undefined),
+    size: 1,
+    listForMcp: () => [
+      {
+        def: probe,
+        name: probe.name,
+        description: probe.description,
+        annotations: probe.annotations,
+        denied: false,
+      },
+    ],
+    call: () => Promise.reject(new Error('wiring bug')),
+  };
+  // The stubbed call never reaches ports or the invoker — empty casts keep the stub honest
+  // about what the adapter actually touches.
+  const server = buildMcpServer({
+    registry,
+    ports: {} as Ports,
+    invokerFor: () =>
+      (() => Promise.reject(new Error('unreachable'))) as unknown as EndpointInvoker,
+  });
+
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'test-harness', version: '0.0.0' });
+  await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+
+  // tools/list: no outputSchema key at all for a tool the T-310 table does not know.
+  const listed = (await client.listTools()).tools;
+  assert.equal(listed.length, 1);
+  assert.ok(listed[0] !== undefined);
+  assert.equal(listed[0].name, 'x_probe_stub');
+  assert.ok(!('outputSchema' in listed[0]));
+
+  // tools/call WITHOUT an arguments field (`?? {}`), and the plain-Error rethrow: the SDK
+  // wraps the escape as a JSON-RPC internal error, never an isError tool result.
+  await assert.rejects(client.callTool({ name: 'x_probe_stub' }), /wiring bug/);
+
+  await client.close();
 });

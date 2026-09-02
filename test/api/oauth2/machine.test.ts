@@ -257,6 +257,31 @@ test('AUTH-2/CONC-1: an eager caller joins a reactive refresh already in flight 
   assert.equal(calls.length, 1);
 });
 
+test('AUTH-2: two COLD callers loading an already-eager pair share one refresh (join inside the refresh entry)', async () => {
+  // Both callers enter with no in-memory pair and no flight, so both pass the early join
+  // check, both load the (eager) pair from the store, and both reach the refresh entry —
+  // the second must join the first one's flight there instead of double-refreshing.
+  const gate = deferred<RefreshHttpResult>();
+  const calls: string[] = [];
+  const clock = fakeClock();
+  const store = inMemoryTokenStore(pairAt(clock));
+  const machine = createRefreshMachine({
+    clock,
+    store,
+    refreshHttp: (rt) => {
+      calls.push(rt);
+      return gate.promise;
+    },
+  });
+
+  clock.advance(7200_000 - 60_000); // 1 min of life left → the stored pair is already eager
+  const a = machine.getAccessToken();
+  const b = machine.getAccessToken();
+  gate.resolve(ok('access-2', { refresh: 'refresh-2', expiresIn: 7200 }));
+  assert.deepEqual(await Promise.all([a, b]), ['access-2', 'access-2']);
+  assert.equal(calls.length, 1, 'the second cold caller joined the flight');
+});
+
 test('CONC-1: all waiters of a failed single-flight refresh see the same typed error; the machine stays healthy', async () => {
   const gate = deferred<RefreshHttpResult>();
   const calls: string[] = [];
@@ -511,6 +536,21 @@ test('AUTH-8: invalid_grant is terminal — typed auth error with the re-authori
   assert.equal(stub.calls.length, 1);
 });
 
+test('AUTH-8: a bare 4xx rejection without OAuth error fields is terminal — no parenthetical, no platform data', async () => {
+  const stub = refreshStub(rejected(401));
+  const { machine } = setup({ stub });
+  await machine.getAccessToken();
+
+  const err = await captureError(machine.handleUnauthorized('access-1'));
+  assert.equal(err.kind, 'auth');
+  // With no `error` field there is no `(...)` insert — the sentence reads cleanly.
+  assert.match(err.message, /X rejected the stored refresh token; re-authorization is required/);
+  assert.equal(err.data.http_status, 401);
+  assert.equal(err.data.platform_title, undefined);
+  assert.equal(err.data.platform_detail, undefined);
+  assert.equal(machine.state(), 'FAILED_CLOSED');
+});
+
 test('AUTH-8: a transient 5xx from the token endpoint is retryable and NOT terminal — the next attempt may refresh again', async () => {
   const stub = refreshStub(
     rejected(503),
@@ -567,6 +607,26 @@ test('AUTH-8: a completed refresh that echoes the rejected access token fails cl
   const err = await captureError(machine.handleUnauthorized('access-1'));
   assert.equal(err.kind, 'auth');
   assert.match(err.message, /same access token/);
+  assert.equal(machine.state(), 'FAILED_CLOSED');
+});
+
+test('AUTH-8: a JOINER whose rejected token is the refresh outcome fails closed instead of spinning', async () => {
+  // The first 401 starts the flight; a second 401 — for the very token that flight is
+  // about to mint — joins it and must NOT hand that same token back (§4A invariant 5).
+  const gate = deferred<RefreshHttpResult>();
+  const clock = fakeClock();
+  const store = inMemoryTokenStore(pairAt(clock));
+  const machine = createRefreshMachine({ clock, store, refreshHttp: () => gate.promise });
+  await machine.getAccessToken();
+
+  const first = machine.handleUnauthorized('access-1');
+  const second = machine.handleUnauthorized('access-2'); // joins; its 401 was for the outcome
+  gate.resolve(ok('access-2', { refresh: 'refresh-2', expiresIn: 7200 }));
+
+  assert.equal(await first, 'access-2', 'the original caller is served the rotation');
+  const err = await captureError(second);
+  assert.equal(err.kind, 'auth');
+  assert.match(err.message, /still yields the rejected access token/);
   assert.equal(machine.state(), 'FAILED_CLOSED');
 });
 
@@ -646,6 +706,18 @@ test('no stored tokens at all → typed auth error with the authorize instructio
 
   store.seed(pairAt(clock)); // `authorize` ran meanwhile — not terminal, just retry
   assert.equal(await machine.getAccessToken(), 'access-1');
+});
+
+test('a 401 with nothing in memory AND nothing on disk reports no stored tokens to refresh', async () => {
+  // The reactive path with a cold machine over an empty store: the under-lock reload
+  // finds nothing to adopt and nothing to refresh from — typed auth error, not terminal.
+  const { machine, stub } = setup({ pair: null });
+  const err = await captureError(machine.handleUnauthorized('access-x'));
+  assert.equal(err.kind, 'auth');
+  assert.match(err.message, /No stored OAuth tokens to refresh/);
+  assert.match(err.message, /npx x-mcp-ai authorize/);
+  assert.equal(stub.calls.length, 0);
+  assert.notEqual(machine.state(), 'FAILED_CLOSED');
 });
 
 // ---------------------------------------------------------------------------------

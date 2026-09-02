@@ -397,3 +397,41 @@ test('fetch adapter: a missing client id fails typed at refresh time, before any
   assert.match(err.message, /X_MCP_CLIENT_ID/);
   assert.match(err.message, /unchanged/); // the stored tokens survive — usable until expiry
 });
+
+test('fetch adapter: a 200 with a NON-JSON body maps to an empty-token success for the machine to reject', async () => {
+  const mock = mockHttp();
+  // A proxy or captive portal can return 200 with an HTML/plain-text body. The adapter
+  // stays tolerant: the unparseable body reads as "no fields", so access_token comes back
+  // '' and the machine's token-shape validation (AUTH-6) rejects it downstream.
+  mock.pool.intercept({ path: TOKEN_ENDPOINT_PATH, method: 'POST' }).reply(200, 'plain text');
+
+  const http = createFetchRefreshHttp({
+    baseUrl: 'https://api.x.com',
+    clientId: 'client-1',
+    dispatcher: mock.dispatcher,
+  });
+  assert.deepEqual(await http('refresh-1'), { ok: true, token: { access_token: '' } });
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('fetch adapter: rejections with an EMPTY or malformed error body carry only the status', async () => {
+  const mock = mockHttp();
+  mock.pool.intercept({ path: TOKEN_ENDPOINT_PATH, method: 'POST' }).reply(400, '');
+  mock.pool.intercept({ path: TOKEN_ENDPOINT_PATH, method: 'POST' }).reply(400, { error: 123 });
+
+  const http = createFetchRefreshHttp({
+    baseUrl: 'https://api.x.com',
+    clientId: 'client-1',
+    dispatcher: mock.dispatcher,
+  });
+  // An empty body yields no OAuth fields at all — the result is status-only, and the
+  // machine's taxonomy falls back to the bare-HTTP-status wording.
+  assert.deepEqual(await http('refresh-1'), { ok: false, status: 400 });
+  // A non-string `error` field is dropped rather than stringified (nothing to sanitize).
+  assert.deepEqual(await http('refresh-1'), { ok: false, status: 400 });
+
+  mock.assertDone();
+  await mock.close();
+});

@@ -8,6 +8,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import { join } from 'node:path';
 
 import { parseConfig } from '../../src/core/config.js';
 import type { TokenPair } from '../../src/core/ports.js';
@@ -94,4 +96,78 @@ test('T-203/INT: oauth2 mode without stored tokens surfaces the typed re-authori
 
   mock.assertDone();
   await mock.close();
+});
+
+test('T-203/INT: a confidential client refreshes with HTTP Basic through the composed wiring', async () => {
+  const mock = mockHttp();
+  const clock = fakeClock();
+  const pair: TokenPair = {
+    access_token: 'access-1',
+    refresh_token: 'refresh-1',
+    obtained_at: clock.now(),
+    expires_in: 7200,
+    version: 1,
+  };
+  const tokens = inMemoryTokenStore(pair);
+
+  mock.pool
+    .intercept({
+      path: '/2/users/by/username/alice',
+      method: 'GET',
+      query: { 'user.fields': USER_FIELDS },
+      headers: { authorization: 'Bearer access-1' },
+    })
+    .reply(401, { title: 'Unauthorized' });
+  // The client secret must reach the refresh adapter: confidential clients authenticate
+  // the token-endpoint POST with HTTP Basic on top of the client_id in the form.
+  mock.pool
+    .intercept({
+      path: TOKEN_ENDPOINT_PATH,
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${Buffer.from('client-1:secret-1').toString('base64')}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=refresh_token&refresh_token=refresh-1&client_id=client-1',
+    })
+    .reply(200, { access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 7200 });
+  mock.pool
+    .intercept({
+      path: '/2/users/by/username/alice',
+      method: 'GET',
+      query: { 'user.fields': USER_FIELDS },
+      headers: { authorization: 'Bearer access-2' },
+    })
+    .reply(200, { data: { id: '42', username: 'alice', name: 'Alice' } });
+
+  const config = parseConfig({
+    X_MCP_AUTH_MODE: 'oauth2',
+    X_MCP_CLIENT_ID: 'client-1',
+    X_MCP_CLIENT_SECRET: 'secret-1',
+  });
+  const composition = composeServer(config, { dispatcher: mock.dispatcher, clock, tokens });
+
+  assert.deepEqual(await composition.resolver.lookup('@alice'), { id: '42', handle: 'alice' });
+  assert.equal(tokens.persistCount(), 1);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('T-203: production defaults compose without overrides — pure wiring, no I/O', () => {
+  // No overrides at all: the default clock/sleep/random are taken, no dispatcher is
+  // spread into the ports or clients, and the oauth2 store is the REAL file backend at
+  // the configured path (constructing it touches nothing on disk). A public client
+  // (no client id/secret) exercises the omit arms of the refresh-adapter spreads.
+  const config = parseConfig({
+    X_MCP_AUTH_MODE: 'oauth2',
+    X_MCP_TOKEN_FILE: join(os.tmpdir(), 'x-mcp-compose-defaults', 'tokens.json'),
+  });
+  const composition = composeServer(config);
+
+  assert.ok(composition.server !== undefined);
+  assert.ok(composition.registry.size > 0);
+  assert.ok(composition.tracker !== undefined);
+  assert.ok(composition.budget !== undefined);
+  assert.equal(typeof composition.resolver.lookup, 'function');
 });

@@ -75,6 +75,9 @@ test('REND-8: classifyUserRef rejects malformed user input as `validation`', () 
   assert.throws(() => classifyUserRef('https://x.com/home'), isKind('validation'));
   // A non-X host is not accepted even though it mentions x.com in the path.
   assert.throws(() => classifyUserRef('https://evil.com/x.com/jack'), isKind('validation'));
+  // A protocol prefix over an unparseable authority is not a URL at all — it falls
+  // through the URL branch and is refused as a malformed reference like any other junk.
+  assert.throws(() => classifyUserRef('https://[abc'), isKind('validation'));
 });
 
 // --- parsePostId: bare id / status URL forms (REND-8) ----------------------------
