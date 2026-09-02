@@ -47,6 +47,20 @@ test('REND-2: partial failures surface as missing[] with a controlled reason', (
   ]);
 });
 
+test('REND-2: suspended and deleted resources map to their own controlled reasons', () => {
+  const out = renderPosts({
+    data: [],
+    errors: [
+      { title: 'User has been suspended', resource_id: '4' },
+      { title: 'Tweet deleted by author', resource_id: '5' },
+    ],
+  });
+  assert.deepEqual(out.missing, [
+    { id: '4', reason: 'suspended' },
+    { id: '5', reason: 'deleted' },
+  ]);
+});
+
 test('REND-7: third-party error detail text never leaks into the mapped result', () => {
   const out = renderPosts({
     data: [],
@@ -95,6 +109,32 @@ test('REND-3: reposts join the referenced full text; unrecoverable sets truncate
   });
   assert.equal(unrecoverable.truncated, true);
   assert.equal(unrecoverable.note_tweet, undefined);
+});
+
+test('REND-3: a repost of a LONG-FORM post prefers the referenced note_tweet body', () => {
+  // When the retweeted original is itself long-form, its expanded `text` is still clipped —
+  // the full body lives in the referenced tweet's own note_tweet.
+  const post = renderPost(
+    {
+      id: '22',
+      author_id: 'u1',
+      text: 'RT @orig: clipped...',
+      referenced_tweets: [{ type: 'retweeted', id: '88' }],
+    },
+    {
+      users: [{ id: 'u1', username: 'bob' }],
+      tweets: [
+        {
+          id: '88',
+          author_id: 'u2',
+          text: 'clipped original...',
+          note_tweet: { text: 'the complete long-form original body' },
+        },
+      ],
+    },
+  );
+  assert.equal(post.note_tweet, 'the complete long-form original body');
+  assert.equal(post.truncated, true);
 });
 
 test('REND-4: every rendered post carries the canonical status permalink', () => {
@@ -241,6 +281,14 @@ test('renderPost maps public_metrics into the compact metrics shape', () => {
     bookmarks: 5,
     impressions: 6,
   });
+
+  // A metrics object with no usable numeric field compacts to NO metrics key at all,
+  // not an empty `{}` — absent beats hollow in the compact shape.
+  const hollow = renderPost(
+    { id: '2', author_id: 'u1', public_metrics: {} },
+    { users: [{ id: 'u1', username: 'a' }] },
+  );
+  assert.equal(hollow.metrics, undefined);
 });
 
 test('renderUser resolves @handle, maps metrics, and omits absent optionals', () => {

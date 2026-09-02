@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import { createDoctorCli } from '../../src/cli/doctor.js';
 import type { DoctorDeps, DoctorFs, DoctorHttpGet, DoctorStat } from '../../src/cli/doctor.js';
+import { POLICY_CELLS } from '../../src/core/tooldef.js';
 import { fakeClock } from '../helpers/fakes.js';
 
 // --- Fake dependency assembly ------------------------------------------------------------
@@ -479,4 +480,232 @@ test('unknown argument exits 1 with usage on stderr and no checks run', async ()
   assert.match(f.errLines.join('\n'), /unknown argument "--bogus"/);
   assert.match(f.errLines.join('\n'), /usage: x-mcp-ai doctor \[--connect\]/);
   assert.equal(f.outLines.length, 0);
+});
+
+// --- Keychain store, path-kind failures, and the plural summary -----------------------------
+
+test('keychain backend: file checks are skipped and the store is reported as OS keychain', async () => {
+  // X_MCP_TOKEN_KEYCHAIN=1 without an explicit token file resolves NO file path (CFG-2),
+  // so no token dir/file/lock checks run at all — one [ok] line replaces the battery.
+  const f = makeDeps({
+    env: {
+      X_MCP_AUTH_MODE: 'oauth2',
+      X_MCP_CLIENT_ID: 'client-id-123',
+      X_MCP_TOKEN_KEYCHAIN: '1',
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  const output = f.stdout();
+  assert.match(output, /\[ok\]\s+token store: OS keychain backend \(X_MCP_TOKEN_KEYCHAIN=1\)/);
+  assert.match(output, /credentials: OAuth 2\.0 — .*token store OS keychain/);
+  assert.doesNotMatch(output, /token directory/);
+  assert.doesNotMatch(output, /token file/);
+});
+
+test('token directory that is not a directory is a failing check', async () => {
+  const f = makeDeps({
+    env: HEALTHY_ENV,
+    files: { ...HEALTHY_FILES, [TOKEN_DIR]: { kind: 'file', mode: 0o600 } },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(
+    f.stdout(),
+    /\[fail\]\s+token directory: \/home\/u\/\.config\/x-mcp is not a directory/,
+  );
+});
+
+test('lock leftovers: a lock without a readable mtime is noted without an age (AUTH-5)', async () => {
+  const f = makeDeps({
+    env: HEALTHY_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      [`${TOKEN_FILE}.lock`]: { kind: 'file', mode: 0o600 }, // no mtimeMs from the fake stat
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  const lockLine = f.outLines.find((l) => l.includes('token lock'));
+  assert.ok(lockLine !== undefined);
+  assert.match(lockLine, /leftover lock file .*tokens\.json\.lock — a crashed process/);
+  assert.doesNotMatch(lockLine, /\(age /);
+});
+
+test('media dir: a non-directory fails, an existing directory is an [ok] line', async () => {
+  const env = { ...HEALTHY_ENV, X_MCP_MEDIA_DIR: '/home/u/media' };
+
+  const bad = makeDeps({
+    env,
+    files: { ...HEALTHY_FILES, '/home/u/media': { kind: 'file', mode: 0o600 } },
+  });
+  assert.equal(await createDoctorCli(bad.deps)([]), 1);
+  assert.match(bad.stdout(), /\[fail\]\s+media dir: \/home\/u\/media is not a directory/);
+
+  const good = makeDeps({
+    env,
+    files: { ...HEALTHY_FILES, '/home/u/media': { kind: 'directory', mode: 0o700 } },
+  });
+  assert.equal(await createDoctorCli(good.deps)([]), 0);
+  assert.match(good.stdout(), /\[ok\]\s+media dir: \/home\/u\/media/);
+});
+
+test('two failing checks are counted with the plural summary line', async () => {
+  // A writable token dir (SEC-T13) plus a missing media dir → exactly two failures.
+  const f = makeDeps({
+    env: { ...HEALTHY_ENV, X_MCP_MEDIA_DIR: '/home/u/media' },
+    files: { ...HEALTHY_FILES, [TOKEN_DIR]: { kind: 'directory', mode: 0o770 } },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(f.stdout(), /doctor: 2 problems found/);
+});
+
+// --- Profiles file: path-kind arms and malformed documents ----------------------------------
+
+test('profiles file with invalid JSON is a failing check naming the parse error', async () => {
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': { kind: 'file', mode: 0o600, content: '{ not json' },
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(
+    f.stdout(),
+    /\[fail\]\s+profiles file: \/home\/u\/profiles\.json is not valid JSON — /,
+  );
+  assert.match(f.stdout(), /remaining checks skipped/);
+});
+
+test('a non-Error read rejection is JSON-rendered, never a raw [object] dump', async () => {
+  // The fake fs only rejects with Errors, so the string-rejection arm of messageOf needs a
+  // divergent fs spread over the assembled deps.
+  const f = makeDeps({ env: PROFILES_ENV, files: HEALTHY_FILES });
+  const fs: DoctorFs = {
+    ...f.deps.fs,
+    readFile: (p) =>
+      p === '/home/u/profiles.json'
+        ? // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the non-Error arm is the point
+          Promise.reject('raw read failure')
+        : f.deps.fs.readFile(p),
+  };
+  const code = await createDoctorCli({ ...f.deps, fs })([]);
+  assert.equal(code, 1);
+  assert.match(
+    f.stdout(),
+    /\[fail\]\s+profiles file: cannot read \/home\/u\/profiles\.json — "raw read failure"/,
+  );
+});
+
+test('profiles file readable but not stat-able is reported as not found', async () => {
+  // stat and readFile diverge in real life (e.g. a parent-dir search-permission quirk):
+  // the config load succeeds from the content while the path check finds nothing.
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': { kind: 'file', mode: 0o600, content: '{"work":{}}' },
+    },
+  });
+  const fs: DoctorFs = {
+    ...f.deps.fs,
+    stat: (p) => (p === '/home/u/profiles.json' ? Promise.resolve(null) : f.deps.fs.stat(p)),
+  };
+  const code = await createDoctorCli({ ...f.deps, fs })([]);
+  assert.equal(code, 1);
+  assert.match(f.stdout(), /\[fail\]\s+profiles file: \/home\/u\/profiles\.json not found/);
+});
+
+test('profiles path that is not a regular file is a failing check', async () => {
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': { kind: 'directory', mode: 0o600, content: '{"work":{}}' },
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(
+    f.stdout(),
+    /\[fail\]\s+profiles file: \/home\/u\/profiles\.json is not a regular file/,
+  );
+});
+
+test('healthy profiles file at mode 0600 gets an [ok] line with the mode suffix', async () => {
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': { kind: 'file', mode: 0o600, content: '{"work":{}}' },
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  assert.match(f.stdout(), /\[ok\]\s+profiles file: \/home\/u\/profiles\.json \(mode 0600\)/);
+});
+
+test('a profiles document that is a JSON array fails validation without crashing the harvest', async () => {
+  // harvestProfileSecrets must survive a malformed document (its early-return arm) — the
+  // validation failure itself is parseConfig's CFG-6 job.
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': { kind: 'file', mode: 0o600, content: '["work"]' },
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(f.stdout(), /\[fail\]\s+config: invalid profiles file/);
+});
+
+test('non-object profile entries are skipped by the secret harvest, then fail validation', async () => {
+  const f = makeDeps({
+    env: PROFILES_ENV,
+    files: {
+      ...HEALTHY_FILES,
+      '/home/u/profiles.json': {
+        kind: 'file',
+        mode: 0o600,
+        content: JSON.stringify({
+          work: { auth_mode: 'app-only', bearer_token: 'tok-w' },
+          note: 'just a string',
+          gone: null,
+        }),
+      },
+    },
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 1);
+  assert.match(f.stdout(), /\[fail\]\s+config: invalid profiles file/);
+});
+
+// --- Policy matrix edges: empty allowed / empty denied --------------------------------------
+
+test('denying every cell prints "(none)" for the allowed cells', async () => {
+  const f = makeDeps({
+    env: { ...HEALTHY_ENV, X_MCP_POLICY_DENY: POLICY_CELLS.join(',') },
+    files: HEALTHY_FILES,
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  assert.match(f.stdout(), /allowed cells — tools in these cells register and run: \(none\)/);
+});
+
+test('full preset plus an explicit DM allow prints "(none)" for the denied cells', async () => {
+  // `full` still excludes the DM cells (POL-3/4) — only an explicit ALLOW closes the gap.
+  const f = makeDeps({
+    env: { ...HEALTHY_ENV, X_MCP_POLICY: 'full', X_MCP_POLICY_ALLOW: 'read:dm,write:dm' },
+    files: HEALTHY_FILES,
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  assert.match(
+    f.stdout(),
+    /denied cells — tools in these cells are registered but annotated as disabled: \(none\)/,
+  );
 });

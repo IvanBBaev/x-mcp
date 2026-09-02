@@ -751,3 +751,315 @@ test('the revision counter bumps monotonically across persist/load cycles', asyn
   const second = await store.load();
   assert.equal(second?.version, 2);
 });
+
+// ---------------------------------------------------------------------------
+// Fault injection through the TokenFs seam: every errno path surfaces as a
+// typed auth error (or a warning) naming the path and the code — never a raw
+// throw. These failures cannot be produced safely on a healthy filesystem.
+// ---------------------------------------------------------------------------
+
+/** A Node-style errno error for fault injection through the `TokenFs` seam. */
+function errWithCode(code: string): Error {
+  return Object.assign(new Error(`injected ${code}`), { code });
+}
+
+test('a mkdir failure without an errno code maps to "unknown error" on the directory', async (t) => {
+  const h = await makeHarness(t);
+  // A bare Error with no `code` at all — errCode() must fall back, not crash.
+  const faultyFs: TokenFs = { ...h.fs, mkdir: () => Promise.reject(new Error('spun down')) };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.dir,
+    'Cannot create the token directory',
+    'unknown error',
+  );
+});
+
+test('a directory stat failure maps to a typed "Cannot inspect" auth error', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    stat: (path) => (path === h.dir ? Promise.reject(errWithCode('EACCES')) : h.fs.stat(path)),
+  };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.dir,
+    'Cannot inspect the token directory',
+    'EACCES',
+  );
+});
+
+test('load: EMLINK on open is refused as a symbolic link, exactly like ELOOP', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = { ...h.fs, open: () => Promise.reject(errWithCode('EMLINK')) };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.path,
+    'symbolic link',
+    'Replace it with a regular file',
+  );
+});
+
+test('load: any other open failure maps to a typed "Cannot open" auth error', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = { ...h.fs, open: () => Promise.reject(errWithCode('EACCES')) };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.path,
+    'Cannot open the token file',
+    'EACCES',
+  );
+});
+
+test('load: a read failure on the open handle maps to a typed "Cannot read" auth error', async (t) => {
+  const h = await makeHarness(t);
+  await h.store().persist(PAIR); // the open itself must succeed — only the read fails
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    open: async (path, flags, mode) => {
+      const handle = await h.fs.open(path, flags, mode);
+      return {
+        readFile: () => Promise.reject(errWithCode('EIO')),
+        writeFile: (data, options) => handle.writeFile(data, options),
+        stat: () => handle.stat(),
+        sync: () => handle.sync(),
+        close: () => handle.close(),
+      };
+    },
+  };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.path,
+    'Cannot read the token file',
+    'EIO',
+  );
+});
+
+test('AUTH-9: valid JSON that is not an object fails closed as corruption', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+  for (const body of ['[1, 2, 3]', '"just a string"', 'null']) {
+    await fsp.writeFile(h.path, body, { mode: 0o600 });
+    await assertAuthError(store.load(), h.path, 'does not contain a JSON object', 'left untouched');
+    assert.equal(await fsp.readFile(h.path, 'utf8'), body); // never rewritten
+  }
+});
+
+test('AUTH-9: a malformed "version" field fails closed, file untouched', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+  for (const version of [-1, 1.5, 'two']) {
+    const body = JSON.stringify({ version, access_token: 'a', obtained_at: 1, expires_in: 3600 });
+    await fsp.writeFile(h.path, body, { mode: 0o600 });
+    await assertAuthError(store.load(), h.path, 'has a malformed "version" field');
+    assert.equal(await fsp.readFile(h.path, 'utf8'), body);
+  }
+});
+
+test('AUTH-9: a malformed "refresh_token" field fails closed', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+  for (const refreshToken of ['', 42]) {
+    const body = JSON.stringify({
+      version: 1,
+      access_token: 'a',
+      obtained_at: 1,
+      expires_in: 3600,
+      refresh_token: refreshToken,
+    });
+    await fsp.writeFile(h.path, body, { mode: 0o600 });
+    await assertAuthError(store.load(), h.path, 'has a malformed "refresh_token" field');
+  }
+});
+
+test('persist: a tmp-file open failure that is not EEXIST fails closed with "NOT saved"', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    open: (path, flags, mode) =>
+      path.endsWith('.tmp') ? Promise.reject(errWithCode('EACCES')) : h.fs.open(path, flags, mode),
+  };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).persist(PAIR),
+    h.path,
+    'Cannot create a temporary file next to',
+    'NOT saved',
+  );
+  await assert.rejects(fsp.access(h.path)); // the token file was never created
+});
+
+test('persist: a tmp-file write failure cleans up the tmp file and fails closed', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    open: async (path, flags, mode) => {
+      const handle = await h.fs.open(path, flags, mode);
+      if (!path.endsWith('.tmp')) return handle;
+      return {
+        readFile: (options) => handle.readFile(options),
+        writeFile: () => Promise.reject(errWithCode('ENOSPC')),
+        stat: () => handle.stat(),
+        sync: () => handle.sync(),
+        close: () => handle.close(),
+      };
+    },
+  };
+  await assertAuthError(
+    h.store({ fs: faultyFs }).persist(PAIR),
+    h.path,
+    'Cannot write the token file next to',
+    'ENOSPC',
+    'NOT saved',
+  );
+  const leftovers = (await fsp.readdir(h.dir)).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []); // the half-written tmp file was unlinked
+  await assert.rejects(fsp.access(h.path));
+});
+
+test('a rename failure without an errno code reports "unknown error" sans win32 hint', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = { ...h.fs, rename: () => Promise.reject(new Error('no errno')) };
+  const err = await assertAuthError(
+    h.store({ fs: faultyFs }).persist(PAIR),
+    h.path,
+    '(unknown error).', // errCode fallback + the POSIX sentence ending
+    'in memory for this session only',
+  );
+  assert.ok(!err.message.includes('holding the file open')); // the win32 hint stays win32-only
+});
+
+test('PLAT-1: EACCES and EEXIST are also retryable win32 rename failures', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store({ platform: 'win32', fs: renameFailingFs(h.fs, ['EACCES', 'EEXIST']) });
+  await store.persist(PAIR);
+  assert.deepEqual(h.sleep.calls, [WIN32_RENAME_DELAY_MS, WIN32_RENAME_DELAY_MS]);
+  assert.equal((await store.load())?.access_token, PAIR.access_token);
+});
+
+test('PLAT-1: a non-retryable win32 rename failure surfaces immediately, no retries', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store({ platform: 'win32', fs: renameFailingFs(h.fs, ['EIO']) });
+  await assertAuthError(store.persist(PAIR), h.path, 'EIO', 'holding the file open');
+  assert.equal(h.sleep.calls.length, 0);
+});
+
+test('withLock: a lock-create failure that is not EEXIST fails closed before running fn', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    open: (path, flags, mode) =>
+      path === h.lockPath && (flags & FSC.O_CREAT) !== 0
+        ? Promise.reject(errWithCode('EACCES'))
+        : h.fs.open(path, flags, mode),
+  };
+  let ran = false;
+  await assertAuthError(
+    h.store({ fs: faultyFs }).withLock(() => {
+      ran = true;
+      return Promise.resolve();
+    }),
+    h.lockPath,
+    'Cannot create the refresh lock',
+    'EACCES',
+  );
+  assert.equal(ran, false);
+});
+
+test('withLock: a lock write failure removes the half-written lock and fails closed', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    open: async (path, flags, mode) => {
+      const handle = await h.fs.open(path, flags, mode);
+      if (path !== h.lockPath) return handle;
+      return {
+        readFile: (options) => handle.readFile(options),
+        writeFile: () => Promise.reject(errWithCode('ENOSPC')),
+        stat: () => handle.stat(),
+        sync: () => handle.sync(),
+        close: () => handle.close(),
+      };
+    },
+  };
+  let ran = false;
+  await assertAuthError(
+    h.store({ fs: faultyFs }).withLock(() => {
+      ran = true;
+      return Promise.resolve();
+    }),
+    h.lockPath,
+    'Cannot write the refresh lock',
+    'ENOSPC',
+  );
+  assert.equal(ran, false);
+  await assert.rejects(fsp.access(h.lockPath)); // the half-written lock was unlinked
+});
+
+test('release: a lock that vanished during the critical section is ignored silently', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+  await store.withLock(async () => {
+    await fsp.unlink(h.lockPath); // e.g. an operator "cleaning up" mid-refresh
+  });
+  assert.deepEqual(h.warnings, []); // gone means nothing to release — no warning
+});
+
+test('release: an unreadable lock at release time is left in place with a warning', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    // Creation (O_CREAT) succeeds; only the attribution read at release fails.
+    open: (path, flags, mode) =>
+      path === h.lockPath && (flags & FSC.O_CREAT) === 0
+        ? Promise.reject(errWithCode('EACCES'))
+        : h.fs.open(path, flags, mode),
+  };
+  const store = h.store({ fs: faultyFs });
+  let ran = false;
+  await store.withLock(() => {
+    ran = true;
+    return Promise.resolve();
+  });
+  assert.equal(ran, true);
+  assert.equal(h.warnings.filter((w) => w.includes('not removing the refresh lock')).length, 1);
+  await fsp.access(h.lockPath); // never removed — cannot be attributed (AUTH-5)
+});
+
+test('release: an unlink failure warns with the errno; ENOENT stays silent', async (t) => {
+  const h = await makeHarness(t);
+  const eaccesFs: TokenFs = {
+    ...h.fs,
+    unlink: (path) =>
+      path === h.lockPath ? Promise.reject(errWithCode('EACCES')) : h.fs.unlink(path),
+  };
+  await h.store({ fs: eaccesFs }).withLock(() => Promise.resolve());
+  const unlinkWarnings = h.warnings.filter((w) => w.includes('could not remove the refresh lock'));
+  assert.equal(unlinkWarnings.length, 1);
+  assert.ok(unlinkWarnings[0]?.includes('EACCES'));
+
+  // ENOENT from unlink means a concurrent removal — losing that race is not a problem.
+  await fsp.unlink(h.lockPath); // clear the lock the EACCES run left behind
+  const enoentFs: TokenFs = {
+    ...h.fs,
+    unlink: (path) =>
+      path === h.lockPath ? Promise.reject(errWithCode('ENOENT')) : h.fs.unlink(path),
+  };
+  await h.store({ fs: enoentFs }).withLock(() => Promise.resolve());
+  assert.equal(h.warnings.length, unlinkWarnings.length); // no new warning
+});
+
+test('the default warn sink is console.warn when no override is injected', async (t) => {
+  const h = await makeHarness(t);
+  const warned = t.mock.method(console, 'warn', () => undefined);
+  const store = createFileTokenStore({
+    path: h.path,
+    clock: h.clock,
+    sleep: h.sleep.fn,
+    platform: 'win32', // triggers the PLAT-2 one-time degradation warnings
+    fs: h.fs,
+  });
+  await store.persist(PAIR);
+  assert.ok(warned.mock.calls.length >= 1);
+  const messages = warned.mock.calls.map((call) => String(call.arguments[0]));
+  assert.ok(messages.some((m) => m.includes('PLAT-2')));
+});
