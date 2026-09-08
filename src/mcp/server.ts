@@ -8,12 +8,17 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import type {
+  CallToolResult,
+  ListToolsResult,
+  ServerNotification,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { XError } from '../core/errors.js';
 import type { Ports } from '../core/ports.js';
 import type { Registry } from '../core/registry.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
+import type { ProgressBridge } from './progress.js';
 import { toolInputSchema } from './schema.js';
 import { renderStructuredResult, toolOutputSchema } from './structured.js';
 
@@ -44,11 +49,59 @@ export interface McpServerDeps {
   readonly ports: Ports;
   /** The rate-limit-recording invoker for a tool's endpoint bucket (INT-3). */
   readonly invokerFor: (toolName: string) => EndpointInvoker;
+  /**
+   * The WP-3.3 progress bridge. Optional so a bare `buildMcpServer` (tests, embedders)
+   * still works: with no bridge the server behaves exactly as before, silently.
+   */
+  readonly progress?: ProgressBridge;
 }
 
 /** Render a typed XError as a structured tool error result (docs/02 §5 — never a crash). */
 function renderError(error: XError): CallToolResult {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(error.toPayload()) }] };
+}
+
+/** Release for a call with no progress binding — nothing was bound, nothing to undo. */
+const NO_PROGRESS = (): void => {};
+
+/** The slice of the SDK's per-request `extra` the progress bridge needs. */
+interface ProgressCapableExtra {
+  readonly signal: AbortSignal;
+  readonly sendNotification: (notification: ServerNotification) => Promise<void>;
+}
+
+/**
+ * MCP-9 — bind this call's `progressToken` to the media package's per-segment seam for the
+ * lifetime of the call, and return the release the caller runs in a `finally`.
+ *
+ * Everything here is advisory and fails open: a client that sent no token, a composition
+ * built without a bridge, and a transport that rejects the notification all leave the
+ * upload itself untouched. `progress`/`total` are BYTES (monotonic by construction — the
+ * seam fires only after the platform accepted a segment), which is what the MCP spec's
+ * "progress MUST increase" rule wants and what a client can render as a percentage.
+ */
+function bindProgress(
+  bridge: ProgressBridge | undefined,
+  token: string | number | undefined,
+  extra: ProgressCapableExtra,
+): () => void {
+  if (bridge === undefined || token === undefined) return NO_PROGRESS;
+  return bridge.bind(extra.signal, (event) => {
+    void extra
+      .sendNotification({
+        method: 'notifications/progress',
+        params: {
+          progressToken: token,
+          progress: event.bytesUploaded,
+          total: event.totalBytes,
+          message: `media ${event.mediaId}: segment ${event.segmentIndex + 1}/${event.segments}`,
+        },
+      })
+      .catch(() => {
+        // The client went away or the transport refused the frame. An upload must never
+        // fail because nobody was listening to its progress.
+      });
+  });
 }
 
 /**
@@ -100,6 +153,13 @@ export function buildMcpServer(deps: McpServerDeps): Server {
     async (request, extra): Promise<CallToolResult> => {
       const name = request.params.name;
       const args: unknown = request.params.arguments ?? {};
+      // MCP-9: the binding is keyed on THIS call's signal and released before the response,
+      // so it is a per-call local like everything else the handler touches (MCP-8).
+      const releaseProgress = bindProgress(
+        deps.progress,
+        request.params._meta?.progressToken,
+        extra,
+      );
       try {
         const result = await deps.registry.call(name, args, {
           ports: deps.ports,
@@ -115,6 +175,8 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         // JSON-RPC internal error rather than disguising it as a tool outcome.
         if (XError.is(error)) return renderError(error);
         throw error;
+      } finally {
+        releaseProgress();
       }
     },
   );

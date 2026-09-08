@@ -170,7 +170,7 @@ test('MCP-3: stdin EOF flushes a large buffered response instead of truncating i
 // Windows has no POSIX signals: `child.kill('SIGTERM')` there is an unconditional
 // `TerminateProcess`, so the server's handler can never run and the child always dies
 // by-signal. Nothing in this repo can change that — the axis asserts a POSIX kernel
-// guarantee, so it skips rather than assert a fiction (docs/13 §Windows).
+// guarantee, so it skips rather than assert a fiction (docs/13 §5.1 Windows).
 test(
   'MCP-3: SIGTERM after startup exits cleanly with code 0',
   {

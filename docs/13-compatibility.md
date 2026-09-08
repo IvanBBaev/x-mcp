@@ -53,7 +53,7 @@ independently of any client.
 | `tools/call` failure | Text-only result with `isError: true`. No `structuredContent` — deliberate, since the spec exempts error results from `outputSchema` conformance. | `protocol-verified` — [`test/mcp/server.test.ts:300`](../test/mcp/server.test.ts) |
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
 | Cancellation | `notifications/cancelled` aborts the in-flight HTTP request and rejects with JSON-RPC `-32001`; the session stays usable. | Plumbing `protocol-verified` — [`test/core/registry.test.ts:484`](../test/core/registry.test.ts), [`test/tools/media.test.ts:1259`](../test/tools/media.test.ts); end-to-end over MCP `probe-verified` (402 ms against a 60 s delayed reply, the full tool list still served afterwards) |
-| Progress notifications | **Not supported.** No `progressToken` handling, no `notifications/progress` — including for chunked media upload, which has an internal progress seam that is not wired to MCP. | `probe-verified` (no `progress` reference in [`src/mcp/compose.ts`](../src/mcp/compose.ts)) |
+| Progress notifications | **Chunked media upload only.** A `tools/call` that carries `_meta.progressToken` receives one `notifications/progress` per accepted APPEND segment: `progress`/`total` in bytes (monotonic — the event fires only after the platform accepted the segment) and a `message` naming the media id and segment. No other tool reports progress, and a call without a token behaves exactly as before. | `protocol-verified` — [`test/mcp/progress.test.ts:184`](../test/mcp/progress.test.ts), [`:285`](../test/mcp/progress.test.ts) (the second over the real composed server and a real two-segment upload) |
 | Unknown methods | `resources/list`, `prompts/list`, anything unrecognised → `-32601 Method not found`. `ping` works (SDK built-in). | `probe-verified` (§7.1) |
 | Startup failure | One `x-mcp-ai: fatal: <reason>` line on **stderr**, empty stdout, exit 1. | `protocol-verified` — [`test/mcp/spawn.test.ts:155`](../test/mcp/spawn.test.ts) |
 | Shutdown | Clean exit 0 on stdin EOF, SIGINT or SIGTERM. | `protocol-verified` — [`test/mcp/spawn.test.ts:111`](../test/mcp/spawn.test.ts), [`:140`](../test/mcp/spawn.test.ts) |
@@ -279,6 +279,26 @@ client's current documentation and treat §7 as the acceptance test.
 | MCP SDK | `^1.23.0` declared (raised from `^1.12.0` by the zod 4 migration, 2026-08-29), 1.30.0 installed and tested against. Bumped from 1.29.0 on 2026-08-07 by a lockfile-only `npm audit fix` closing two **high** advisories in the SDK's own transitive tree (`fast-uri` host confusion, `ip-address` SSRF/trust-boundary) plus `js-yaml`, `hono` and `undici`. Neither high advisory is reachable from this server — both sit under the SDK's HTTP/SSE transport and JSON-Schema validator, and this server is stdio-only with hand-rolled Zod validation — but `npm run check` gates on `npm audit --omit=dev --audit-level=high` and does not grade reachability, deliberately: a "not reachable today" exception is a claim that has to be re-proved on every dependency change, and nobody re-proves it. | `package.json` |
 | Platforms | CI runs the full gate — including the spawned-stdio tests — on ubuntu (Node 22 and 24), macOS (Node 22) and Windows (Node 22). A packed-tarball smoke job checks that the shipped `files` set actually boots. | `protocol-verified` — [`.github/workflows/ci.yml:23`](../.github/workflows/ci.yml), [`:118`](../.github/workflows/ci.yml) |
 | Client features required | Spawn a subprocess, pass `env`, `initialize`, `tools/list`, `tools/call`. Nothing else. | §2 |
+
+### 5.1 Windows
+
+Windows is supported — CI runs the whole gate there, spawned-stdio tests included — but
+five guarantees this server makes on POSIX are weaker on Windows. All five degrade
+**explicitly**: a one-time warning on stderr, a typed error, or a `doctor` note. None of
+them degrades silently, and none of them is a client-visible protocol difference.
+
+| Guarantee | On POSIX | On Windows | Evidence |
+|---|---|---|---|
+| Shutdown by signal | `SIGINT`/`SIGTERM` run the clean shutdown and exit 0. | Windows has no POSIX signals: a client's `child.kill()` is an unconditional `TerminateProcess`, so no handler can run and the child always dies by-signal. **Stop the server by closing its stdin** — the EOF path is identical on both platforms and is what every MCP client does anyway. | `protocol-verified` — [`test/mcp/spawn.test.ts:175`](../test/mcp/spawn.test.ts) (the SIGTERM axis skips on win32 rather than assert a kernel guarantee that does not exist there) |
+| Symlink refusal on the final path component | Media files and the token file are opened with `O_NOFOLLOW`, so the last component can never be a symlink — checked and opened as one operation. | The flag does not exist. Both degrade to an `lstat` check before the open, warned once, which leaves a narrow TOCTOU window the POSIX path does not have. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:302`](../test/api/oauth2/filestore.test.ts), [`src/tools/media.ts:239`](../src/tools/media.ts) |
+| POSIX permission checks | A group/other-readable token file or directory is a **refusal**; a loose profiles file is a warning. | `stat()` reports a synthetic `0666` for everything, so the bits carry no information and every one of these checks is skipped, warned once. `x-mcp-ai doctor` says so explicitly and tells the operator to inspect the ACLs by hand. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:284`](../test/api/oauth2/filestore.test.ts), [`test/cli/doctor.test.ts:262`](../test/cli/doctor.test.ts) |
+| Atomic token persist | Write-temp + `rename` never fails because a reader holds the destination. | `rename` over a file another process has open can fail. The store retries `EPERM`/`EACCES`/`EBUSY`/`EEXIST` a bounded number of times and, if they persist, surfaces a typed `auth` error naming the likely cause instead of losing the token pair. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:474`](../test/api/oauth2/filestore.test.ts), [`:482`](../test/api/oauth2/filestore.test.ts) |
+| Keychain token backend | `X_MCP_TOKEN_KEYCHAIN=1` stores tokens in the OS keychain (macOS `security`, Linux `secret-tool`). | Not supported. Setting it is a typed **fatal at startup**, naming the two supported platforms and `X_MCP_TOKEN_FILE` — fail-closed, with no in-memory fallback. Use the token file; its default is `%APPDATA%\x-mcp\tokens.json`. | `protocol-verified` — [`test/api/oauth2/keychain.test.ts:262`](../test/api/oauth2/keychain.test.ts) |
+
+Paths are not a limitation: no code path re-joins or normalises an operator-supplied path,
+so drive letters, backslashes and UNC prefixes come through byte-identical (PLAT-3,
+[`test/core/config.test.ts:126`](../test/core/config.test.ts)). Escape the backslashes when
+you write them into a client's JSON config — `"C:\\Users\\me\\tokens.json"`.
 
 ## 6. Client limitations worth knowing — all `spec-derived`
 
