@@ -42,6 +42,7 @@ import { timelinesTools } from '../tools/timelines.js';
 import { createUsageTools } from '../tools/usage.js';
 import { usersTools } from '../tools/users.js';
 import { createBudgetGate, createPolicyGate, createRateLimitGate } from './gates.js';
+import { createProgressBridge } from './progress.js';
 import { buildMcpServer } from './server.js';
 import { createSessionProvider } from './session.js';
 import { assertOutputSchemaCoverage } from './structured.js';
@@ -280,6 +281,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
   });
 
   const session = createSessionProvider(config, policy);
+  const progress = createProgressBridge();
   const tools = [
     ...createAuthTools({ session, rateLimit: tracker }),
     ...postsTools,
@@ -294,7 +296,13 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     // reach x_media_upload by being closed over here. Registering the unbound instances
     // would make every upload refuse with "no media directory is configured" even when the
     // operator set one (MEDIA-5's fail-closed default, misapplied).
-    ...createMediaTools(config.mediaDir !== undefined ? { mediaDir: config.mediaDir } : {}),
+    // The progress sink is bound here for the same reason the media directory is: the seam
+    // is per-composition, while the `progressToken` it reports against is per-request. The
+    // bridge holds that correlation; the adapter does the sending (WP-3.3).
+    ...createMediaTools({
+      ...(config.mediaDir !== undefined ? { mediaDir: config.mediaDir } : {}),
+      onProgress: progress.onProgress,
+    }),
     ...dmTools,
     ...archiveTools,
     // INT-6, like createAuthTools: the report reads process state (the session credit
@@ -329,7 +337,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     }),
   });
 
-  const server = buildMcpServer({ registry, ports, invokerFor });
+  const server = buildMcpServer({ registry, ports, invokerFor, progress });
   const resolver = {
     cache: createResolveCache(),
     lookup: createHandleLookup(invokerFor('x_user_get')),

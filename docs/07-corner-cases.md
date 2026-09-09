@@ -576,6 +576,18 @@ credits, not tiers, for post-2026-02-06 developers.)*
   under interleaving (CONC-1…4); no per-request global mutable context exists. An
   InMemoryTransport test drives overlapping calls.
 
+- **MCP-9 — Progress notifications for chunked upload** `P3` `[new — added 2026-09-08]`
+  A `tools/call` that carries `_meta.progressToken` receives one
+  `notifications/progress` per accepted APPEND segment, `progress`/`total` in bytes
+  (monotonic by construction — the event fires only after the platform accepted the
+  segment). The bridge correlates a media event to the call that caused it by
+  per-call `AbortSignal` identity, so N overlapping uploads never cross-talk
+  (the MCP-8 argument, applied to the notification direction). Advisory in every
+  direction: no token, no bridge, or a transport that rejects the frame all leave the
+  upload untouched, and the binding is released in a `finally` so a request's
+  `sendNotification` closure cannot outlive its response. Completes MEDIA-7's sibling
+  half — cancellation was wired to the protocol in Phase 3, progress was not.
+
 ## 15. PLAT — Cross-platform
 
 - **PLAT-1 — Windows rename semantics** `P2` `[OPS-F5, QA checklist]`
