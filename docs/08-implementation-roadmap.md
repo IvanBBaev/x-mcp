@@ -280,6 +280,9 @@ Spend rules are binding — see [05-testing-and-quality.md](05-testing-and-quali
 Done when: the fixture's `_provenance` header records a real capture date instead of
 `PROVISIONAL`, and the spot-checked read fixtures still match live response shapes.
 
+How: [14-live-testing.md](14-live-testing.md) §6 walks the capture and the promotion
+checklist, §5 the read spot-check.
+
 ### H3 — T-214 e2e: authorize → post → delete from a real client
 
 Blocks: `test/scenarios/` covers the same call sequences over fixtures. That is a
@@ -294,6 +297,9 @@ round-trip a real post.
 3. Confirm the deletion, and that no draft or media artefact is left behind.
 
 Done when: the round-trip succeeds from a client, not from a test harness.
+
+How: [14-live-testing.md](14-live-testing.md) §4 — step 1 is the manual leg above;
+the harness verifies its result rather than performing it, and covers steps 2-3.
 
 ### H4 — T-321: one dogfood week
 
