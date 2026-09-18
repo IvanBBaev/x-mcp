@@ -27,11 +27,15 @@
 // class is exactly the money cap. They diverge for WRITES, which is the point: a
 // `w:post` costs more than any read unit, and a post whose text contains a URL costs
 // $0.20 (docs/07 COST-4) — a single such call would consume the entire run budget, and the
-// money rail refuses it. That is a guard worth having, not an accident.
+// money rail refuses it the moment anything else has been spent (in the write tier the
+// account check always has). That is a guard worth having, not an accident.
 //
 // If the second rail refuses after the first accepted, the first stays charged. Deliberate:
-// a refusal aborts the run, and every later `authorize` then refuses too. The guard fails
-// CLOSED — it never becomes cheaper to keep going after it said no.
+// the guard never refunds, so the allowance only ever shrinks and it never becomes cheaper
+// to keep going after it said no. There is deliberately NO refusal latch on top of that — a
+// later call that still fits both rails is authorized — because the call after a refusal is
+// the cleanup delete `withCleanup` runs on the way out (write-e2e.live.test.ts), and a latch
+// would leave the live post standing. The caps bound the run, not a latch.
 //
 // SCOPE, stated plainly because it is easy to misread: `node --test` runs each test FILE in
 // its own process, so the cap is per live test file, not per `npm run test:live` invocation.

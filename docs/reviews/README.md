@@ -98,3 +98,15 @@ Corpus **not yet ratified**: the two blockers plus the consensus corrections mus
 folded back into docs/01–06 first. The reviews themselves are the input for that
 revision pass; each file carries its full findings list with severities and concrete
 recommendations.
+
+> **Closed 2026-09-09.** The paragraph above is this index's status **as written on
+> 2026-07-21** and is left standing as the record — the same policy
+> [07-implementation-audit.md](07-implementation-audit.md) §7 states for its own findings.
+> Read it as history, not as an open item. The fold-back pass it demands is Phase 0R in
+> [../08-implementation-roadmap.md](../08-implementation-roadmap.md) (WP-0.1…0.10), which
+> dispositioned every BLOCKER and MAJOR into docs/01–06 — BLOCKER 1 as the pay-per-use
+> rewrite of docs/01, BLOCKER 2 as the refresh state machine in docs/02 — and its exit
+> gate 0R was walked by T-019 in
+> [../09-parallel-execution-plan.md](../09-parallel-execution-plan.md), re-run against the
+> shipped code on 2026-08-07. Ratification is therefore done; the live status lives in
+> those two documents, not here.

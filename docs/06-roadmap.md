@@ -55,6 +55,12 @@ Exit: `npm run check` green; works in Claude Code via `npx` against a real accou
 
 ## Open questions (to resolve in Phase 0 reviews)
 
+> **All four answered — forward pointer added 2026-09-09.** These were open when this
+> file was written; they were settled in
+> [08-implementation-roadmap.md § Resolved open questions](08-implementation-roadmap.md#resolved-open-questions-from-the-old-roadmap),
+> which is the live record and carries the dates. The questions stay here verbatim as
+> the historical record — read them as history, not as work outstanding.
+
 1. Is client-side read-budget tracking (`core/budget`) worth its complexity for v1,
    or should Phase 1 rely on `usage_get` + rate-limit errors alone?
 2. Denied-tool visibility: registered-but-erroring (current design) vs hidden —

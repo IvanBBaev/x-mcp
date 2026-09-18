@@ -30,7 +30,8 @@ Run the same checks CI runs before you push:
 npm run check
 ```
 
-`check` runs, in order: `typecheck` → `lint` → `format:check` → `test`. The individual scripts:
+`check` runs, in order: `verify` → `test:coverage` → `gates` → `npm audit --omit=dev --audit-level=high`.
+The individual scripts:
 
 | Script | What it does |
 |---|---|
@@ -39,9 +40,12 @@ npm run check
 | `npm run lint` | ESLint over the repo. |
 | `npm run format` / `npm run format:check` | Prettier write / verify. |
 | `npm test` | Build, then `node --test` over `build/test/**/*.test.js`. |
+| `npm run test:live` | Build, then `node --test` over `build/test/live/*.live.test.js` only. Every file in it registers as a **skip** unless `X_MCP_LIVE_TEST=1` is set — the tier spends real credit against a real account, so read [`docs/14-live-testing.md`](docs/14-live-testing.md) before turning it on. Never runs in CI. |
 | `npm run coverage` | Same tests under c8 coverage. |
-| `npm run check` | typecheck + lint + format:check + test (the pre-push gate). |
-| `npm run verify` | clean + build + coverage + lint + format:check (the fuller local gate). |
+| `npm run verify` | build + lint + format:check + test (the fast local gate). |
+| `npm run test:coverage` | The suite under c8 with the 90/80/95 thresholds and the per-file floors (`scripts/coverage-guard.mjs`). |
+| `npm run gates` | The three drift gates: generated docs, `tools/list` context budget, `server.json` ↔ `package.json`. |
+| `npm run check` | verify + test:coverage + gates + `npm audit` (the pre-push gate; what CI runs). |
 
 Tests use Node's built-in test runner and `undici`'s `MockAgent` for HTTP — no network access
 and no credentials are needed to run the suite.
