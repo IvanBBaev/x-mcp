@@ -588,6 +588,20 @@ credits, not tiers, for post-2026-02-06 developers.)*
   `sendNotification` closure cannot outlive its response. Completes MEDIA-7's sibling
   half — cancellation was wired to the protocol in Phase 3, progress was not.
 
+- **MCP-10 — SDK-delegated protocol facts are pinned, not assumed** `P2` `[new — added 2026-09-18]`
+  Three things every client meets are decided entirely inside the MCP SDK, with no
+  line of `src/mcp/` in the path: which `protocolVersion` the `initialize` response
+  carries (the client's own when it is one of the five the SDK speaks, the newest
+  otherwise — never a refusal), what an unadvertised method gets (`-32601 Method not
+  found` for `resources/*`, `prompts/*`, `logging/*`, `completion/*`; `ping` answers
+  `{}`), and what a cancelled `tools/call` becomes (`notifications/cancelled` aborts
+  the per-request signal, the abort reaches the HTTP dispatcher through the MCP-7
+  chain, the client rejects with `-32001`, and the session stays whole). Because the
+  server merely inherits them, an SDK bump can change any of them without touching a
+  reviewed file, so each is pinned by a test over a real linked transport pair against
+  the composed graph (MCP-2), and the supported-version list is asserted as a literal
+  so that a bump fails the test that names the compatibility page to re-date.
+
 ## 15. PLAT — Cross-platform
 
 - **PLAT-1 — Windows rename semantics** `P2` `[OPS-F5, QA checklist]`
