@@ -35,9 +35,10 @@ The suite is split into three tiers, ordered by blast radius (`LiveTier` in
 | `write` | `test/live/write-e2e.live.test.ts` | Creates and deletes one real **public** post. | `X_MCP_LIVE_ACCOUNT` + user-context auth + a policy granting `write:content` and `destructive:content` |
 | `capture` | `test/live/billing-capture.live.test.ts` | Provokes a billing rejection and records its raw body (COST-6). | `X_MCP_LIVE_CAPTURE=1` |
 
-`test/live/preflight.live.test.ts` sits in front of all three (§3), and
-`test/live/gate.test.ts` is **not** a live test at all — it drives every branch of the gate
-from injected env snapshots and runs in the normal suite, in CI, on every commit.
+`test/live/preflight.live.test.ts` sits in front of all three (§3). The `test/live/*.test.ts`
+files without `.live.` in the name — one per harness module, `gate.test.ts` among them — are
+**not** live tests at all: they drive the harness from injected env snapshots and in-memory
+doubles and run in the normal suite, in CI, on every commit (§7).
 
 Every live call is priced before it is issued. A live test opens a `LiveSession`
 (`test/live/harness/session.ts`) and reaches the X API one of two ways, both metered by the
@@ -415,12 +416,19 @@ because someone remembered to exclude them from a glob: the live files are insid
 `node --test "build/test/**/*.test.js"` pattern and are registered as skips by the gate itself.
 Excluding them from the glob would be a convention; the gate is a mechanism.
 
-What CI *can* protect is the logic that decides whether the live suite may run at all, and it
-does: `test/live/gate.test.ts` is ungated and drives every branch of the gate — the exact-`1`
-rule, the credential preflight, the write tier's three refusals, the capture opt-in, handle
-normalization, and the CFG-8 stripping — from injected env snapshots, with no network and no
-dependence on the machine's filesystem. A live suite nobody can run today is still worth having
-if its guardrails are provably correct.
+What CI *can* protect is the harness itself, and it does: every module under
+`test/live/harness/` has an ungated companion in `test/live/*.test.ts` that runs in the normal
+suite with no network and no dependence on the machine's filesystem. `gate.test.ts` drives every
+branch of the gate — the exact-`1` rule, the credential preflight, the write tier's three
+refusals, the capture opt-in, handle normalization, and the CFG-8 stripping — from injected env
+snapshots. `spend.test.ts` drives both rails, the deny list, the ledger, and the derivation of
+the money cap from `COST_TABLE`, on in-memory guards. `session.test.ts` opens a real
+`LiveSession` over an undici `MockAgent` and proves the guard is consulted before any request
+leaves, that the server's own budget is an independent second rail, and that the COST-6
+recorder sees a billing rejection. `capture.test.ts` covers header redaction, the recorder, the
+provenance text, and the fixture write into a temp directory. `drift.test.ts` and
+`cleanup.test.ts` are pure. A live suite nobody can run today is still worth having if its
+guardrails are provably correct.
 
 ## 8. What this page cannot tell you
 
@@ -440,7 +448,3 @@ repository does not answer the question, listed so nobody mistakes silence for a
 - **What X will actually bill you.** The figures in §2 are the harness's own accounting from
   `COST_TABLE`, not an invoice. The canonical prices are
   [01-api-landscape.md](01-api-landscape.md) §3.1 and Appendix B.
-- **Offline coverage of the harness beyond the gate.** Header comments in
-  `test/live/harness/drift.ts` and `test/live/harness/session.ts` refer to companion ungated
-  tests (`test/live/drift.test.ts`, `MockAgent`-driven session/spend tests) that are not in the
-  tree at the time of writing; `test/live/gate.test.ts` is the only one that exists.

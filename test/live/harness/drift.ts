@@ -53,7 +53,10 @@ export function shapeOf(value: unknown, prefix = ''): Shape {
 
   function walk(node: unknown, path: string): void {
     const type = typeOf(node);
-    if (path !== '') out.set(path, type);
+    // First writer wins: every array element lands on the same `[]` path, and the docstring
+    // promises the first element's type is the one recorded. Non-array paths are visited
+    // exactly once, so the guard changes nothing for them.
+    if (path !== '' && !out.has(path)) out.set(path, type);
     if (type === 'array') {
       for (const item of node as unknown[]) walk(item, `${path}[]`);
       return;
