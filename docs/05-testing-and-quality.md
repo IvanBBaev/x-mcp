@@ -194,6 +194,10 @@ carries the "spends real money" warning). Live tests are gated behind
   credits) — after capture the fixture and mapping are locked and everything else
   stays on fixtures / `MockAgent`.
 
+This section is the binding policy. The operator procedure that implements it —
+every variable each tier needs, how to run one, and the COST-6 capture and
+promotion checklist — is [14-live-testing.md](14-live-testing.md).
+
 ## 7. Pipelines & CI matrix
 
 - `npm run verify` = build + lint + format:check + tests — required before every
