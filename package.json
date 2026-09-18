@@ -32,6 +32,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"build/test/**/*.test.js\"",
+    "test:live": "npm run build && node --test \"build/test/live/*.live.test.js\"",
     "coverage": "npm run build && c8 node --test \"build/test/**/*.test.js\"",
     "lint": "eslint .",
     "format": "prettier --write .",

@@ -161,11 +161,9 @@ A tier opt-in never overrides the master switch — `X_MCP_LIVE_CAPTURE=1` with
 ### 3.4 Running a tier
 
 Run from the repository root: the fixture loader and the capture writer both anchor on
-`process.cwd()`.
-
-```bash
-npm run build
-```
+`process.cwd()`. `npm run test:live` builds and then runs `build/test/live/*.live.test.js` —
+the four live files and nothing else. The script does **not** set `X_MCP_LIVE_TEST`; that
+stays with you, so an absent-minded `npm run test:live` prints four skips and spends nothing.
 
 Reads only (app-only is enough):
 
@@ -173,7 +171,7 @@ Reads only (app-only is enough):
 X_MCP_LIVE_TEST=1 \
 X_MCP_AUTH_MODE=app-only \
 X_MCP_BEARER_TOKEN=… \
-node --test "build/test/live/*.live.test.js"
+npm run test:live
 ```
 
 Reads plus the write end-to-end, on the dedicated account:
@@ -184,16 +182,16 @@ X_MCP_LIVE_ACCOUNT=@my-testbed \
 X_MCP_AUTH_MODE=oauth2 \
 X_MCP_CLIENT_ID=… \
 X_MCP_POLICY=manage \
-node --test "build/test/live/*.live.test.js"
+npm run test:live
 ```
 
-The COST-6 capture adds `X_MCP_LIVE_CAPTURE=1` (§6). Narrow the glob to one file — e.g.
-`build/test/live/write-e2e.live.test.js` — to run a single tier; each file carries its own
-20-unit allowance either way (§2). The glob above deliberately excludes
-`build/test/live/gate.test.js`, which is an ordinary offline test.
+The COST-6 capture adds `X_MCP_LIVE_CAPTURE=1` (§6). To run a single tier, bypass the script
+and name the file — `npm run build && X_MCP_LIVE_TEST=1 … node --test
+build/test/live/write-e2e.live.test.js`; each file carries its own 20-unit allowance either
+way (§2). The script's glob deliberately excludes the harness's own offline tests
+(`build/test/live/*.test.js` without `.live`), which are ordinary CI tests.
 
-There is **no `npm run test:live` script** in `package.json`; compose the command yourself as
-above. Authorize with the same env you will run with — a live run that points at a different
+Authorize with the same env you will run with — a live run that points at a different
 `X_MCP_TOKEN_FILE` will not find the tokens you just minted (docs/10 §3).
 
 ### 3.5 Reading the output
@@ -442,8 +440,6 @@ repository does not answer the question, listed so nobody mistakes silence for a
 - **What X will actually bill you.** The figures in §2 are the harness's own accounting from
   `COST_TABLE`, not an invoice. The canonical prices are
   [01-api-landscape.md](01-api-landscape.md) §3.1 and Appendix B.
-- **A `test:live` npm script.** `test/live/harness/spend.ts` mentions `npm run test:live`, but
-  no such script exists in `package.json`; §3.4 composes the command by hand instead.
 - **Offline coverage of the harness beyond the gate.** Header comments in
   `test/live/harness/drift.ts` and `test/live/harness/session.ts` refer to companion ungated
   tests (`test/live/drift.test.ts`, `MockAgent`-driven session/spend tests) that are not in the
