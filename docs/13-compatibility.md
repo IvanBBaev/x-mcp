@@ -45,16 +45,16 @@ independently of any client.
 | Property | Value | Evidence |
 |---|---|---|
 | Transport | stdio only. One JSON-RPC frame per line on stdout; nothing else ever reaches stdout. | `protocol-verified` — [`test/mcp/spawn.test.ts:111`](../test/mcp/spawn.test.ts) |
-| Protocol version | Echoes the client's request when it is one of `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`, `2024-10-07`. An unrecognised version falls back to `2025-11-25`. | `probe-verified` (§7.1 reproduces it) |
+| Protocol version | Echoes the client's request when it is one of `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`, `2024-10-07`. An unrecognised version falls back to `2025-11-25`. | `protocol-verified` — [`test/mcp/protocol.test.ts:147`](../test/mcp/protocol.test.ts) (one `initialize` per version, then the full `tools/list` under it), [`:185`](../test/mcp/protocol.test.ts) (fallback), [`:141`](../test/mcp/protocol.test.ts) (the five-version list itself, as a literal — an SDK bump fails here first). Was `probe-verified` until 2026-09-18. |
 | Capabilities | Exactly `{"tools":{}}`. No `listChanged`, no resources, prompts, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts:61`](../src/mcp/server.ts), [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
 | `instructions` | 944 characters returned on `initialize`. | `protocol-verified` — [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
 | `tools/list` | 41 tools, delivered in one response (~78 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:123`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
 | `tools/call` success | `content[0]` is a JSON text block **and** `structuredContent` is the same object. | `protocol-verified` — [`test/mcp/structured.test.ts:134`](../test/mcp/structured.test.ts) |
 | `tools/call` failure | Text-only result with `isError: true`. No `structuredContent` — deliberate, since the spec exempts error results from `outputSchema` conformance. | `protocol-verified` — [`test/mcp/server.test.ts:300`](../test/mcp/server.test.ts) |
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
-| Cancellation | `notifications/cancelled` aborts the in-flight HTTP request and rejects with JSON-RPC `-32001`; the session stays usable. | Plumbing `protocol-verified` — [`test/core/registry.test.ts:484`](../test/core/registry.test.ts), [`test/tools/media.test.ts:1259`](../test/tools/media.test.ts); end-to-end over MCP `probe-verified` (402 ms against a 60 s delayed reply, the full tool list still served afterwards) |
-| Progress notifications | **Not supported.** No `progressToken` handling, no `notifications/progress` — including for chunked media upload, which has an internal progress seam that is not wired to MCP. | `probe-verified` (no `progress` reference in [`src/mcp/compose.ts`](../src/mcp/compose.ts)) |
-| Unknown methods | `resources/list`, `prompts/list`, anything unrecognised → `-32601 Method not found`. `ping` works (SDK built-in). | `probe-verified` (§7.1) |
+| Cancellation | `notifications/cancelled` aborts the in-flight HTTP request and rejects with JSON-RPC `-32001`; the session stays usable. | `protocol-verified` end to end — [`test/mcp/protocol.test.ts:320`](../test/mcp/protocol.test.ts): an SDK client cancels a `tools/call` whose mocked reply is 5 s away; the abort is observed at the HTTP dispatcher, the call rejects with `-32001` well under a second, and the same session then lists all 41 tools and completes a fresh call. Plumbing beneath it — [`test/core/registry.test.ts:484`](../test/core/registry.test.ts), [`test/tools/media.test.ts:1259`](../test/tools/media.test.ts). The end-to-end leg was `probe-verified` only (402 ms against a 60 s delayed reply) until 2026-09-18. |
+| Progress notifications | **Chunked media upload only.** A `tools/call` that carries `_meta.progressToken` receives one `notifications/progress` per accepted APPEND segment: `progress`/`total` in bytes (monotonic — the event fires only after the platform accepted the segment) and a `message` naming the media id and segment. No other tool reports progress, and a call without a token behaves exactly as before. | `protocol-verified` — [`test/mcp/progress.test.ts:184`](../test/mcp/progress.test.ts), [`:285`](../test/mcp/progress.test.ts) (the second over the real composed server and a real two-segment upload) |
+| Unknown methods | `resources/list`, `prompts/list`, anything unrecognised → `-32601 Method not found`. `ping` works (SDK built-in). | `protocol-verified` — [`test/mcp/protocol.test.ts:208`](../test/mcp/protocol.test.ts) (nine `resources/*`, `prompts/*`, `logging/*`, `completion/*` and made-up methods, each a JSON-RPC error rather than an empty result; `ping` → `{}`; `tools/list` whole afterwards). Was `probe-verified` until 2026-09-18. |
 | Startup failure | One `x-mcp-ai: fatal: <reason>` line on **stderr**, empty stdout, exit 1. | `protocol-verified` — [`test/mcp/spawn.test.ts:155`](../test/mcp/spawn.test.ts) |
 | Shutdown | Clean exit 0 on stdin EOF, SIGINT or SIGTERM. | `protocol-verified` — [`test/mcp/spawn.test.ts:111`](../test/mcp/spawn.test.ts), [`:140`](../test/mcp/spawn.test.ts) |
 
@@ -274,11 +274,31 @@ client's current documentation and treat §7 as the acceptance test.
 | Requirement | Value | Evidence |
 |---|---|---|
 | Node.js | **>= 22**. Declared in `package.json` `engines`; enforced at launch by `bin/x-mcp-ai.cjs` before any `node:`-prefixed import, so an old runtime gets one readable fatal line rather than a parse error. | `protocol-verified` — [`test/mcp/launcher.test.ts:26`](../test/mcp/launcher.test.ts); CI job `launcher probe (Node 12)` at [`.github/workflows/ci.yml:95`](../.github/workflows/ci.yml) |
-| MCP protocol | `2025-03-26` and newer, up to `2025-11-25`. `2024-11-05` and `2024-10-07` are accepted by the SDK and echoed, but are not exercised by any test — treat them as `unverified`. | `probe-verified` |
+| MCP protocol | `2025-03-26` and newer, up to `2025-11-25`. `2024-11-05` and `2024-10-07` are accepted by the SDK and echoed, but are not exercised by any test — treat them as `unverified`. *2026-09-18:* all five are now exercised — [`test/mcp/protocol.test.ts:147`](../test/mcp/protocol.test.ts) runs `initialize` under each one and asserts the echo and a whole `tools/list` beneath it, so `2024-11-05` and `2024-10-07` are no longer `unverified` at the protocol level. What stays unverified for them is only that no real client from that era has been run against the server (§3). | `protocol-verified` — [`test/mcp/protocol.test.ts:147`](../test/mcp/protocol.test.ts). Was `probe-verified` until 2026-09-18. |
 | Transport | stdio only. No HTTP, no SSE, no WebSocket. A client that can only speak a remote transport cannot use this server. | `protocol-verified` — [`src/index.ts`](../src/index.ts) uses `StdioServerTransport` exclusively |
 | MCP SDK | `^1.23.0` declared (raised from `^1.12.0` by the zod 4 migration, 2026-08-29), 1.30.0 installed and tested against. Bumped from 1.29.0 on 2026-08-07 by a lockfile-only `npm audit fix` closing two **high** advisories in the SDK's own transitive tree (`fast-uri` host confusion, `ip-address` SSRF/trust-boundary) plus `js-yaml`, `hono` and `undici`. Neither high advisory is reachable from this server — both sit under the SDK's HTTP/SSE transport and JSON-Schema validator, and this server is stdio-only with hand-rolled Zod validation — but `npm run check` gates on `npm audit --omit=dev --audit-level=high` and does not grade reachability, deliberately: a "not reachable today" exception is a claim that has to be re-proved on every dependency change, and nobody re-proves it. | `package.json` |
 | Platforms | CI runs the full gate — including the spawned-stdio tests — on ubuntu (Node 22 and 24), macOS (Node 22) and Windows (Node 22). A packed-tarball smoke job checks that the shipped `files` set actually boots. | `protocol-verified` — [`.github/workflows/ci.yml:23`](../.github/workflows/ci.yml), [`:118`](../.github/workflows/ci.yml) |
 | Client features required | Spawn a subprocess, pass `env`, `initialize`, `tools/list`, `tools/call`. Nothing else. | §2 |
+
+### 5.1 Windows
+
+Windows is supported — CI runs the whole gate there, spawned-stdio tests included — but
+five guarantees this server makes on POSIX are weaker on Windows. All five degrade
+**explicitly**: a one-time warning on stderr, a typed error, or a `doctor` note. None of
+them degrades silently, and none of them is a client-visible protocol difference.
+
+| Guarantee | On POSIX | On Windows | Evidence |
+|---|---|---|---|
+| Shutdown by signal | `SIGINT`/`SIGTERM` run the clean shutdown and exit 0. | Windows has no POSIX signals: a client's `child.kill()` is an unconditional `TerminateProcess`, so no handler can run and the child always dies by-signal. **Stop the server by closing its stdin** — the EOF path is identical on both platforms and is what every MCP client does anyway. | `protocol-verified` — [`test/mcp/spawn.test.ts:175`](../test/mcp/spawn.test.ts) (the SIGTERM axis skips on win32 rather than assert a kernel guarantee that does not exist there) |
+| Symlink refusal on the final path component | Media files and the token file are opened with `O_NOFOLLOW`, so the last component can never be a symlink — checked and opened as one operation. | The flag does not exist. Both degrade to an `lstat` check before the open, warned once, which leaves a narrow TOCTOU window the POSIX path does not have. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:302`](../test/api/oauth2/filestore.test.ts), [`src/tools/media.ts:239`](../src/tools/media.ts) |
+| POSIX permission checks | A group/other-readable token file or directory is a **refusal**; a loose profiles file is a warning. | `stat()` reports a synthetic `0666` for everything, so the bits carry no information and every one of these checks is skipped, warned once. `x-mcp-ai doctor` says so explicitly and tells the operator to inspect the ACLs by hand. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:284`](../test/api/oauth2/filestore.test.ts), [`test/cli/doctor.test.ts:262`](../test/cli/doctor.test.ts) |
+| Atomic token persist | Write-temp + `rename` never fails because a reader holds the destination. | `rename` over a file another process has open can fail. The store retries `EPERM`/`EACCES`/`EBUSY`/`EEXIST` a bounded number of times and, if they persist, surfaces a typed `auth` error naming the likely cause instead of losing the token pair. | `protocol-verified` — [`test/api/oauth2/filestore.test.ts:474`](../test/api/oauth2/filestore.test.ts), [`:482`](../test/api/oauth2/filestore.test.ts) |
+| Keychain token backend | `X_MCP_TOKEN_KEYCHAIN=1` stores tokens in the OS keychain (macOS `security`, Linux `secret-tool`). | Not supported. Setting it is a typed **fatal at startup**, naming the two supported platforms and `X_MCP_TOKEN_FILE` — fail-closed, with no in-memory fallback. Use the token file; its default is `%APPDATA%\x-mcp\tokens.json`. | `protocol-verified` — [`test/api/oauth2/keychain.test.ts:262`](../test/api/oauth2/keychain.test.ts) |
+
+Paths are not a limitation: no code path re-joins or normalises an operator-supplied path,
+so drive letters, backslashes and UNC prefixes come through byte-identical (PLAT-3,
+[`test/core/config.test.ts:126`](../test/core/config.test.ts)). Escape the backslashes when
+you write them into a client's JSON config — `"C:\\Users\\me\\tokens.json"`.
 
 ## 6. Client limitations worth knowing — all `spec-derived`
 
@@ -330,6 +350,12 @@ node --test "build/test/mcp/**/*.test.js"
 **Expected:** `# fail 0`. The pass count grows as tools are added (60 at the time of
 writing) — the count is not the assertion, the zero is. A failure here is a server
 regression: stop and fix it before touching any client.
+
+*2026-09-18:* 83 at the time of this note. The run now also covers the three §2 rows
+this section used to be the only evidence for — protocol-version echo and fallback,
+`-32601` for unadvertised methods, and cancellation end to end — via
+[`test/mcp/protocol.test.ts`](../test/mcp/protocol.test.ts). Reproducing them by hand is
+no longer part of the handoff.
 
 Then confirm the tool count that the matrix quotes (the `node <entry>` command must come
 immediately after `--cli`, before the `-e` pairs — the §4.5 argument-order caveat applies

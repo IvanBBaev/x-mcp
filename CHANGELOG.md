@@ -8,6 +8,21 @@ development chronology lives in `WORKLOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- MCP progress notifications for chunked media upload. A `tools/call` that carries
+  `_meta.progressToken` now receives one `notifications/progress` per accepted APPEND
+  segment, with `progress`/`total` counted in bytes and a `message` naming the media id
+  and segment. This closes the half of the media work that shipped as an internal
+  per-segment seam with the protocol notification deliberately left to the composition
+  root. The bridge correlates a seam event to the call that caused it by per-call
+  `AbortSignal` identity — the same object the adapter already hands the registry — so
+  overlapping uploads cannot cross-talk. Everything about it is advisory and fails open: a
+  client that sends no token, an embedder that composes the server without the bridge, and
+  a transport that refuses the frame all leave the upload itself untouched. No tool
+  schema, description or annotation changed, so the advertised `tools/list` is
+  byte-identical.
+
 ## [0.8.0] - 2026-08-25
 
 First published release on npm as `x-mcp-ai`.
