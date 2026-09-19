@@ -168,7 +168,9 @@ above; this is the single list to walk before tagging:
       directions — no test names a case that no longer exists. **Amended 2026-09-08:**
       the WP-3.3 progress bridge added `MCP-9`, named by the nine tests in
       `test/mcp/progress.test.ts` — 111 numbered cases, 107 named by tests, drift
-      still zero.*
+      still zero. **Amended 2026-09-19:** the protocol-surface pins added `MCP-10`,
+      named by the nine tests in `test/mcp/protocol.test.ts` — 112 numbered cases,
+      108 named by tests, drift still zero.*
 - [x] Docs-drift gate green: registry ↔ docs/03 ↔ generated tool reference agree.
       *`npm run docs:check` (`scripts/docs-gen.mjs`). Verified 2026-08-09: 41 tools
       in 12 packages, zero drift in either direction. The gate is proven non-vacuous
