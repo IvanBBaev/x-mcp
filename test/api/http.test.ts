@@ -4,8 +4,9 @@
 //   AUTH-14 — host-scoped auth + redirects never followed
 //   CFG-7   — proxy env is ignored (default/injected dispatcher, never a ProxyAgent)
 //   NET-1   — body tolerance: empty / non-JSON / oversized, no raw body text in errors
-//   NET-2   — transport failures mapped to `network`, timeouts distinguished
+//   NET-2   — transport failures mapped to `network` (connect AND mid-body), timeouts distinguished
 //   NET-3   — GET retries exactly once on 5xx/network; writes never auto-retry
+//   MCP-7   — host cancellation before AND during the response; a cancelled write is POST-4-ambiguous
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,6 +14,7 @@ import assert from 'node:assert/strict';
 import { XError } from '../../src/core/errors.js';
 import { createHttpClient, shouldAttachAuth, DEFAULT_API_BASE_URL } from '../../src/api/http.js';
 import type { HttpClientConfig } from '../../src/api/http.js';
+import type { Dispatcher } from '../../src/core/ports.js';
 import { mockHttp, fakeClock, fakeSleep, fakeRandom } from '../helpers/index.js';
 
 // Case-insensitive header lookup over the object the MockAgent reply callback captures.
@@ -48,6 +50,65 @@ async function rejects(promise: Promise<unknown>): Promise<XError> {
     return err;
   }
   throw new assert.AssertionError({ message: 'expected the promise to reject, but it resolved' });
+}
+
+// The union of the two undici handler protocols this decorator has to speak: the bundled
+// fetch on Node 22 drives a dispatcher with v1 callbacks (`onComplete` / `onError`), Node 24+
+// with v2 (`onResponseEnd` / `onResponseError`). Only the members touched here are named.
+interface BodySink {
+  onRequestStart?: unknown;
+  onComplete?(trailers: unknown): void;
+  onError?(err: Error): void;
+  onResponseEnd?(controller: unknown, trailers: unknown): void;
+  onResponseError?(controller: unknown, err: Error): void;
+}
+
+/** What befalls a response once its bytes were delivered: die in an error, or never finish. */
+type MidBodyFate = { readonly die: Error } | { readonly stall: () => void };
+
+/**
+ * Wrap a dispatcher so the FIRST `fates.length` responses do not complete cleanly: status
+ * and bytes are delivered as the mock replied them, then the stream either ends in the
+ * queued error — an ECONNRESET after the headers, exactly the NET-2 case the MockAgent
+ * alone cannot stage (`replyWithError` fails before any response exists) — or stalls open
+ * forever, with `stall` told so a test can cancel a request whose body is still streaming
+ * (MCP-7). Both act a macrotask later because a real socket never resets synchronously
+ * inside `dispatch`, and fetch wires its stream-error listener only after `onHeaders`.
+ * Later responses pass through untouched, so a retry can succeed.
+ */
+function midBody(inner: Dispatcher, fates: MidBodyFate[]): Dispatcher {
+  const dispatcher = {
+    dispatch(opts: unknown, handler: BodySink): boolean {
+      const fate = fates.shift();
+      const spy = fate === undefined ? handler : (Object.create(handler) as BodySink);
+      if (fate !== undefined) {
+        // Replaces the clean completion: raise the error through the handler, or just tell.
+        const instead = (raise: (err: Error) => void): void => {
+          setImmediate(() => ('die' in fate ? raise(fate.die) : fate.stall()));
+        };
+        if ('onRequestStart' in handler) {
+          spy.onResponseEnd = function (this: BodySink, controller: unknown) {
+            instead((err) => handler.onResponseError?.call(this, controller, err));
+          };
+        } else {
+          spy.onComplete = function (this: BodySink) {
+            instead((err) => handler.onError?.call(this, err));
+          };
+        }
+      }
+      return (inner as unknown as { dispatch(o: unknown, h: BodySink): boolean }).dispatch(
+        opts,
+        spy,
+      );
+    },
+    close: () => (inner as unknown as { close(): Promise<void> }).close(),
+    destroy: () => (inner as unknown as { destroy(): Promise<void> }).destroy(),
+  };
+  return dispatcher as unknown as Dispatcher;
+}
+
+function connectionReset(): Error {
+  return Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
 }
 
 // --- AUTH-14: host-scoped auth ---------------------------------------------------
@@ -382,6 +443,124 @@ test('NET-3: a write (POST) NEVER auto-retries on a network error', async () => 
   );
 
   assert.equal(err.kind, 'network');
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- NET-2 mid-body: the response started, then the connection died ----------------
+//
+// Distinct from the connect failures above: headers (and some bytes) arrived, so the failure
+// surfaces from the body read, not from fetch itself. The read rejects with the stream's
+// `terminated` error carrying the transport cause — never with our own XError — and the
+// client must treat it exactly like a connect failure: GET retries once, a write never.
+
+test('NET-2/NET-3: a GET whose body dies mid-stream (ECONNRESET) retries once, then succeeds', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: connectionReset() }]),
+  });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.equal(sleep.calls.length, 1); // one backoff between the two attempts
+  http.assertDone(); // both interceptors consumed → the retry really went out
+  await http.close();
+});
+
+test('NET-2/NET-3: a write whose body dies mid-stream surfaces `network` at once, never retries', async () => {
+  const http = mockHttp();
+  // A single interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: connectionReset() }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.deepEqual(sleep.calls, []); // no backoff, no retry
+  assert.doesNotMatch(err.message, /ECONNRESET|terminated/); // raw cause never inlined
+  assert.doesNotMatch(err.message, /timed out/i); // a reset is not a timeout
+  http.assertDone();
+  await http.close();
+});
+
+test("NET-2: a timeout that reaches the client wrapped as the stream error's cause still reads as a timeout", async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  // fetch reports a mid-body failure as `TypeError: terminated` with the transport error as
+  // `cause`; when that transport error is the timeout DOMException, the client must still
+  // unwrap it — the distinct NET-2 timeout message, not the generic connection-failed one.
+  const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: timeout }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /timed out/i);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- MCP-7 mid-body: the host cancels while the body is still streaming --------------
+//
+// The response started, so the cancellation surfaces from the body read — fetch errors the
+// stream with the abort reason — not from fetch itself: the `'response'` phase of the
+// cancelled error. Never retried, whatever the method. A GET stays re-issuable; a write
+// was already on the wire, so it carries the POST-4 ambiguity and is pinned non-retryable
+// so that nothing auto-re-issues a possibly-applied write.
+
+test('MCP-7: cancellation while a GET body streams is a cancelled `network` error, not a retry', async () => {
+  const http = mockHttp();
+  // A single interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    dispatcher: midBody(http.dispatcher, [{ stall: () => controller.abort() }]),
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled while reading the response/);
+  assert.doesNotMatch(err.message, /before a response arrived/); // the body-read phase, not fetch
+  assert.equal(err.retryable, true); // a cancelled GET is safe to re-issue
+  assert.doesNotMatch(err.message, /X may have applied/); // no write ambiguity on a GET
+  assert.deepEqual(sleep.calls, []); // cancellation is never retried, even for a GET
+  http.assertDone();
+  await http.close();
+});
+
+test('MCP-7/POST-4: cancellation while a write body streams carries the applied-anyway note, non-retryable', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    dispatcher: midBody(http.dispatcher, [{ stall: () => controller.abort() }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled while reading the response/);
+  assert.match(err.message, /X may have applied the write anyway/);
+  assert.match(err.message, /Do NOT blindly re-issue it/);
+  assert.equal(err.retryable, false); // pinned: a possibly-applied write must not auto-retry
   assert.deepEqual(sleep.calls, []);
   http.assertDone();
   await http.close();
