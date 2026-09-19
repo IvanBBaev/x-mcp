@@ -7,6 +7,7 @@
 //   NET-2   — transport failures mapped to `network` (connect AND mid-body), timeouts distinguished
 //   NET-3   — GET retries exactly once on 5xx/network; writes never auto-retry
 //   MCP-7   — host cancellation before AND during the response; a cancelled write is POST-4-ambiguous
+//   RATE-1/2/4 — the onResponse seam (T-320 F6): every response, once per attempt, before any decision
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -562,6 +563,210 @@ test('MCP-7/POST-4: cancellation while a write body streams carries the applied-
   assert.match(err.message, /Do NOT blindly re-issue it/);
   assert.equal(err.retryable, false); // pinned: a possibly-applied write must not auto-retry
   assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- RATE-2/INT-3: the onResponse observer seam (T-320 F6) --------------------------
+//
+// The third seam. Every response the origin returned — a 2xx, the 429 that follows it, a
+// 5xx about to be retried, a 3xx about to be refused — reaches the observer once per
+// attempt, in arrival order, BEFORE this client reads the body, retries, refuses or maps
+// it. A transport failure yields no response and so never reaches it. What to make of a
+// headerless response is the tracker's policy (RATE-4), not this layer's.
+
+// Record what the observer saw, one entry per call, in arrival order.
+function observed() {
+  const calls: Array<{ status: number; remaining: string | null }> = [];
+  const onResponse = (status: number, headers: Headers): void => {
+    calls.push({ status, remaining: headers.get('x-rate-limit-remaining') });
+  };
+  return { calls, onResponse };
+}
+
+test('RATE-2: a 2xx with rate-limit headers reaches the observer — successes train the tracker', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(
+    200,
+    { data: { id: '1' } },
+    {
+      headers: {
+        'x-rate-limit-limit': '300',
+        'x-rate-limit-remaining': '299',
+        'x-rate-limit-reset': '1700000000',
+      },
+    },
+  );
+
+  let seen: { status: number; headers: Headers } | undefined;
+  const { client } = makeClient(http, {
+    onResponse: (status, headers) => {
+      seen = { status, headers };
+    },
+  });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1'); // the request itself still resolves with the parsed body
+  assert.equal(seen?.status, 200);
+  assert.ok(seen?.headers instanceof Headers);
+  assert.equal(seen?.headers.get('x-rate-limit-limit'), '300');
+  assert.equal(seen?.headers.get('x-rate-limit-remaining'), '299');
+  assert.equal(seen?.headers.get('x-rate-limit-reset'), '1700000000');
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-1: on a 429 the observer fires before mapError, with the headers the mapper sees', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(
+    429,
+    { title: 'Too Many Requests' },
+    {
+      headers: { 'x-rate-limit-remaining': '0', 'x-rate-limit-reset': '1700000000' },
+    },
+  );
+
+  const order: string[] = [];
+  const seen = observed();
+  let mapped: { status: number; remaining: string | null } | undefined;
+  const { client } = makeClient(http, {
+    onResponse: (status, headers) => {
+      order.push('observe');
+      seen.onResponse(status, headers);
+    },
+    mapError: (status, headers) => {
+      order.push('map');
+      mapped = { status, remaining: headers.get('x-rate-limit-remaining') };
+      return new XError('rate-limit', 'Rate limit exhausted.');
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'rate-limit');
+  assert.deepEqual(order, ['observe', 'map']); // the tracker learns the window before the error is built
+  assert.deepEqual(seen.calls, [{ status: 429, remaining: '0' }]);
+  assert.deepEqual(mapped, { status: 429, remaining: '0' });
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-3: a retried GET reaches the observer once per attempt — the 5xx, then the 2xx', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(503, { e: 'boom' }, { headers: { 'x-rate-limit-remaining': '7' } });
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(200, { data: { id: '1' } }, { headers: { 'x-rate-limit-remaining': '6' } });
+
+  const seen = observed();
+  const { client, sleep } = makeClient(http, { onResponse: seen.onResponse });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.equal(sleep.calls.length, 1); // one backoff between the two attempts
+  // Each call carries its own attempt's headers, in arrival order — the retried 5xx is not lost.
+  assert.deepEqual(seen.calls, [
+    { status: 503, remaining: '7' },
+    { status: 200, remaining: '6' },
+  ]);
+  http.assertDone();
+  await http.close();
+});
+
+test('AUTH-14: a refused redirect still reaches the observer before it is refused', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/redir', method: 'GET' }).reply(302, '', {
+    headers: { location: 'https://evil.example/steal', 'x-rate-limit-remaining': '5' },
+  });
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/redir' }));
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.data.http_status, 302);
+  assert.deepEqual(seen.calls, [{ status: 302, remaining: '5' }]); // observed, then refused
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-2: a connection failure never reaches the observer — there is no response', async () => {
+  const http = mockHttp();
+  // A write so there is no retry; the single interceptor throws on connect.
+  http.pool
+    .intercept({ path: '/2/tweets', method: 'POST' })
+    .replyWithError(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.deepEqual(seen.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-2: a per-attempt timeout never reaches the observer', async () => {
+  const http = mockHttp();
+  // A write (no retry). The response is delayed well past the tiny timeout window.
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(200, { ok: true }).delay(500);
+
+  const seen = observed();
+  const { client } = makeClient(http, { timeoutMs: 10, onResponse: seen.onResponse });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /timed out/i);
+  assert.deepEqual(seen.calls, []);
+  await http.close();
+});
+
+test('MCP-7: a call cancelled before any response never reaches the observer', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const controller = new AbortController();
+  controller.abort(); // already cancelled by the host
+  const seen = observed();
+  const { client } = makeClient(http, { signal: controller.signal, onResponse: seen.onResponse });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(seen.calls, []);
+  await http.close();
+});
+
+test('NET-1: the observer is optional — a client built without one handles a 200 normally', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(200, { data: { id: '1' } }, { headers: { 'x-rate-limit-remaining': '299' } });
+
+  const { client } = makeClient(http); // no onResponse
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-4: a 200 without rate-limit headers still reaches the observer — the seam is unconditional', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  // Whether a headerless response trains the table is the tracker's call, not this layer's.
+  assert.deepEqual(seen.calls, [{ status: 200, remaining: null }]);
   http.assertDone();
   await http.close();
 });

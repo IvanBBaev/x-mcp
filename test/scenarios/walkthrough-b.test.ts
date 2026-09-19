@@ -321,13 +321,23 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   // Step 3 (summarize + draft) is in-model: no further tool call, no further spend.
   assert.equal(composition.budget.total(), 0.011);
 
-  // INT-3: the table is trained by the error mapper, and api/http exposes no success-path
-  // header hook — so an all-2xx journey like this one leaves it empty. The operator sees
-  // an honest "nothing observed yet", not a stale or invented window.
+  // RATE-1/INT-3: an all-2xx journey now leaves a real table behind (T-320 F6, closed) —
+  // every reply passed through its tool's bucket observer. The two step-1 requests share
+  // the mentions tool's bucket and settle on the lower remaining; the parent read and the
+  // conversation search each trained their own. The operator sees where the session
+  // actually stands, not "nothing observed yet" after four successful calls.
   const table = textPayload<Rendered<RateLimitStatus>>(
     await call(client, 'x_rate_limit_status', {}),
   );
-  assert.deepEqual(table.data.buckets, []);
+  assert.deepEqual(
+    table.data.buckets.map((b) => [b.key, b.windows.map((w) => w.remaining)]),
+    [
+      ['timeline-mentions#app', [178]],
+      ['tweets#app', [14]],
+      ['search#app', [59]],
+    ],
+  );
+  assert.ok(table.data.buckets.every((b) => b.windows.every((w) => !w.exhausted)));
   assert.equal(table.meta.cost_usd, 0); // `local` meta tool: free, and it adds no spend
   assert.equal(table.meta.session_total_usd, 0.011);
 
@@ -362,6 +372,58 @@ test('REND-6: the untrusted-content note is one field per RESULT, not one per it
   for (const item of page.items) {
     assert.ok(!('note' in item), 'a compact item must not repeat the guard note');
   }
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('RATE-2/INT-3: a SUCCESSFUL read that spends the last unit refuses the next call before HTTP', async () => {
+  const mock = mockHttp();
+  // The look-ahead the preflight gate promises (RATE-2): a 200 whose headers say the window
+  // is spent trains the bucket exactly as the 429 after it would — so the second call is
+  // refused locally, before the origin ever gets to answer it with a 429 (T-320 F6).
+  mock.pool
+    .intercept({ path: '/2/users/me', method: 'GET', query: USERS_PROJECTION })
+    .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/me.json'), {
+      headers: {
+        'x-rate-limit-limit': '25',
+        'x-rate-limit-remaining': '0',
+        'x-rate-limit-reset': String(Math.floor(Date.now() / 1000) + 900),
+      },
+    });
+
+  const client = await connect(composeFor(mock));
+
+  const first = await call(client, 'x_user_get', { users: ['me'] });
+  assert.notEqual(first.isError, true);
+  assert.deepEqual(
+    textPayload<Rendered<{ items: Array<{ id: string }> }>>(first).data.items.map((u) => u.id),
+    [ME_ID],
+  );
+
+  const table = textPayload<Rendered<RateLimitStatus>>(
+    await call(client, 'x_rate_limit_status', {}),
+  ).data;
+  assert.deepEqual(
+    table.buckets.map((b) => b.key),
+    ['users#app'],
+  );
+  const bucket = table.buckets[0];
+  assert.deepEqual(
+    bucket?.windows.map((w) => ({
+      limit: w.limit,
+      remaining: w.remaining,
+      exhausted: w.exhausted,
+    })),
+    [{ limit: 25, remaining: 0, exhausted: true }],
+  );
+
+  // No interceptor is registered for a second `me` read: reaching the network would fail
+  // the mock, so a `rate-limit` error here can only have come from the local preflight.
+  const refused = await call(client, 'x_user_get', { users: ['me'] });
+  assert.equal(refused.isError, true);
+  assert.equal(textPayload<RenderedError>(refused).error.kind, 'rate-limit');
 
   mock.assertDone();
   await client.close();

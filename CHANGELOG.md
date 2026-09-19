@@ -8,6 +8,13 @@ development chronology lives in `WORKLOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Rate-limit tracking now learns from every response, not only from failures: a successful
+  call whose headers report an exhausted window trains the table, so the next call in that
+  bucket is refused locally before the platform answers 429, and `x_rate_limit_status`
+  shows a bucket after its first successful call instead of after its first failure.
+
 ## [0.8.0] - 2026-08-25
 
 First published release on npm as `x-mcp-ai`.

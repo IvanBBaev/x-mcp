@@ -381,15 +381,19 @@ depends on a paid timeline read.
 - Preemptive refusal when `remaining === 0` and reset is in the future (skew-tolerant,
   `reset − 5 s`); on 429, idempotent GETs may retry once if reset ≤ 5 s away, writes
   never (RATE-2/3/5).
-- **As shipped, only non-2xx responses train the table** (T-320 F6, 2026-08-07). The
-  tracker is wired into the http client's *error mapper* (`mcp/compose`), and `api/http`
-  exposes no success-path header hook — so a bucket stays unknown until a call in it
-  fails. Consequence: the preemptive refusal is a **429-repeat suppressor**, not a
-  look-ahead. The first exhausted call in a fresh process always goes out and comes back
-  429; every subsequent call in that bucket is then refused locally until reset. Both
-  `x_rate_limit_status` and this bullet describe the same table, so the tool reports
-  nothing for a bucket that has only ever succeeded — that is the design as built, not a
-  gap in the tracker (`api/ratelimit` records whatever it is handed).
+- **Every response trains the table** (T-320 F6, closed 2026-09-19). `api/http` exposes
+  a third seam beside `mapError` and `authorization`: an `onResponse` observer called
+  synchronously with each response's status and headers, once per attempt, before the
+  body is read and before the client decides to retry, refuse or map it. `mcp/compose`
+  wires `tracker.record` through that seam on every per-bucket client, and the error
+  mapper is pure mapping again. Consequence: the preemptive refusal is a genuine
+  **look-ahead** — a 200 whose headers say `remaining: 0` exhausts the bucket, and the
+  next call in it is refused locally before the origin ever answers 429 — and
+  `x_rate_limit_status` shows a bucket after its first successful call, not only after
+  its first failure. Through 0.8.0 the tracker was fed by the error mapper alone, so only
+  non-2xx responses trained it and the refusal merely suppressed *repeat* 429s; that
+  shape is gone. A transport failure yields no response and so trains nothing; a
+  response without `x-rate-limit-*` headers leaves the table untouched (RATE-4).
 
 **Session credit budget** (replaces the old monthly read-budget model — ARCH-F3/F4,
 X-F4; cases COST-1…7):

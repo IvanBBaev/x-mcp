@@ -12,7 +12,9 @@
 // (status, headers, body) → XError mapping is api/errors (T-116), plugged in through the
 // `mapError` seam; the 401→refresh→retry loop is oauth2 (T-201/203), layered on top of the
 // `authorization` provider. When those are absent we fall back to a safe, minimal `api`
-// error that never leaks third-party body text.
+// error that never leaks third-party body text. The `onResponse` observer is the third
+// seam: it hands every response's status and headers to whoever tracks them (the
+// rate-limit table, T-320 F6) without this layer knowing what a rate limit is.
 
 import type { Dispatcher, Random, Sleep } from '../core/ports.js';
 import type { EndpointInvoker, XApiRequest } from '../core/tooldef.js';
@@ -57,6 +59,18 @@ export type AuthorizationProvider = () => Promise<string | undefined>;
  */
 export type ErrorMapper = (status: number, headers: Headers, body: unknown) => XError;
 
+/**
+ * The response observer seam (T-320 F6). Called SYNCHRONOUSLY for every HTTP response the
+ * origin returned — success and error alike, once per attempt, in arrival order, before the
+ * body is read and before this client decides to retry, refuse or map it. It exists so the
+ * rate-limit tracker (`api/ratelimit`, wired by `mcp/compose`) learns a window's state from
+ * the headers of a 200, not only from the 429 that follows — which is what makes the
+ * preflight refusal a look-ahead rather than a repeat suppressor (RATE-2). A transport
+ * failure (timeout, reset, cancellation) yields no response and so never reaches it. The
+ * observer must not throw: it is wiring, not policy, and nothing here catches for it.
+ */
+export type ResponseObserver = (status: number, headers: Headers) => void;
+
 /** Configuration for {@link createHttpClient}. The composition root (T-130) wires it. */
 export interface HttpClientConfig {
   /** Backoff delay port — injected so the GET retry never really waits in tests. */
@@ -83,6 +97,8 @@ export interface HttpClientConfig {
   readonly signal?: AbortSignal;
   /** Rich response→XError mapper (T-116). Omit to use the minimal `api` fallback. */
   readonly mapError?: ErrorMapper;
+  /** Sees every response's status and headers (T-320 F6). Omit when nothing tracks them. */
+  readonly onResponse?: ResponseObserver;
   /** Max buffered response bytes. Defaults to {@link DEFAULT_MAX_RESPONSE_BYTES}. */
   readonly maxResponseBytes?: number;
 }
@@ -277,6 +293,12 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
         }
         throw toNetworkError(err);
       }
+
+      // T-320 F6: the observer sees the response BEFORE any of the decisions below — a 3xx
+      // this client refuses, a 5xx it is about to retry and a 2xx alike all carry whatever
+      // rate-limit headers the origin attached, and every one of them is a fact about the
+      // window that the tracker should not miss.
+      config.onResponse?.(response.status, response.headers);
 
       // AUTH-14: redirects are refused. With redirect: 'manual', a real fetch yields an
       // opaque redirect (status 0); undici's MockAgent yields the raw 3xx. Both are refused.

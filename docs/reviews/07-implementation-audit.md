@@ -555,6 +555,19 @@ every endpoint's response path — disproportionate at 1.0.0 for a control that 
 pinned by `test/scenarios/walkthrough-b.test.ts:371`, so it is a known shape and any change
 is visible. Carried forward as a post-1.0 item.
 
+**Closed 2026-09-19.** The success-path hook landed as a third seam on the http client —
+`HttpClientConfig.onResponse: (status, headers) => void`, called synchronously for every
+response the origin returned (2xx, refused 3xx, retried 5xx, 429 alike), once per attempt,
+before the body is read. `mcp/compose` wires `tracker.record` through it on each per-bucket
+client and the error mapper is pure mapping again; the fallback client for local-only tools
+has no observer. The preflight is now the look-ahead docs/02 §7 always described: a 200 that
+reports `remaining: 0` exhausts the bucket and the next call is refused before HTTP
+(`test/scenarios/walkthrough-b.test.ts`, `RATE-2/INT-3`), three concurrent successes settle
+into one window (`test/mcp/server.test.ts`, `MCP-8/CONC-2`), and the seam's own contract —
+fires on success, fires before `mapError`, once per attempt, never on a transport failure —
+is pinned in `test/api/http.test.ts`. The "post-1.0" label was a proportionality call, not a
+dependency; the change touched one function in `api/http` and the wiring in `mcp/compose`.
+
 ### F7 — the refresh lock under the keychain backend
 
 Closed as a documentation correction; the code was already honest (`withLock` is an
