@@ -428,14 +428,21 @@ test('MCP-8/CONC-2: parallel tools/call requests interleave safely with no cross
   assert.deepEqual(totals, [unit, unit * 2, unit * 3]);
   assert.equal(composition.budget.total(), unit * 3);
 
-  // (3) The rate-limit table is unchanged by three concurrent SUCCESSES. This is not an
-  //     oversight in the test: api/http exposes its header hook only through `mapError`, so
-  //     the per-bucket recording clients (INT-3) train the tracker on non-2xx responses only
-  //     (see the integrator note in mcp/compose). Pinning the empty table here keeps that
-  //     limitation visible — if a success-path hook is ever added, this assertion fails and
-  //     forces the concurrency claim below to be revisited deliberately.
+  // (3) Three concurrent SUCCESSES train the table too (T-320 F6, closed): every reply
+  //     passes through the shared bucket's response observer (INT-3), so three interleaved
+  //     writes to one key must settle into ONE bucket holding ONE window whose remaining is
+  //     the headers' 10 — never three entries, never a torn read (CONC-3). The 429 variant
+  //     of this claim is the next test; this one pins the success path it used to exclude.
   const status = await call(client, 'x_rate_limit_status', {});
-  assert.deepEqual((textPayload<Rendered>(status).data as RateLimitStatus).buckets, []);
+  const table = textPayload<Rendered>(status).data as RateLimitStatus;
+  assert.deepEqual(
+    table.buckets.map((b) => b.key),
+    ['tweets#app'],
+  );
+  assert.deepEqual(
+    table.buckets[0]?.windows.map((w) => w.remaining),
+    [10],
+  );
 
   mock.assertDone();
   await client.close();
