@@ -3,7 +3,7 @@
 // the provenance-checked shape record (DRIFT-4). Corner cases referenced: DX-F13 (every error
 // carries actionable remediation), REND-2 (partial failures → missing[], not a thrown error),
 // REND-7 (no third-party content / raw HTML in any error), plus AUTH-8, RATE-2/5/7, DRIFT-2,
-// COST-6/7, NET-1.
+// COST-6/7, NET-1, RATE-4.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,6 +30,7 @@ const ERROR_FIXTURES = [
   '403-suspended-target.json',
   '403-insufficient-scope.json',
   '403-billing-access-level.json',
+  '402-payment-required.json',
   '429-rate-limit.json',
   '404-not-found.json',
   '502-html.json',
@@ -97,6 +98,21 @@ test('403 billing/entitlement maps to billing, distinct from the local budget cl
   assert.match(err.message, /not.*the local session budget/i); // billing ≠ budget
 });
 
+test('402 maps to billing on the status alone — the body need not name credits — COST-6', () => {
+  // The fixture body is deliberately neutral (no credit / entitlement wording): unlike the 403
+  // path, which has to sniff the problem text, a 402 IS the billing signal.
+  const err = map('402-payment-required.json');
+  assert.equal(err.kind, 'billing');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 402);
+  assert.match(err.message, /not.*the local session budget/i);
+  // Same remediation prose as the 403 variant — one billing story, two status codes.
+  assert.equal(err.message, map('403-billing-access-level.json').message);
+  // And with no body at all the class still holds — nothing to sniff, nothing needed.
+  assert.equal(mapHttpError(402, {}, undefined).kind, 'billing');
+});
+
 test('429 maps to rate-limit and surfaces reset_at + retry_after_seconds; later time wins — RATE-2/7', () => {
   const resetEpoch = 1900000000; // from the fixture's x-rate-limit-reset
   const nowMs = (resetEpoch - 60) * 1000; // reset is 60 s away; retry-after (30 s) is earlier
@@ -144,6 +160,30 @@ test('HTML 502 maps to a clean api error; raw markup is dropped, not echoed — 
   // And the raw HTML never sneaks into a passed-through platform_detail either.
   assert.equal(err.data.platform_detail, undefined);
   assert.equal(err.data.platform_title, undefined);
+});
+
+test('markup is recognised by its first byte when the content-type does not say html — REND-7, NET-1', () => {
+  // The 502 fixture is caught by its `text/html` content-type; a gateway that mislabels its
+  // error page (or serves XML) is caught by the leading `<` instead — the page is still dropped.
+  const pages: ReadonlyArray<readonly [Record<string, string>, string]> = [
+    [{ 'content-type': 'application/xml' }, '<?xml version="1.0"?><error>SENTINEL_SECRET</error>'],
+    [{ 'content-type': 'application/octet-stream' }, '<!DOCTYPE html><p>SENTINEL_SECRET</p>'],
+    [{}, '  <html><body>SENTINEL_SECRET</body></html>'],
+  ];
+  for (const [headers, body] of pages) {
+    const err = mapHttpError(503, headers, body);
+    assert.equal(err.kind, 'api');
+    assert.equal(err.retryable, true);
+    assert.match(err.message, /non-JSON HTML error page/);
+    assert.doesNotMatch(err.message, /</, `markup leaked for ${body.slice(0, 12)}`);
+    assert.equal(err.message.includes('SENTINEL_SECRET'), false);
+    assert.equal(err.data.platform_detail, undefined);
+  }
+  // A non-markup string body (truncated JSON) takes the generic unmapped path instead.
+  const truncated = mapHttpError(503, {}, '{"title":"Service Unav');
+  assert.equal(truncated.kind, 'api');
+  assert.doesNotMatch(truncated.message, /HTML/);
+  assert.equal(truncated.message.includes('Service Unav'), false);
 });
 
 test('REND-7 sentinel sweep: no fixture body content leaks into any mapped error message', () => {
@@ -270,4 +310,28 @@ test('mapHttpError reads a real Headers object identically to a record (RATE-4 t
   assert.equal(bare.kind, 'rate-limit');
   assert.equal(bare.data.reset_at, undefined);
   assert.equal(bare.data.retry_after_seconds, undefined);
+});
+
+test('mapHttpError reads Node-style header records: numeric, string[] and absent values (RATE-4 tolerant)', () => {
+  const resetEpoch = 1900000000;
+  const nowMs = (resetEpoch - 45) * 1000;
+  const body = { title: 'Too Many Requests' };
+
+  // `IncomingHttpHeaders` may carry a number, and a repeated header arrives as an array —
+  // the first value is the one that counts. Case is matched loosely on the key.
+  const numeric = mapHttpError(429, { 'X-Rate-Limit-Reset': resetEpoch }, body, nowMs);
+  assert.equal(numeric.data.retry_after_seconds, 45);
+  const repeated = mapHttpError(
+    429,
+    { 'x-rate-limit-reset': [String(resetEpoch), '1'] },
+    body,
+    nowMs,
+  );
+  assert.equal(repeated.data.retry_after_seconds, 45);
+
+  // A key present with an `undefined` value is the same as no header at all (RATE-4).
+  const absent = mapHttpError(429, { 'x-rate-limit-reset': undefined }, body, nowMs);
+  assert.equal(absent.kind, 'rate-limit');
+  assert.equal(absent.data.reset_at, undefined);
+  assert.equal(absent.data.retry_after_seconds, undefined);
 });
