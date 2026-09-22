@@ -3,7 +3,7 @@
 // the provenance-checked shape record (DRIFT-4). Corner cases referenced: DX-F13 (every error
 // carries actionable remediation), REND-2 (partial failures → missing[], not a thrown error),
 // REND-7 (no third-party content / raw HTML in any error), plus AUTH-8, RATE-2/5/7, DRIFT-2,
-// COST-6/7, NET-1.
+// COST-6/7, NET-1, RATE-4.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,6 +30,7 @@ const ERROR_FIXTURES = [
   '403-suspended-target.json',
   '403-insufficient-scope.json',
   '403-billing-access-level.json',
+  '402-payment-required.json',
   '429-rate-limit.json',
   '404-not-found.json',
   '502-html.json',
@@ -88,6 +89,30 @@ test('403 insufficient scope maps to scope (distinct from forbidden/billing) —
   assert.equal(err.fix, 'operator');
 });
 
+test('a scope signal without a dotted scope name still maps to scope; the name is simply omitted — DX-F13', () => {
+  // The fixtures all name the missing scope (`users.read`); a body that only SAYS "scope" — or
+  // signals it through `type` alone, with no detail at all — has nothing for `data.scope`, and
+  // the message must not render an empty parenthetical.
+  const type = 'https://api.twitter.com/2/problems/oauth-scopes-insufficient';
+  const bodies = [
+    {
+      title: 'Forbidden',
+      type,
+      detail: 'Your token is missing a required scope for this endpoint.',
+    },
+    { title: 'Forbidden', type },
+  ];
+  for (const body of bodies) {
+    for (const status of [401, 403]) {
+      const err = mapHttpError(status, {}, body);
+      assert.equal(err.kind, 'scope', `status ${status}`);
+      assert.equal(err.data.scope, undefined);
+      assert.doesNotMatch(err.message, /\(`/);
+      assert.match(err.message, /authorize/);
+    }
+  }
+});
+
 test('403 billing/entitlement maps to billing, distinct from the local budget class — COST-6/7', () => {
   const err = map('403-billing-access-level.json');
   assert.equal(err.kind, 'billing');
@@ -95,6 +120,21 @@ test('403 billing/entitlement maps to billing, distinct from the local budget cl
   assert.equal(err.retryable, false);
   assert.match(err.message, /credit|access level|entitlement/i);
   assert.match(err.message, /not.*the local session budget/i); // billing ≠ budget
+});
+
+test('402 maps to billing on the status alone — the body need not name credits — COST-6', () => {
+  // The fixture body is deliberately neutral (no credit / entitlement wording): unlike the 403
+  // path, which has to sniff the problem text, a 402 IS the billing signal.
+  const err = map('402-payment-required.json');
+  assert.equal(err.kind, 'billing');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 402);
+  assert.match(err.message, /not.*the local session budget/i);
+  // Same remediation prose as the 403 variant — one billing story, two status codes.
+  assert.equal(err.message, map('403-billing-access-level.json').message);
+  // And with no body at all the class still holds — nothing to sniff, nothing needed.
+  assert.equal(mapHttpError(402, {}, undefined).kind, 'billing');
 });
 
 test('429 maps to rate-limit and surfaces reset_at + retry_after_seconds; later time wins — RATE-2/7', () => {
@@ -131,6 +171,27 @@ test('unmapped 4xx (400) degrades to api and is NOT retryable — DRIFT-2', () =
   assert.equal(err.data.platform_title, 'Invalid Request');
 });
 
+test('a legacy errors[].message body with no top-level problem fields still yields title/detail — DRIFT-2', () => {
+  // The v1.1-era shape has neither `title` nor `detail` at the top level: both come from the
+  // first entry, `title`/`detail` when present, else the single `message`.
+  const legacy = mapHttpError(
+    400,
+    {},
+    { errors: [{ message: 'Sorry, that page does not exist', code: 34 }] },
+  );
+  assert.equal(legacy.kind, 'api');
+  assert.equal(legacy.data.platform_title, 'Sorry, that page does not exist');
+  assert.equal(legacy.data.platform_detail, 'Sorry, that page does not exist');
+
+  const nested = mapHttpError(
+    400,
+    {},
+    { errors: [{ title: 'Invalid Request', detail: 'Bad id.' }] },
+  );
+  assert.equal(nested.data.platform_title, 'Invalid Request');
+  assert.equal(nested.data.platform_detail, 'Bad id.');
+});
+
 // --- REND-7: HTML error page recognised and never leaked --------------------------
 
 test('HTML 502 maps to a clean api error; raw markup is dropped, not echoed — REND-7, NET-1', () => {
@@ -144,6 +205,43 @@ test('HTML 502 maps to a clean api error; raw markup is dropped, not echoed — 
   // And the raw HTML never sneaks into a passed-through platform_detail either.
   assert.equal(err.data.platform_detail, undefined);
   assert.equal(err.data.platform_title, undefined);
+});
+
+test('markup is recognised by its first byte when the content-type does not say html — REND-7, NET-1', () => {
+  // The 502 fixture is caught by its `text/html` content-type; a gateway that mislabels its
+  // error page (or serves XML) is caught by the leading `<` instead — the page is still dropped.
+  const pages: ReadonlyArray<readonly [Record<string, string>, string]> = [
+    [{ 'content-type': 'application/xml' }, '<?xml version="1.0"?><error>SENTINEL_SECRET</error>'],
+    [{ 'content-type': 'application/octet-stream' }, '<!DOCTYPE html><p>SENTINEL_SECRET</p>'],
+    [{}, '  <html><body>SENTINEL_SECRET</body></html>'],
+  ];
+  for (const [headers, body] of pages) {
+    const err = mapHttpError(503, headers, body);
+    assert.equal(err.kind, 'api');
+    assert.equal(err.retryable, true);
+    assert.match(err.message, /non-JSON HTML error page/);
+    assert.doesNotMatch(err.message, /</, `markup leaked for ${body.slice(0, 12)}`);
+    assert.equal(err.message.includes('SENTINEL_SECRET'), false);
+    assert.equal(err.data.platform_detail, undefined);
+  }
+  // A non-markup string body (truncated JSON) takes the generic unmapped path instead.
+  const truncated = mapHttpError(503, {}, '{"title":"Service Unav');
+  assert.equal(truncated.kind, 'api');
+  assert.doesNotMatch(truncated.message, /HTML/);
+  assert.equal(truncated.message.includes('Service Unav'), false);
+});
+
+test('an HTML page with an unmapped 4xx status says "do not retry" and is not retryable — REND-7, DRIFT-2', () => {
+  // Same drop-the-markup path as the 502 above, but a 4xx is not transient: the remediation
+  // must not invite the retry the 5xx wording allows.
+  const err = mapHttpError(400, { 'content-type': 'text/html' }, '<html>SENTINEL_SECRET</html>');
+  assert.equal(err.kind, 'api');
+  assert.equal(err.retryable, false);
+  assert.match(err.message, /non-JSON HTML error page with HTTP 400/);
+  assert.match(err.message, /do not retry/);
+  assert.doesNotMatch(err.message, /may retry once/);
+  assert.doesNotMatch(err.message, /</);
+  assert.equal(err.data.platform_detail, undefined);
 });
 
 test('REND-7 sentinel sweep: no fixture body content leaks into any mapped error message', () => {
@@ -248,11 +346,47 @@ test('collectMissing surfaces only safe scalars — no raw platform detail leaks
   assert.equal(serialized.includes('Could not find'), false); // no free-form detail prose
 });
 
+test('collectMissing classifies protected and deleted targets and tolerates sparse entries — REND-2', () => {
+  // The fixture covers not-found / suspended / unauthorized with fully populated entries; the
+  // remaining reasons and the fallbacks for a thin entry are pinned here. `deepEqual` (strict)
+  // also proves an absent `resource_type` is left OUT, not written as `undefined`.
+  const missing = collectMissing({
+    data: [],
+    errors: [
+      // No `resource_id` → the requested `value` is the id.
+      { value: '1', title: 'Forbidden', detail: 'User [1] is protected.' },
+      { resource_id: '2', resource_type: 'tweet', detail: 'The Tweet [2] has been deleted.' },
+      // Neither id field, no classifiable text at all → empty id, not-found.
+      { title: 'Not Found Error' },
+      {},
+      'not-an-object',
+    ],
+  });
+  assert.deepEqual(missing, [
+    { id: '1', reason: 'protected' },
+    { id: '2', reason: 'deleted', resource_type: 'tweet' },
+    { id: '', reason: 'not-found' },
+    { id: '', reason: 'not-found' },
+  ]);
+});
+
 test('collectMissing is total: a full-success or zero-results body yields []', () => {
   assert.deepEqual(collectMissing({ data: [{ id: '1' }] }), []);
   assert.deepEqual(collectMissing({ meta: { result_count: 0 } }), []); // REND-1 zero-results
   assert.deepEqual(collectMissing('not-an-object'), []);
   assert.deepEqual(collectMissing(null), []);
+});
+
+test('an unparseable x-rate-limit-reset is treated as absent — backoff prose, no reset_at — RATE-4', () => {
+  const nowMs = 1900000000000;
+  for (const reset of ['soon', 'Infinity', 'NaN']) {
+    const err = mapHttpError(429, { 'x-rate-limit-reset': reset }, {}, nowMs);
+    assert.equal(err.kind, 'rate-limit', reset);
+    assert.equal(err.data.reset_at, undefined, reset);
+    assert.equal(err.data.retry_after_seconds, undefined, reset);
+    assert.match(err.message, /Retry after a short backoff/);
+    assert.doesNotMatch(err.message, /resets at/);
+  }
 });
 
 // --- Header handling parity: Headers object vs plain record -----------------------
@@ -270,4 +404,31 @@ test('mapHttpError reads a real Headers object identically to a record (RATE-4 t
   assert.equal(bare.kind, 'rate-limit');
   assert.equal(bare.data.reset_at, undefined);
   assert.equal(bare.data.retry_after_seconds, undefined);
+});
+
+test('mapHttpError reads Node-style header records: numeric, string[] and absent values (RATE-4 tolerant)', () => {
+  const resetEpoch = 1900000000;
+  const nowMs = (resetEpoch - 45) * 1000;
+  const body = { title: 'Too Many Requests' };
+
+  // `IncomingHttpHeaders` may carry a number, and a repeated header arrives as an array —
+  // the first value is the one that counts. Case is matched loosely on the key.
+  const numeric = mapHttpError(429, { 'X-Rate-Limit-Reset': resetEpoch }, body, nowMs);
+  assert.equal(numeric.data.retry_after_seconds, 45);
+  const repeated = mapHttpError(
+    429,
+    { 'x-rate-limit-reset': [String(resetEpoch), '1'] },
+    body,
+    nowMs,
+  );
+  assert.equal(repeated.data.retry_after_seconds, 45);
+
+  // A key present with an `undefined` value is the same as no header at all (RATE-4), and so
+  // is a repeated header that arrived with no values.
+  for (const value of [undefined, []] as const) {
+    const absent = mapHttpError(429, { 'x-rate-limit-reset': value }, body, nowMs);
+    assert.equal(absent.kind, 'rate-limit');
+    assert.equal(absent.data.reset_at, undefined);
+    assert.equal(absent.data.retry_after_seconds, undefined);
+  }
 });

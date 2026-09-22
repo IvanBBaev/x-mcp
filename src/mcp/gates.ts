@@ -35,7 +35,14 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  *
  * Consequence (mandated by INT-2): a call that fails AFTER the check (rate-limit gate,
  * handler error) stays charged — the API attempt was paid for, so charge-at-check is the
- * honest accounting. The registry's "reserve on success" step becomes a read-back here.
+ * honest accounting. The registry's post-handler `reserve` becomes a read-back here.
+ *
+ * SETTLEMENT (COST-3): the check-time reservation prices ONE resource, because how many
+ * the response will carry is unknowable before it arrives. When the handler reports a real
+ * count, `reserve` settles the held reservation to `unit price × units` — a refund for a
+ * page shorter than asked for, a top-up for a full one. `settle` never throws, so a hard-mode
+ * budget that the settled price pushes past the cap reports a warning rather than failing a
+ * call whose resources the platform has already delivered (the money is spent either way).
  */
 export function createBudgetGate(budget: SessionBudget): BudgetGate {
   const reserved = new WeakMap<CostEstimate, BudgetReservation>();
@@ -44,15 +51,15 @@ export function createBudgetGate(budget: SessionBudget): BudgetGate {
       // Throws the typed `budget` XError in hard mode BEFORE any reservation (COST-1).
       reserved.set(estimate, budget.reserve(estimate));
     },
-    reserve(estimate) {
+    reserve(estimate, units) {
       const meta = reserved.get(estimate);
       if (meta !== undefined) {
         reserved.delete(estimate);
-        return meta;
+        return units === undefined ? meta : budget.settle(meta, { ...estimate, units });
       }
       // Defensive: unreachable through the registry pipeline (check always precedes
       // reserve); if a future caller skips check, charge now so nothing rides free.
-      return budget.reserve(estimate);
+      return budget.reserve(units === undefined ? estimate : { ...estimate, units });
     },
   };
 }

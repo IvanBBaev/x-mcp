@@ -31,7 +31,7 @@ import {
 import { createHandleLookup } from '../api/endpoints/users.js';
 import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, rawSummary, renderUserPage } from '../core/render.js';
+import { billableUnits, capRawMaxResults, rawSummary, renderUserPage } from '../core/render.js';
 import type { RawListResponse, RawUser } from '../core/render.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
@@ -143,8 +143,14 @@ function renderGraphPage(
   raw: boolean,
   notes: readonly string[],
 ): ToolOutput {
+  // Billed per user the page returned, not per call (COST-3).
+  const units = billableUnits(res);
   if (raw) {
-    return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+    return {
+      data: res,
+      summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+      units,
+    };
   }
   let page = renderUserPage(res);
   if (notes.length > 0) {
@@ -154,6 +160,7 @@ function renderGraphPage(
   return {
     data: page,
     summary: `${page.result_count} result(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+    units,
   };
 }
 

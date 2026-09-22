@@ -661,3 +661,76 @@ test('MCP-7 → POST-4: a cancelled WRITE is non-retryable and warns the platfor
   assert.match(err.message, /may nevertheless have been applied/);
   assert.match(err.message, /POST-4/);
 });
+
+test('COST-3: the handler’s resource count reaches the budget gate’s settle step', async () => {
+  // Step 6 is the settle step: the gate held ONE resource at check time (it could not know
+  // the count), and the registry hands it what the response actually carried.
+  const seen: { units?: number; called: number } = { called: 0 };
+  const tool = makeTool({
+    name: 'x_post_search',
+    policy: 'read:content',
+    cost: 'r:post',
+    handler: () => Promise.resolve({ data: { items: [1, 2, 3] }, units: 3 }),
+  });
+  const budget: BudgetGate = {
+    check: () => {},
+    reserve: (_e, units) => {
+      seen.called += 1;
+      if (units !== undefined) seen.units = units;
+      return { cost_usd: 0.015, session_total_usd: 0.015 };
+    },
+  };
+
+  const reg = createRegistry([tool], deps({ budget }));
+  const result = await reg.call('x_post_search', {}, callCtx());
+
+  assert.equal(seen.called, 1);
+  assert.equal(seen.units, 3);
+  assert.deepEqual(result.meta, { cost_usd: 0.015, session_total_usd: 0.015 });
+  // The count is accounting only — it never leaks into the agent-facing payload.
+  assert.deepEqual(result.data, { items: [1, 2, 3] });
+  assert.equal('units' in result, false);
+});
+
+test('a handler that reports no count settles at one resource (undefined, not zero)', async () => {
+  // The pre-`units` contract: every single-resource tool keeps charging exactly one unit.
+  let seen: number | undefined | 'unset' = 'unset';
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    cost: 'r:post',
+    handler: () => Promise.resolve({ data: { id: '1' } }),
+  });
+  const budget: BudgetGate = {
+    check: () => {},
+    reserve: (_e, units) => {
+      seen = units;
+      return { cost_usd: 0.005, session_total_usd: 0.005 };
+    },
+  };
+
+  const reg = createRegistry([tool], deps({ budget }));
+  await reg.call('x_post_get', {}, callCtx());
+  assert.equal(seen, undefined); // NOT 0 — an absent count must not read as "nothing billable"
+});
+
+test('COST-3: a zero count is forwarded verbatim, so an empty page bills nothing', async () => {
+  let seen: number | undefined = undefined;
+  const tool = makeTool({
+    name: 'x_post_search',
+    policy: 'read:content',
+    cost: 'r:post',
+    handler: () => Promise.resolve({ data: { items: [] }, units: 0 }),
+  });
+  const budget: BudgetGate = {
+    check: () => {},
+    reserve: (_e, units) => {
+      seen = units;
+      return { cost_usd: 0, session_total_usd: 0 };
+    },
+  };
+
+  const reg = createRegistry([tool], deps({ budget }));
+  await reg.call('x_post_search', {}, callCtx());
+  assert.equal(seen, 0);
+});

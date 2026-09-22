@@ -154,6 +154,7 @@ test('x_dm_events_list: GET /2/dm_events renders minimized events — no bodies 
     },
   ]);
   assert.equal(page.result_count, 2);
+  assert.equal(out.units, 2); // COST-3: billed per DM event returned
   assert.equal(page.next_token, 'dmtok1'); // PAGE-1: response cursor surfaced verbatim
   assert.ok(page.note);
   assert.ok(page.note.includes(DM_RETENTION_NOTE)); // DM-2

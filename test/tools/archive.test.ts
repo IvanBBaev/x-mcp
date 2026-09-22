@@ -98,6 +98,7 @@ test('x_search_archive: happy path renders a compact page with @handles and next
 
   assert.equal(page.items.length, 3);
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per post the archive page returned
   assert.equal(page.next_token, 'arch-next-1');
   assert.equal(page.items[0]?.author, '@carol_codes');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
