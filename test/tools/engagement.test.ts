@@ -423,6 +423,7 @@ test('bookmarks list: GET /2/users/me-id/bookmarks renders a compact page (REND-
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per bookmarked post returned
   assert.equal(page.next_token, 'abc');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
   assert.ok(page.note);

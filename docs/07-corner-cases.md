@@ -241,7 +241,15 @@ credits, not tiers, for post-2026-02-06 developers.)*
 - **COST-3 — Per-call cost surfaces in results** `P1` `[X-F4]`
   Every result includes the estimated credit cost of the call (`cost_usd`) and the
   session running total, computed from the static cost table (e.g. $0.005/post
-  read, $0.010/user read, $0.015/post create).
+  read, $0.010/user read, $0.015/post create). Reads are priced **per resource
+  returned** and writes per request ([01 §3.1](01-api-landscape.md)): the handler
+  reports how many billable resources its response carried and the registry settles
+  the reservation at `unit price × count`, so a search returning 100 posts costs
+  $0.50, an empty page costs nothing, and a single-resource lookup is unchanged.
+  A `usd` override (COST-4) is an absolute per-call price and is never multiplied.
+  Because the count is unknowable before the response, the pre-flight reservation
+  holds ONE resource and the settlement moves the ledger by the difference; a
+  settlement never refuses a call whose resources the platform already delivered.
 
 - **COST-4 — URL-bearing post costs $0.20 — warn before spend** `P2` `[X-F4]`
   `post_create` detects URLs in `text`; when present, the result (and, in `hard`

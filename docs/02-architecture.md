@@ -360,7 +360,7 @@ tool call
   → endpoint wrapper builds request         (api/endpoints)
   → host-scoped auth injection + send       (api/http, api/oauth2)
   → 401 once? refresh (state machine §4A)   (api/oauth2)
-  → response: update rate-limit table, reserve credit cost (atomic — CONC-2)
+  → response: update rate-limit table, settle credit cost by resources returned (CONC-2)
   → render + sanitize compact shape         (core/render, core/sanitize)
   → MCP result
 ```
@@ -406,22 +406,43 @@ X-F4; cases COST-1…7):
   a URL-bearing post is $0.20 — COST-3/4). The authoritative cost table is the appendix in
   [01](01-api-landscape.md) (WP-0.1). Restart resets the counter — the docs state plainly
   that this is per-process, advisory accounting, not a hard ledger (OPS-F10).
+- **Reads are priced per resource returned, writes per request** ([01 §3.1](01-api-landscape.md)).
+  A handler reports how many billable resources its response carried (`ToolOutput.units`);
+  the registry hands that count to the budget's settle step, and the price is
+  `unit price × units`. A search that returns 100 posts costs $0.50, not $0.005; a page
+  that came back empty costs nothing; a lookup of one post is unchanged. A `usd` override
+  is an absolute per-call price (the URL post) and is never multiplied. Secondary
+  `includes` expansions are not counted a second time — the platform prices what the
+  endpoint is a read *of*. Two read shapes deliberately stay at one unit: a single-object
+  lookup (one list, one usage report, the auth snapshot), and the counts endpoints, whose
+  `data` holds time buckets rather than posts — how X prices a histogram is not something
+  the response tells us, so it is left at the call price rather than guessed at per bucket.
+  Through 0.8.0 every read was charged a single unit however many resources came back, so
+  the running total under-reported multi-resource reads by up to two orders of magnitude.
 - Every result carries `cost_usd` (this call) and the session running total (COST-3). At
   90 % a `budget_warning` is attached; at 100 % `warn` mode still returns results (with the
   warning) while `hard` mode fails **reads and writes** with the typed `budget` error
   ("operator-set limit; cannot be changed from within this session"). check-and-reserve is
   **atomic**, so two interleaved calls near the cap cannot both pass in `hard` mode
   (COST-5, CONC-2).
-- **The unit charged is one tool call, not one HTTP request** (T-320 F9, 2026-08-07), and
-  the charge lands **after** the handler returns (`core/registry` — check before, reserve
-  after). Two consequences, both deliberate and both worth knowing before trusting the
-  running total: a handler that sends several requests is charged **once** (media's
-  chunked INIT/APPEND×N/FINALIZE is one estimate, not one per segment), and a call that
-  fails part-way is charged **nothing** even though the requests it already sent were
-  billed by X. So the counter under-reports against the operator's real invoice; it is a
-  ceiling on *tool calls* priced by the static table, not a meter on wire traffic. This
-  is consistent with the "advisory accounting, not a hard ledger" framing above — stated
+- **The unit charged is one tool call, not one HTTP request** (T-320 F9, 2026-08-07). A
+  handler that sends several requests is charged **once**: media's chunked
+  INIT/APPEND×N/FINALIZE is one `w:action` estimate, not one per segment. So the counter
+  is a ceiling on *tool calls* priced by the static table, not a meter on wire traffic —
+  consistent with the "advisory accounting, not a hard ledger" framing above, and stated
   here explicitly so the gap is not mistaken for drift.
+- **When the charge lands: at the check, not after the handler.** The registry's seam is
+  two-step (check before the call, settle after), and it does not mandate which step moves
+  the counter; the shipped gate (`mcp/gates`, INT-2) charges at the **check**, because
+  `SessionBudget.reserve` is a single synchronous check-and-reserve and splitting it would
+  reopen the interleaving window CONC-2 closes. The consequence is deliberate: a call that
+  reaches the API and then fails — rate-limit refusal, handler error, mid-page transport
+  failure — **stays charged**, which is the honest accounting for requests the platform
+  already served. The post-handler step is then a *settlement*: it moves the ledger by the
+  difference between the one resource held at check time and what the response actually
+  carried. Settlement never throws, in either mode — the resources have been delivered and
+  cannot be un-returned, so a `hard`-mode settle past the cap attaches a warning saying so
+  and the **next** call is the one refused.
 - Platform-side exhaustion is separate: X's own "out of credits" rejection maps to the
   `billing` error class (real body captured and locked by a Phase 1 live test — COST-6),
   and the 2M-posts/month platform hard cap is surfaced verbatim as `billing` when hit but

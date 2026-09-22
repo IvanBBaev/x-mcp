@@ -21,6 +21,7 @@ import type { RawCreatedPost } from '../api/endpoints/posts.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
 import {
   RAW_MAX_RESULTS,
+  billableUnits,
   capRawMaxResults,
   postUrl,
   rawSummary,
@@ -73,6 +74,11 @@ export const xPostGet = defineTool({
     const ids = [...new Set(input.ids.map(parsePostId))];
     const res = await getPosts(ctx.http, { ids });
 
+    // Billed per post X actually returned, not per call and not per id asked for (COST-3):
+    // ids that came back in `errors[]` (deleted, protected) returned no resource. Counted
+    // from the raw envelope so the REND-10 cap below does not change the price.
+    const units = billableUnits(res);
+
     if (input.raw === true) {
       const all = res.data ?? [];
       const capped = all.slice(0, capRawMaxResults(all.length));
@@ -82,6 +88,7 @@ export const xPostGet = defineTool({
         summary: rawSummary(
           `${capped.length} raw post(s)${truncated ? ` (capped at ${RAW_MAX_RESULTS})` : ''}`,
         ),
+        units,
       };
     }
 
@@ -91,6 +98,7 @@ export const xPostGet = defineTool({
       summary: `${batch.items.length} post(s)${
         batch.missing?.length ? `, ${batch.missing.length} missing` : ''
       }`,
+      units,
     };
   },
 });

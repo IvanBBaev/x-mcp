@@ -419,14 +419,25 @@ test('MCP-8/CONC-2: parallel tools/call requests interleave safely with no cross
     assert.equal(payload.summary, `${expected.length} post(s)`);
   });
 
-  // (2) Atomic check-and-reserve (CONC-2): identical cost class, and the three session totals
-  //     are 1x/2x/3x — every call saw a DIFFERENT snapshot, so no update was lost.
+  // (2) Atomic check-and-reserve (CONC-2): the price is per RESOURCE returned (COST-3), so
+  //     the two-id call costs twice what the one-id calls cost. What pins "no update was
+  //     lost" is that the final ledger is EXACTLY the sum of the three charges: every
+  //     reserve and every settle moved the shared counter by its own amount and none
+  //     overwrote another's — which is why the settle moves by the difference rather than
+  //     writing an absolute total. Each call's own snapshot is somewhere between its own
+  //     charge and that final sum, depending on where the interleaving put it.
   const unit = payloads[0]?.meta.cost_usd ?? 0;
   assert.ok(unit > 0);
-  for (const payload of payloads) assert.equal(payload.meta.cost_usd, unit);
-  const totals = payloads.map((p) => p.meta.session_total_usd).sort((x, y) => x - y);
-  assert.deepEqual(totals, [unit, unit * 2, unit * 3]);
-  assert.equal(composition.budget.total(), unit * 3);
+  payloads.forEach((payload, i) => {
+    assert.equal(payload.meta.cost_usd, unit * (calls[i]?.ids.length ?? 0));
+  });
+  const charged = payloads.reduce((sum, p) => sum + p.meta.cost_usd, 0);
+  assert.equal(charged, unit * 4); // 1 + 1 + 2 posts
+  assert.equal(composition.budget.total(), charged);
+  for (const payload of payloads) {
+    assert.ok(payload.meta.session_total_usd >= payload.meta.cost_usd);
+    assert.ok(payload.meta.session_total_usd <= charged);
+  }
 
   // (3) Three concurrent SUCCESSES train the table too (T-320 F6, closed): every reply
   //     passes through the shared bucket's response observer (INT-3), so three interleaved

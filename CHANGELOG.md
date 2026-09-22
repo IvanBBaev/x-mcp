@@ -14,6 +14,13 @@ development chronology lives in `WORKLOG.md`.
   call whose headers report an exhausted window trains the table, so the next call in that
   bucket is refused locally before the platform answers 429, and `x_rate_limit_status`
   shows a bucket after its first successful call instead of after its first failure.
+- `cost_usd` now reflects how many resources a call returned. X bills reads per resource and
+  writes per request, but every read was previously charged a single unit price — a search
+  returning 100 posts reported $0.005 instead of $0.50. Multi-resource reads are now priced
+  `unit price × resources returned`, an empty page costs nothing, and single-resource
+  lookups and writes are unchanged. Expect the session total to be substantially higher
+  than before for the same workload; it is closer to the real invoice, and a
+  `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
 
 ## [0.8.0] - 2026-08-25
 

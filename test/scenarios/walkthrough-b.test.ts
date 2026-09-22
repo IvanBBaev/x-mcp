@@ -282,9 +282,10 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   // One page, no cursor: the fixture's meta carries no next_token.
   assert.equal(mentions.data.next_token, undefined);
   assert.equal(mentions.summary, '3 result(s).');
-  // COST-3: the `owned` mentions read is $0.001 and it is the first spend of the session.
-  assert.equal(mentions.meta.cost_usd, 0.001);
-  assert.equal(mentions.meta.session_total_usd, 0.001);
+  // COST-3: the `owned` rate is $0.001 PER POST RETURNED, so this three-mention page costs
+  // $0.003 — not one flat $0.001 for the call. It is the first spend of the session.
+  assert.equal(mentions.meta.cost_usd, 0.003);
+  assert.equal(mentions.meta.session_total_usd, 0.003);
 
   // --- Step 2a: pull the thread root the ambiguous mentions point at --------------
   const parentResult = await call(client, 'x_post_get', { ids: [PARENT_ID] });
@@ -296,9 +297,10 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   assert.equal(parent.data.items[0]?.author, '@self_bot');
   assert.equal(parent.data.items[0]?.url, `https://x.com/i/status/${PARENT_ID}`);
   assert.equal(parent.data.missing, undefined);
-  // COST-3: $0.005 for a post read, accumulating onto the session total.
+  // COST-3: $0.005 per post returned — one post here, so one unit, accumulating onto
+  // the session total.
   assert.equal(parent.meta.cost_usd, 0.005);
-  assert.equal(parent.meta.session_total_usd, 0.006);
+  assert.equal(parent.meta.session_total_usd, 0.008);
 
   // --- Step 2b: the rest of the conversation --------------------------------------
   const threadResult = await call(client, 'x_search_recent', {
@@ -315,11 +317,12 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   );
   // The reply chain is walkable from the compact page alone.
   assert.deepEqual(thread.data.items[1]?.reply_to, { id: '1900000000000000001' });
-  assert.equal(thread.meta.cost_usd, 0.005);
-  assert.equal(thread.meta.session_total_usd, 0.011);
+  // Two posts came back, so the search costs 2 x $0.005 (COST-3).
+  assert.equal(thread.meta.cost_usd, 0.01);
+  assert.equal(thread.meta.session_total_usd, 0.018);
 
   // Step 3 (summarize + draft) is in-model: no further tool call, no further spend.
-  assert.equal(composition.budget.total(), 0.011);
+  assert.equal(composition.budget.total(), 0.018);
 
   // RATE-1/INT-3: an all-2xx journey now leaves a real table behind (T-320 F6, closed) —
   // every reply passed through its tool's bucket observer. The two step-1 requests share
@@ -339,7 +342,7 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   );
   assert.ok(table.data.buckets.every((b) => b.windows.every((w) => !w.exhausted)));
   assert.equal(table.meta.cost_usd, 0); // `local` meta tool: free, and it adds no spend
-  assert.equal(table.meta.session_total_usd, 0.011);
+  assert.equal(table.meta.session_total_usd, 0.018);
 
   mock.assertDone();
   await client.close();
