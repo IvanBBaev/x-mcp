@@ -406,7 +406,7 @@ test('AUTH-5/CONC-4: SIGKILL between refresh and persist — a fresh process rec
   // platform speaking, not this scenario; what the assertion is about is that recovery
   // itself — reclaim, refresh, persist, release — warned about nothing.
   assert.deepEqual(
-    warnings.filter((w) => !w.includes('(PLAT-2)')),
+    warnings.filter((w) => !w.includes('(PLAT-2')),
     [],
   );
 });

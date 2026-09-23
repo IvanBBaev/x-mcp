@@ -41,7 +41,7 @@
 // without real processes; all waiting goes through the injected `Sleep`, so no test
 // ever sleeps for real.
 
-import { constants as FSC, promises as fsp } from 'node:fs';
+import { constants as FSC, lstatSync, promises as fsp } from 'node:fs';
 import { dirname } from 'node:path';
 
 import type { Clock, Sleep, TokenPair, TokenStore } from '../../core/ports.js';
@@ -49,6 +49,15 @@ import { authError } from '../../core/errors.js';
 
 /** On-disk schema version this build reads and writes (docs/05 §8.7). */
 export const TOKEN_FILE_SCHEMA_VERSION = 1;
+
+/**
+ * The on-disk form of `TokenPair.expires_in`: the lifetime when it is known, `null` when it
+ * is not (AUTH-11). The refresh machine stores an unknown lifetime as NaN, which JSON would
+ * silently turn into `null` anyway — writing it explicitly keeps the round trip deliberate.
+ */
+export function persistedLifetime(expiresIn: number): number | null {
+  return Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : null;
+}
 
 /**
  * A foreign lock older than this is "expired". The refresh HTTP timeout (25 s, in the
@@ -79,6 +88,50 @@ const MAX_TMP_ATTEMPTS = 3;
 const MAX_RECLAIM_ATTEMPTS = 3;
 
 const AUTHORIZE_HINT = 'Run `npx x-mcp-ai authorize` to create a fresh token file.';
+
+/**
+ * The one token-file permission rule (T1, AUTH-12), shared by the store's first `load()`
+ * and the server's startup check so both say the same thing: a file accessible by group
+ * or other is a warning — never a refusal, since the next persist rewrites it 0600.
+ * Returns `null` for a tight mode. The message carries no `x-mcp-ai:` prefix; each sink
+ * adds its own.
+ */
+export function tokenFilePermissionWarning(path: string, mode: number): string | null {
+  if ((mode & 0o077) === 0) return null;
+  return (
+    `token file ${path} is accessible by group or other ` +
+    `(mode ${(mode & 0o777).toString(8)}); tighten it with: chmod 600 ${path}. ` +
+    'The next token refresh rewrites it with mode 0600.'
+  );
+}
+
+/** Seams for {@link tokenFileStartupWarnings}; production uses `lstatSync` and the host platform. */
+export interface TokenFileStartupDeps {
+  readonly platform?: NodeJS.Platform;
+  /** `lstat` (never follows symlinks); throws when the path is missing or unreadable. */
+  readonly lstat?: (path: string) => { mode: number; isFile(): boolean };
+}
+
+/**
+ * AUTH-12 startup check: surface a too-open token file when the server starts, not only
+ * on the first `load()` — which may come much later, or never in a session without X
+ * calls. A missing file, a non-regular file (the store refuses symlinks on its own), or
+ * an unreadable path yields no warning here; the store reports those on use. On win32 the
+ * POSIX bits are meaningless, and the store's one-time PLAT-2 notice covers it.
+ */
+export function tokenFileStartupWarnings(path: string, deps: TokenFileStartupDeps = {}): string[] {
+  if ((deps.platform ?? process.platform) === 'win32') return [];
+  const lstat = deps.lstat ?? lstatSync;
+  let stat: { mode: number; isFile(): boolean };
+  try {
+    stat = lstat(path);
+  } catch {
+    return [];
+  }
+  if (!stat.isFile()) return [];
+  const warning = tokenFilePermissionWarning(path, stat.mode);
+  return warning === null ? [] : [warning];
+}
 
 /**
  * The minimal async file-handle surface the store needs — a structural subset of
@@ -224,8 +277,10 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (win32) {
       warnOnce(
         'posix-perms-win32',
-        `x-mcp-ai: POSIX permission checks for ${dir} are skipped on Windows; ` +
-          'use NTFS ACLs to restrict access to the token file (PLAT-2).',
+        `x-mcp-ai: POSIX permission checks for ${path} are skipped on Windows — mode bits ` +
+          "are not enforced there, so securing the token file is the operator's " +
+          `responsibility; inspect its ACL with: icacls "${path}" and run: npx x-mcp-ai doctor ` +
+          '(PLAT-2, AUTH-12).',
       );
       return;
     }
@@ -290,10 +345,16 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (typeof obtainedAt !== 'number' || !Number.isFinite(obtainedAt)) {
       corruptError('is missing a numeric "obtained_at" field');
     }
-    const expiresIn = parsed['expires_in'];
-    if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
+    // `null` is the persisted form of an UNKNOWN lifetime (AUTH-11) — loaded back as NaN,
+    // which the refresh machine reads as "no eager refresh". Absent or non-numeric is corrupt.
+    const rawExpiresIn = parsed['expires_in'];
+    if (
+      rawExpiresIn !== null &&
+      (typeof rawExpiresIn !== 'number' || !Number.isFinite(rawExpiresIn))
+    ) {
       corruptError('is missing a numeric "expires_in" field');
     }
+    const expiresIn = rawExpiresIn === null ? Number.NaN : rawExpiresIn;
     const refreshToken = parsed['refresh_token'];
     if (refreshToken !== undefined && (typeof refreshToken !== 'string' || refreshToken === '')) {
       corruptError('has a malformed "refresh_token" field');
@@ -335,14 +396,8 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
       if (!win32) {
         // fstat on the open handle (not a second path lookup) → no TOCTOU window (T1).
         const { mode } = await handle.stat();
-        if ((mode & 0o077) !== 0) {
-          warnOnce(
-            'token-file-perms',
-            `x-mcp-ai: token file ${path} is accessible by group or other ` +
-              `(mode ${(mode & 0o777).toString(8)}); tighten it with: chmod 600 ${path}. ` +
-              'The next token refresh rewrites it with mode 0600.',
-          );
-        }
+        const permsWarning = tokenFilePermissionWarning(path, mode);
+        if (permsWarning !== null) warnOnce('token-file-perms', `x-mcp-ai: ${permsWarning}`);
       }
       text = await handle.readFile({ encoding: 'utf8' });
     } catch (err) {
@@ -443,7 +498,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
       revision: (pair.version ?? 0) + 1,
       access_token: pair.access_token,
       obtained_at: pair.obtained_at,
-      expires_in: pair.expires_in,
+      expires_in: persistedLifetime(pair.expires_in),
     };
     if (pair.refresh_token !== undefined) body['refresh_token'] = pair.refresh_token;
     const payload = `${JSON.stringify(body, null, 2)}\n`;

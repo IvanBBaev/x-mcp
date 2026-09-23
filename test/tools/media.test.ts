@@ -862,7 +862,7 @@ test(
     assert.ok(warnings.length <= 1, `expected at most one warning, got ${String(warnings.length)}`);
     if (process.platform !== 'win32') {
       assert.equal(warnings.length, 1);
-      assert.match(warnings[0] ?? '', /O_NOFOLLOW is unavailable/);
+      assert.match(warnings[0] ?? '', /^x-mcp-ai: warning: O_NOFOLLOW is unavailable/);
       assert.match(warnings[0] ?? '', /PLAT-2/);
     }
     // A regular file still opens through the same fallback path.

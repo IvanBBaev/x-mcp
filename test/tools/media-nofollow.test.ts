@@ -39,6 +39,8 @@ test('MEDIA-5/PLAT-2: with no warn port the degradation notice lands on stderr, 
   assert.equal(notices.length, 1, `expected one stderr notice, got ${String(notices.length)}`);
   assert.match(notices[0] ?? '', /O_NOFOLLOW is unavailable/);
   assert.match(notices[0] ?? '', /PLAT-2/);
+  // Same stderr prefix as every other non-fatal notice (`x-mcp-ai: warning: <text>`).
+  assert.match(notices[0] ?? '', /^x-mcp-ai: warning: O_NOFOLLOW/);
   // The default writer terminates the message itself — stderr is a stream, not a logger.
   assert.ok((notices[0] ?? '').endsWith('\n'));
 });
