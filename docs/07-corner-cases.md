@@ -451,7 +451,9 @@ credits, not tiers, for post-2026-02-06 developers.)*
   200-with-`errors[]` responses (deleted/suspended/protected items in batch or
   single lookups) render successful items plus
   `missing: [{id, reason: "deleted" | "suspended" | "protected" | …}]`. An agent
-  asking for 100 posts and receiving 87 always sees why.
+  asking for 100 posts and receiving 87 always sees why. A single lookup with nothing
+  to render (e.g. `x_list_get` on a missing or foreign private list) fails as a typed
+  `not-found` carrying the reason, instead of rendering an empty object.
 
 - **REND-3 — Long posts are never silently truncated** `P1` `[ARCH-F11, DX-F3]`
   `post-compact` includes `note_tweet`; render prefers `note_tweet.text` over

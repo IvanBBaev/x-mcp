@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_list_get` on a list X cannot return (missing, or private to someone else) now fails
+  with a `not-found` error naming the reason. X answers such a lookup with a 200 that
+  carries only `errors[]`, and the tool used to render that as an empty list.
+
 - A call refused locally because the rate-limit window is known to be exhausted no longer
   counts against `X_MCP_CREDIT_BUDGET`. Nothing is sent to X for such a call, but it was
   charged, so retries inside an exhausted window could use up a `hard`-mode budget.

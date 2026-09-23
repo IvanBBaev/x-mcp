@@ -35,7 +35,7 @@ import {
 } from '../api/endpoints/lists.js';
 import type { ListPageParams } from '../api/endpoints/lists.js';
 import { createHandleLookup, getMe as getUsersMe } from '../api/endpoints/users.js';
-import { apiError, validationError } from '../core/errors.js';
+import { apiError, notFoundError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
   billableUnits,
@@ -43,6 +43,7 @@ import {
   rawSummary,
   renderList,
   renderListPage,
+  renderMissing,
   renderPostPage,
   renderUserPage,
 } from '../core/render.js';
@@ -385,6 +386,13 @@ export const xListGet = defineTool({
     const res = await getList(ctx.http, listId);
     if (input.raw === true) {
       return { data: res, summary: rawSummary(`Raw list ${listId}.`) };
+    }
+    // REND-2: a 200 that carries only `errors[]` means X could not return the list (missing,
+    // or private to someone else). Rendering `{}` would pass it off as a real, empty list, so
+    // this single lookup fails typed instead, with the controlled reason only (REND-7).
+    if (res.data === undefined && (res.errors?.length ?? 0) > 0) {
+      const reason = renderMissing(res.errors)[0]?.reason ?? 'not-found';
+      throw notFoundError(`List ${listId} could not be read (${reason}).`);
     }
     // REND-5: renderList omits `owner` when the includes cannot resolve it — never throws.
     const list = renderList(res.data ?? {}, res.includes);

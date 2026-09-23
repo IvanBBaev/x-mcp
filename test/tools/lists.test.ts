@@ -407,6 +407,43 @@ test('DRIFT-1: get with a data-less 200 renders an empty compact list, no crash'
   await mock.close();
 });
 
+test('REND-2, REND-7: get with a 200 carrying only errors[] is a typed not-found, no detail leak', async () => {
+  const fixture = loadFixture<object>('lists/not-found.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}`, method: 'GET', query: LIST_PROJECTION })
+    .reply(200, fixture);
+
+  // Rendering `{}` here would report a real, empty list named "" — the missing list must
+  // fail typed instead, with only the controlled reason from the fixed vocabulary.
+  await assert.rejects(
+    () => xListGet.handler({ list_id: LIST_ID }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(err instanceof XError);
+      assert.equal(err.kind, 'not-found');
+      assert.equal(err.message, `List ${LIST_ID} could not be read (not-found).`);
+      assert.doesNotMatch(err.message, /SENTINEL_SECRET|Could not find/);
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-10: get raw:true passes an errors-only 200 through untouched', async () => {
+  const fixture = loadFixture<object>('lists/not-found.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}`, method: 'GET', query: LIST_PROJECTION })
+    .reply(200, fixture);
+
+  const out = await xListGet.handler({ list_id: LIST_ID, raw: true }, contextFor(mock));
+
+  assert.deepEqual(out.data, fixture); // raw is the exact API JSON, errors[] included
+  mock.assertDone();
+  await mock.close();
+});
+
 // --- x_lists_owned ---------------------------------------------------------------
 
 test('owned: user defaults to "me", renders a compact list page (REND-8/REND-6)', async () => {
