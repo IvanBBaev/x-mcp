@@ -98,6 +98,7 @@ test('x_search_archive: happy path renders a compact page with @handles and next
 
   assert.equal(page.items.length, 3);
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per post the archive page returned
   assert.equal(page.next_token, 'arch-next-1');
   assert.equal(page.items[0]?.author, '@carol_codes');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
@@ -320,16 +321,16 @@ test('x_post_counts_archive: maps buckets to numeric counts, prefers meta total,
   await http.close();
 });
 
-test('REND-10: raw search WITHOUT max_results sends no cap on the wire and counts a data-less page as 0', async () => {
+test('REND-10: raw search WITHOUT max_results sends the raw default (10) and counts a data-less page as 0', async () => {
   const http = mockHttp();
-  // The raw ceiling only rewrites a max_results the caller actually asked for; with none
-  // given the request must carry none — the API's own default applies, not an invented 25.
-  // The intercept pins the exact sorted query, so a smuggled max_results fails the match.
+  // With no size asked for, a raw read still bounds the page: it sends the raw default (10)
+  // rather than letting an API default (100 on some endpoints) breach the 25-item cap.
+  // The intercept pins the exact sorted query, so any other max_results fails the match.
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
       method: 'GET',
-      query: { query: 'nothing-matches-this', ...ARCHIVE_FIELD_PARAMS },
+      query: { query: 'nothing-matches-this', ...ARCHIVE_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, { meta: { result_count: 0 } });
 

@@ -86,9 +86,6 @@ export const DEFAULT_SCOPES: readonly string[] = [
   'offline.access',
 ];
 
-/** X token responses carry `expires_in`; if one ever does not, assume the documented 2 h. */
-const DEFAULT_EXPIRES_IN_S = 7200;
-
 /** Timeout for the code-exchange POST in the production fetch adapter. */
 const EXCHANGE_TIMEOUT_MS = 30_000;
 
@@ -640,7 +637,7 @@ function toExchangeResult(deps: AuthorizeDeps, body: unknown): ExchangeResult {
       : undefined;
   if (expiresIn === undefined) {
     deps.stdout(
-      `Note: the token response carried no usable expires_in — assuming ${String(DEFAULT_EXPIRES_IN_S)} s (the reactive 401 path remains the source of truth).`,
+      'Note: the token response carried no usable expires_in — the token will not be refreshed ahead of expiry; the first 401 after it expires triggers the refresh.',
     );
   }
   if (refreshToken === undefined) {
@@ -653,7 +650,9 @@ function toExchangeResult(deps: AuthorizeDeps, body: unknown): ExchangeResult {
     access_token: accessToken,
     ...(refreshToken !== undefined ? { refresh_token: refreshToken } : {}),
     obtained_at: deps.clock.now(),
-    expires_in: expiresIn ?? DEFAULT_EXPIRES_IN_S,
+    // No default lifetime is assumed (AUTH-11): NaN marks it unknown, which disables eager
+    // refresh and leaves the reactive 401 path in charge.
+    expires_in: expiresIn ?? Number.NaN,
   };
   return scope === undefined ? { pair } : { pair, scope };
 }
