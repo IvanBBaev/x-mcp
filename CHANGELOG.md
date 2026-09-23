@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- Hitting X's monthly usage cap now returns a `billing` error that says the cap will not
+  lift until the monthly period renews, instead of a `rate-limit` error that suggested
+  waiting a few minutes and retrying.
+
 - When X issues or refreshes a token without saying how long it lives, the server no
   longer breaks. Previously the refreshed token was saved in a form the next start
   rejected as a corrupt token file, forcing a fresh `authorize`; `authorize` itself

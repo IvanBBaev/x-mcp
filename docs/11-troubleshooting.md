@@ -162,6 +162,10 @@ context; `POST /2/tweets` additionally carries a 24-hour app-level cap surfaced 
 - `x_rate_limit_status` prints the known windows and costs nothing.
 - Rate limits are *not* the credit budget. A rate-limit refusal costs $0; a budget refusal
   means you hit **your** spend cap.
+- A 429 for X's **monthly usage cap** is not a rate limit: it comes back as `billing`
+  (`platform_title: "UsageCapExceeded"`), because no reset window lifts it — waiting and
+  retrying only repeats the refusal (COST-7). It clears when the monthly period renews or
+  the cap is raised on the developer account.
 
 ## 6. Budget refusals
 

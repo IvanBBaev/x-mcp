@@ -464,7 +464,8 @@ X-F4; cases COST-1…7):
   and the **next** call is the one refused.
 - Platform-side exhaustion is separate: X's own "out of credits" rejection maps to the
   `billing` error class (real body captured and locked by a Phase 1 live test — COST-6),
-  and the 2M-posts/month platform hard cap is surfaced verbatim as `billing` when hit but
+  and the 2M-posts/month platform hard cap — a 429 with problem type `usage-capped` — is
+  surfaced as `billing` (not `rate-limit`, which would invite a pointless wait) when hit but
   not pre-tracked — monthly state would need persistence the design omits (COST-7).
 
 ## 8. Field & expansion strategy

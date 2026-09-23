@@ -23,6 +23,35 @@ interface ErrorScenario {
   readonly body: unknown;
 }
 
+test('COST-7: a usage-capped 429 is billing, not a rate limit to wait out', () => {
+  const err = map('429-usage-capped.json');
+  assert.equal(err.kind, 'billing');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 429);
+  // No reset window is advertised: the fixture's near reset would otherwise invite a retry.
+  assert.equal(err.data.reset_at, undefined);
+  assert.equal(err.data.retry_after_seconds, undefined);
+  assert.equal(err.data.platform_title, 'UsageCapExceeded');
+  assert.match(String(err.data.platform_detail), /Monthly product cap/);
+  assert.match(err.message, /monthly usage cap/);
+  assert.match(err.message, /NOT the local session budget/);
+  assert.match(err.message, /NOT a rate-limit window/);
+});
+
+test('COST-7: the cap is recognised by its type or by its title/detail alone', () => {
+  const byTitle = mapHttpError(429, {}, { title: 'UsageCapExceeded' });
+  assert.equal(byTitle.kind, 'billing');
+  const byDetail = mapHttpError(429, {}, { detail: 'Usage cap exceeded: Monthly product cap' });
+  assert.equal(byDetail.kind, 'billing');
+  // An ordinary 429 — and one merely mentioning credits — stays a rate limit.
+  assert.equal(map('429-rate-limit.json').kind, 'rate-limit');
+  assert.equal(
+    mapHttpError(429, {}, { detail: 'Too many requests for your credits' }).kind,
+    'rate-limit',
+  );
+});
+
 /** All fixtures that represent a real error RESPONSE (i.e. everything except the 200 partial). */
 const ERROR_FIXTURES = [
   '401-invalid-token.json',
@@ -33,6 +62,7 @@ const ERROR_FIXTURES = [
   '403-billing-access-level.json',
   '402-payment-required.json',
   '429-rate-limit.json',
+  '429-usage-capped.json',
   '404-not-found.json',
   '502-html.json',
   '500-json.json',
