@@ -861,7 +861,7 @@ test('exchange: HTTP 200 with a non-JSON body maps to [api] missing-JSON-body', 
   assert.equal(bag.store.persistCount(), 0);
 });
 
-test('exchange: a minimal body (access_token only) succeeds with notes and defaults', async () => {
+test('exchange: a minimal body (access_token only) succeeds with notes, assuming nothing', async () => {
   const bag = makeDeps({ exchange: { status: 200, body: { access_token: 'at-min-1' } } });
   const browser = completingBrowser(bag);
   const cli = createAuthorizeCli({ ...bag.deps, openBrowser: browser.open });
@@ -871,9 +871,12 @@ test('exchange: a minimal body (access_token only) succeeds with notes and defau
   assert.ok(pair);
   assert.equal(pair.access_token, 'at-min-1');
   assert.equal(pair.refresh_token, undefined, 'no refresh token is fabricated');
-  assert.equal(pair.expires_in, 7200, 'the documented default lifetime is assumed');
+  // AUTH-11: no default lifetime is assumed — unknown disables eager refresh.
+  assert.ok(Number.isNaN(pair.expires_in), 'the lifetime stays unknown');
   const stdoutText = bag.out.join('\n');
   assert.match(stdoutText, /no usable expires_in/);
+  assert.match(stdoutText, /first 401 after it expires triggers the refresh/);
+  assert.ok(!stdoutText.includes('assuming'), 'no assumed lifetime is announced');
   assert.match(stdoutText, /no refresh_token was issued/);
   assert.ok(!stdoutText.includes('Granted scopes'), 'no scope line without a scope');
 });
@@ -892,7 +895,7 @@ test('exchange: empty refresh_token/scope and a non-positive expires_in are all 
   const pair = await bag.store.load();
   assert.ok(pair);
   assert.equal(pair.refresh_token, undefined);
-  assert.equal(pair.expires_in, 7200);
+  assert.ok(Number.isNaN(pair.expires_in)); // AUTH-11: unknown, never a default
   assert.ok(!bag.out.some((l) => l.includes('Granted scopes')));
 });
 
@@ -909,7 +912,7 @@ test('exchange: a non-finite expires_in and a non-string scope are dropped too',
   assert.equal(await cli([]), 0);
   const pair = await bag.store.load();
   assert.ok(pair);
-  assert.equal(pair.expires_in, 7200);
+  assert.ok(Number.isNaN(pair.expires_in)); // AUTH-11: unknown, never a default
   assert.ok(!bag.out.some((l) => l.includes('Granted scopes')));
 });
 

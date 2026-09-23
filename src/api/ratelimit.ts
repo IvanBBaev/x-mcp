@@ -1,13 +1,14 @@
 // Header-driven rate-limit tracker + preflight (docs/02 §6 pipeline / §7; docs/01 §4).
 // Owned by T-115 (WP-1.4). Consumed by the request pipeline (core/registry, T-113) as the
-// pre-flight choke point, by the http client's error mapper to update the table, and by the
-// `x_rate_limit_status` tool (T-120) to dump it.
+// pre-flight choke point, by the http client's response observer to update the table, and
+// by the `x_rate_limit_status` tool (T-120) to dump it.
 //
-// NOTE on what actually reaches `record` (T-320 F6): mcp/compose wires this tracker into the
-// per-bucket ERROR mapper, and api/http exposes no success-path header hook — so only non-2xx
-// responses train the table. This module is agnostic about that (it records whatever it is
-// handed); the consequence for callers is that `preflight` suppresses REPEAT 429s rather than
-// predicting the first one. Documented in docs/02 §7.
+// What reaches `record` (T-320 F6, closed): mcp/compose wires this tracker into each
+// per-bucket client's `onResponse` observer, so EVERY response trains the table — a 200
+// whose headers say `remaining: 0` exhausts the window as surely as the 429 that would
+// otherwise follow. This module is agnostic about that (it records whatever it is handed);
+// the consequence for callers is that `preflight` predicts the first 429 of a window rather
+// than merely suppressing repeats. Documented in docs/02 §7.
 //
 // What it does (cases RATE-1…7, CONC-3):
 //   • Parses `x-rate-limit-{limit,remaining,reset}` (and the `x-app-limit-24hour-*` 24-hour
@@ -27,7 +28,8 @@
 //     with respect to the event loop — updates cannot interleave mid-write.
 //
 // The RATE-5 GET-retry-once-within-5-s orchestration (method-aware; writes never retry) lives
-// in api/http (T-114); this module only supplies the reset delay it needs via `retryDelayMs`.
+// in api/http (T-114); this module only supplies the reset delay it needs via `retryDelayMs`,
+// wired per bucket in mcp/compose as the client's `rateLimitRetryDelay` seam.
 //
 // Pure in-process state. Time comes ONLY from the injected `Clock` — never `Date.now()`.
 
@@ -108,8 +110,10 @@ export interface RateLimitTracker {
   preflight(key: string): XError | null;
   /**
    * Milliseconds until the standard (15-minute) window for `key` resets, or `null` when no
-   * standard window is tracked. api/http (T-114) reads this after a 429 to decide the single
-   * GET retry (only when the delay is ≤ 5 s; writes never retry — RATE-5).
+   * standard window is tracked. mcp/compose wires it as api/http's `rateLimitRetryDelay`,
+   * read after a 429 to decide the single GET retry (only when the delay is ≤ 5 s; writes
+   * never retry — RATE-5). Only the standard window is consulted: the 24-hour app window
+   * rides on write endpoints, which never retry.
    */
   retryDelayMs(key: string): number | null;
   /** Snapshot of the whole table for the `x_rate_limit_status` tool (T-120). */

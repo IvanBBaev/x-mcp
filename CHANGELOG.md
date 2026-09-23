@@ -8,6 +8,65 @@ development chronology lives in `WORKLOG.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- When `X_MCP_CREDIT_BUDGET_MODE=hard` refuses an `x_post_create` whose text contains a
+  URL, the refusal now says the post is priced at $0.20 instead of the $0.015 base. URL
+  detection also covers internationalized and punycode domains (for example `xn--p1ai`)
+  and a domain glued to a word by `_`, so those posts are no longer under-quoted.
+
+- In a batch lookup's `missing[]`, a suspended account is now reported as `suspended`
+  rather than `not-found`, and a "Not Authorized" item as `protected` rather than
+  `unavailable`. X sends a suspended user with a generic not-found type, and only the
+  error detail names the suspension. The detail is read to classify the item but is still
+  never echoed.
+
+- `x_list_get` on a list X cannot return (missing, or private to someone else) now fails
+  with a `not-found` error naming the reason. X answers such a lookup with a 200 that
+  carries only `errors[]`, and the tool used to render that as an empty list.
+
+- A call refused locally because the rate-limit window is known to be exhausted no longer
+  counts against `X_MCP_CREDIT_BUDGET`. Nothing is sent to X for such a call, but it was
+  charged, so retries inside an exhausted window could use up a `hard`-mode budget.
+
+- A paginated `raw: true` read called without `max_results` now sends `max_results=10`
+  instead of none. X's own default is 100 on the follower/following, liker, bookmark and
+  list endpoints, so the raw payload could exceed its documented 25-item cap (REND-10).
+
+- Hitting X's monthly usage cap now returns a `billing` error that says the cap will not
+  lift until the monthly period renews, instead of a `rate-limit` error that suggested
+  waiting a few minutes and retrying.
+
+- When X issues or refreshes a token without saying how long it lives, the server no
+  longer breaks. Previously the refreshed token was saved in a form the next start
+  rejected as a corrupt token file, forcing a fresh `authorize`; `authorize` itself
+  silently assumed a 2-hour lifetime. The lifetime is now recorded as unknown: the token
+  is refreshed on the first 401 after it expires instead of ahead of time.
+- A write that fails with a 5xx or a network error — sending a DM, liking, following,
+  managing a list, and so on, not only post tools — now returns a non-retryable error
+  that says X may have applied the write anyway and that the effect should be verified
+  before re-issuing it. Previously these errors were marked retryable, inviting a blind
+  retry that could duplicate the write.
+- A `page_token` that X rejects as stale or invalid now returns a `validation` error
+  ("pagination token invalid or expired — restart from the first page") instead of an
+  opaque `api` error, so the agent knows to drop the cursor and page again from the start.
+- A read that hits a rate limit whose window renews within 5 seconds now waits for the
+  reset and retries once instead of failing: the 429 is absorbed and the call returns
+  normally, a few seconds later. A reset further away still returns the `rate-limit`
+  error immediately, and writes are never retried on any status.
+
+- Rate-limit tracking now learns from every response, not only from failures: a successful
+  call whose headers report an exhausted window trains the table, so the next call in that
+  bucket is refused locally before the platform answers 429, and `x_rate_limit_status`
+  shows a bucket after its first successful call instead of after its first failure.
+- `cost_usd` now reflects how many resources a call returned. X bills reads per resource and
+  writes per request, but every read was previously charged a single unit price — a search
+  returning 100 posts reported $0.005 instead of $0.50. Multi-resource reads are now priced
+  `unit price × resources returned`, an empty page costs nothing, and single-resource
+  lookups and writes are unchanged. Expect the session total to be substantially higher
+  than before for the same workload; it is closer to the real invoice, and a
+  `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
+
 ## [0.8.0] - 2026-08-25
 
 First published release on npm as `x-mcp-ai`.

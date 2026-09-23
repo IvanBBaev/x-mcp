@@ -4,15 +4,26 @@
 //   AUTH-14 — host-scoped auth + redirects never followed
 //   CFG-7   — proxy env is ignored (default/injected dispatcher, never a ProxyAgent)
 //   NET-1   — body tolerance: empty / non-JSON / oversized, no raw body text in errors
-//   NET-2   — transport failures mapped to `network`, timeouts distinguished
+//   NET-2   — transport failures mapped to `network` (connect AND mid-body), timeouts distinguished
 //   NET-3   — GET retries exactly once on 5xx/network; writes never auto-retry
+//   NET-4   — a write that fails without a definite answer (5xx, transport) is POST-4-ambiguous
+//   MCP-7   — host cancellation before AND during the response; a cancelled write is POST-4-ambiguous
+//   RATE-1/2/4 — the onResponse seam (T-320 F6): every response, once per attempt, before any decision
+//   RATE-5  — a GET 429 whose reset is ≤ 5 s away waits it out and retries once; writes never
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { XError } from '../../src/core/errors.js';
-import { createHttpClient, shouldAttachAuth, DEFAULT_API_BASE_URL } from '../../src/api/http.js';
+import {
+  createHttpClient,
+  shouldAttachAuth,
+  DEFAULT_API_BASE_URL,
+  RATE_LIMIT_RETRY_MAX_MS,
+  WRITE_AMBIGUITY,
+} from '../../src/api/http.js';
 import type { HttpClientConfig } from '../../src/api/http.js';
+import type { Dispatcher } from '../../src/core/ports.js';
 import { mockHttp, fakeClock, fakeSleep, fakeRandom } from '../helpers/index.js';
 
 // Case-insensitive header lookup over the object the MockAgent reply callback captures.
@@ -48,6 +59,65 @@ async function rejects(promise: Promise<unknown>): Promise<XError> {
     return err;
   }
   throw new assert.AssertionError({ message: 'expected the promise to reject, but it resolved' });
+}
+
+// The union of the two undici handler protocols this decorator has to speak: the bundled
+// fetch on Node 22 drives a dispatcher with v1 callbacks (`onComplete` / `onError`), Node 24+
+// with v2 (`onResponseEnd` / `onResponseError`). Only the members touched here are named.
+interface BodySink {
+  onRequestStart?: unknown;
+  onComplete?(trailers: unknown): void;
+  onError?(err: Error): void;
+  onResponseEnd?(controller: unknown, trailers: unknown): void;
+  onResponseError?(controller: unknown, err: Error): void;
+}
+
+/** What befalls a response once its bytes were delivered: die in an error, or never finish. */
+type MidBodyFate = { readonly die: Error } | { readonly stall: () => void };
+
+/**
+ * Wrap a dispatcher so the FIRST `fates.length` responses do not complete cleanly: status
+ * and bytes are delivered as the mock replied them, then the stream either ends in the
+ * queued error — an ECONNRESET after the headers, exactly the NET-2 case the MockAgent
+ * alone cannot stage (`replyWithError` fails before any response exists) — or stalls open
+ * forever, with `stall` told so a test can cancel a request whose body is still streaming
+ * (MCP-7). Both act a macrotask later because a real socket never resets synchronously
+ * inside `dispatch`, and fetch wires its stream-error listener only after `onHeaders`.
+ * Later responses pass through untouched, so a retry can succeed.
+ */
+function midBody(inner: Dispatcher, fates: MidBodyFate[]): Dispatcher {
+  const dispatcher = {
+    dispatch(opts: unknown, handler: BodySink): boolean {
+      const fate = fates.shift();
+      const spy = fate === undefined ? handler : (Object.create(handler) as BodySink);
+      if (fate !== undefined) {
+        // Replaces the clean completion: raise the error through the handler, or just tell.
+        const instead = (raise: (err: Error) => void): void => {
+          setImmediate(() => ('die' in fate ? raise(fate.die) : fate.stall()));
+        };
+        if ('onRequestStart' in handler) {
+          spy.onResponseEnd = function (this: BodySink, controller: unknown) {
+            instead((err) => handler.onResponseError?.call(this, controller, err));
+          };
+        } else {
+          spy.onComplete = function (this: BodySink) {
+            instead((err) => handler.onError?.call(this, err));
+          };
+        }
+      }
+      return (inner as unknown as { dispatch(o: unknown, h: BodySink): boolean }).dispatch(
+        opts,
+        spy,
+      );
+    },
+    close: () => (inner as unknown as { close(): Promise<void> }).close(),
+    destroy: () => (inner as unknown as { destroy(): Promise<void> }).destroy(),
+  };
+  return dispatcher as unknown as Dispatcher;
+}
+
+function connectionReset(): Error {
+  return Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
 }
 
 // --- AUTH-14: host-scoped auth ---------------------------------------------------
@@ -269,7 +339,9 @@ test('NET-2: a connection failure surfaces as `network`, raw cause never inlined
   );
 
   assert.equal(err.kind, 'network');
-  assert.equal(err.retryable, true); // network default
+  // NET-2: a failed WRITE may have landed — ambiguous and non-retryable, not the network default.
+  assert.equal(err.retryable, false);
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
   assert.doesNotMatch(err.message, /ECONNRESET|socket hang up/);
   http.assertDone();
   await http.close();
@@ -287,6 +359,8 @@ test('NET-2: a per-attempt timeout maps to `network` with a distinct message', a
 
   assert.equal(err.kind, 'network');
   assert.match(err.message, /timed out/i);
+  assert.equal(err.retryable, false); // a timed-out write is POST-4-ambiguous
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
   await http.close();
 });
 
@@ -370,6 +444,82 @@ test('NET-3: a write (POST) NEVER auto-retries on a 5xx', async () => {
   await http.close();
 });
 
+// --- NET-4: a write that failed without a definite answer is ambiguous -------------
+
+test('NET-4: a 5xx on a write keeps its class and data but drops the retry advice for the ambiguity note', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/dm_conversations/with/7/messages', method: 'POST' })
+    .reply(503, {});
+
+  const mapped = new XError('api', 'A 5xx is often transient, so a single retry may succeed.', {
+    retryable: true,
+    data: { http_status: 503, platform_title: 'Service Unavailable' },
+  });
+  const { client } = makeClient(http, { mapError: () => mapped });
+  const err = await rejects(
+    client.send({
+      method: 'POST',
+      path: '/2/dm_conversations/with/7/messages',
+      body: { text: 'hi' },
+    }),
+  );
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.retryable, false);
+  assert.equal(err.fix, mapped.fix);
+  assert.deepEqual(err.data, mapped.data);
+  assert.equal(err.cause, mapped);
+  assert.doesNotMatch(err.message, /single retry may succeed/);
+  assert.match(err.message, /HTTP 503/);
+  assert.match(err.message, /platform_title/); // X's own words are still pointed at
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-4: without platform prose the write message does not point at absent fields', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/users/1/likes', method: 'DELETE' }).reply(502, 'bad gateway');
+
+  const { client } = makeClient(http); // minimal fallback mapper
+  const err = await rejects(client.send({ method: 'DELETE', path: '/2/users/1/likes' }));
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 502);
+  assert.doesNotMatch(err.message, /platform_title/);
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-4: a GET 5xx and a write 4xx are not write-ambiguous', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(500, {}).times(2);
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(400, {});
+
+  // A mapper that marks 5xx retryable, like the real one: the read must keep that verdict.
+  const { client } = makeClient(http, {
+    mapError: (status) =>
+      new XError('api', `HTTP ${status}.`, {
+        retryable: status >= 500,
+        data: { http_status: status },
+      }),
+  });
+  const read = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+  assert.equal(read.retryable, true); // the mapper's own verdict stands for a read
+  assert.equal(read.message.includes(WRITE_AMBIGUITY), false);
+
+  // A 4xx is a definite answer: X refused the write, nothing was applied.
+  const refused = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+  assert.equal(refused.message.includes(WRITE_AMBIGUITY), false);
+  http.assertDone();
+  await http.close();
+});
+
 test('NET-3: a write (POST) NEVER auto-retries on a network error', async () => {
   const http = mockHttp();
   http.pool
@@ -383,6 +533,547 @@ test('NET-3: a write (POST) NEVER auto-retries on a network error', async () => 
 
   assert.equal(err.kind, 'network');
   assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- NET-2 mid-body: the response started, then the connection died ----------------
+//
+// Distinct from the connect failures above: headers (and some bytes) arrived, so the failure
+// surfaces from the body read, not from fetch itself. The read rejects with the stream's
+// `terminated` error carrying the transport cause — never with our own XError — and the
+// client must treat it exactly like a connect failure: GET retries once, a write never.
+
+test('NET-2/NET-3: a GET whose body dies mid-stream (ECONNRESET) retries once, then succeeds', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: connectionReset() }]),
+  });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.equal(sleep.calls.length, 1); // one backoff between the two attempts
+  http.assertDone(); // both interceptors consumed → the retry really went out
+  await http.close();
+});
+
+test('NET-2/NET-3: a write whose body dies mid-stream surfaces `network` at once, never retries', async () => {
+  const http = mockHttp();
+  // A single interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: connectionReset() }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.deepEqual(sleep.calls, []); // no backoff, no retry
+  assert.doesNotMatch(err.message, /ECONNRESET|terminated/); // raw cause never inlined
+  assert.doesNotMatch(err.message, /timed out/i); // a reset is not a timeout
+  http.assertDone();
+  await http.close();
+});
+
+test("NET-2: a timeout that reaches the client wrapped as the stream error's cause still reads as a timeout", async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  // fetch reports a mid-body failure as `TypeError: terminated` with the transport error as
+  // `cause`; when that transport error is the timeout DOMException, the client must still
+  // unwrap it — the distinct NET-2 timeout message, not the generic connection-failed one.
+  const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  const { client, sleep } = makeClient(http, {
+    dispatcher: midBody(http.dispatcher, [{ die: timeout }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /timed out/i);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- MCP-7 mid-body: the host cancels while the body is still streaming --------------
+//
+// The response started, so the cancellation surfaces from the body read — fetch errors the
+// stream with the abort reason — not from fetch itself: the `'response'` phase of the
+// cancelled error. Never retried, whatever the method. A GET stays re-issuable; a write
+// was already on the wire, so it carries the POST-4 ambiguity and is pinned non-retryable
+// so that nothing auto-re-issues a possibly-applied write.
+
+test('MCP-7: cancellation while a GET body streams is a cancelled `network` error, not a retry', async () => {
+  const http = mockHttp();
+  // A single interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    dispatcher: midBody(http.dispatcher, [{ stall: () => controller.abort() }]),
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled while reading the response/);
+  assert.doesNotMatch(err.message, /before a response arrived/); // the body-read phase, not fetch
+  assert.equal(err.retryable, true); // a cancelled GET is safe to re-issue
+  assert.doesNotMatch(err.message, /X may have applied/); // no write ambiguity on a GET
+  assert.deepEqual(sleep.calls, []); // cancellation is never retried, even for a GET
+  http.assertDone();
+  await http.close();
+});
+
+test('MCP-7/POST-4: cancellation while a write body streams carries the applied-anyway note, non-retryable', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(201, { data: { id: '9' } });
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    dispatcher: midBody(http.dispatcher, [{ stall: () => controller.abort() }]),
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled while reading the response/);
+  assert.match(err.message, /X may have applied the write anyway/);
+  assert.match(err.message, /Do NOT blindly re-issue it/);
+  assert.equal(err.retryable, false); // pinned: a possibly-applied write must not auto-retry
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+// --- RATE-2/INT-3: the onResponse observer seam (T-320 F6) --------------------------
+//
+// The third seam. Every response the origin returned — a 2xx, the 429 that follows it, a
+// 5xx about to be retried, a 3xx about to be refused — reaches the observer once per
+// attempt, in arrival order, BEFORE this client reads the body, retries, refuses or maps
+// it. A transport failure yields no response and so never reaches it. What to make of a
+// headerless response is the tracker's policy (RATE-4), not this layer's.
+
+// Record what the observer saw, one entry per call, in arrival order.
+function observed() {
+  const calls: Array<{ status: number; remaining: string | null }> = [];
+  const onResponse = (status: number, headers: Headers): void => {
+    calls.push({ status, remaining: headers.get('x-rate-limit-remaining') });
+  };
+  return { calls, onResponse };
+}
+
+test('RATE-2: a 2xx with rate-limit headers reaches the observer — successes train the tracker', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(
+    200,
+    { data: { id: '1' } },
+    {
+      headers: {
+        'x-rate-limit-limit': '300',
+        'x-rate-limit-remaining': '299',
+        'x-rate-limit-reset': '1700000000',
+      },
+    },
+  );
+
+  let seen: { status: number; headers: Headers } | undefined;
+  const { client } = makeClient(http, {
+    onResponse: (status, headers) => {
+      seen = { status, headers };
+    },
+  });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1'); // the request itself still resolves with the parsed body
+  assert.equal(seen?.status, 200);
+  assert.ok(seen?.headers instanceof Headers);
+  assert.equal(seen?.headers.get('x-rate-limit-limit'), '300');
+  assert.equal(seen?.headers.get('x-rate-limit-remaining'), '299');
+  assert.equal(seen?.headers.get('x-rate-limit-reset'), '1700000000');
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-1: on a 429 the observer fires before mapError, with the headers the mapper sees', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(
+    429,
+    { title: 'Too Many Requests' },
+    {
+      headers: { 'x-rate-limit-remaining': '0', 'x-rate-limit-reset': '1700000000' },
+    },
+  );
+
+  const order: string[] = [];
+  const seen = observed();
+  let mapped: { status: number; remaining: string | null } | undefined;
+  const { client } = makeClient(http, {
+    onResponse: (status, headers) => {
+      order.push('observe');
+      seen.onResponse(status, headers);
+    },
+    mapError: (status, headers) => {
+      order.push('map');
+      mapped = { status, remaining: headers.get('x-rate-limit-remaining') };
+      return new XError('rate-limit', 'Rate limit exhausted.');
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'rate-limit');
+  assert.deepEqual(order, ['observe', 'map']); // the tracker learns the window before the error is built
+  assert.deepEqual(seen.calls, [{ status: 429, remaining: '0' }]);
+  assert.deepEqual(mapped, { status: 429, remaining: '0' });
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-3: a retried GET reaches the observer once per attempt — the 5xx, then the 2xx', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(503, { e: 'boom' }, { headers: { 'x-rate-limit-remaining': '7' } });
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(200, { data: { id: '1' } }, { headers: { 'x-rate-limit-remaining': '6' } });
+
+  const seen = observed();
+  const { client, sleep } = makeClient(http, { onResponse: seen.onResponse });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.equal(sleep.calls.length, 1); // one backoff between the two attempts
+  // Each call carries its own attempt's headers, in arrival order — the retried 5xx is not lost.
+  assert.deepEqual(seen.calls, [
+    { status: 503, remaining: '7' },
+    { status: 200, remaining: '6' },
+  ]);
+  http.assertDone();
+  await http.close();
+});
+
+test('AUTH-14: a refused redirect still reaches the observer before it is refused', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/redir', method: 'GET' }).reply(302, '', {
+    headers: { location: 'https://evil.example/steal', 'x-rate-limit-remaining': '5' },
+  });
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/redir' }));
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.data.http_status, 302);
+  assert.deepEqual(seen.calls, [{ status: 302, remaining: '5' }]); // observed, then refused
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-2: a connection failure never reaches the observer — there is no response', async () => {
+  const http = mockHttp();
+  // A write so there is no retry; the single interceptor throws on connect.
+  http.pool
+    .intercept({ path: '/2/tweets', method: 'POST' })
+    .replyWithError(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.deepEqual(seen.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-2: a per-attempt timeout never reaches the observer', async () => {
+  const http = mockHttp();
+  // A write (no retry). The response is delayed well past the tiny timeout window.
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(200, { ok: true }).delay(500);
+
+  const seen = observed();
+  const { client } = makeClient(http, { timeoutMs: 10, onResponse: seen.onResponse });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /timed out/i);
+  assert.deepEqual(seen.calls, []);
+  await http.close();
+});
+
+test('MCP-7: a call cancelled before any response never reaches the observer', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const controller = new AbortController();
+  controller.abort(); // already cancelled by the host
+  const seen = observed();
+  const { client } = makeClient(http, { signal: controller.signal, onResponse: seen.onResponse });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(seen.calls, []);
+  await http.close();
+});
+
+test('NET-1: the observer is optional — a client built without one handles a 200 normally', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(200, { data: { id: '1' } }, { headers: { 'x-rate-limit-remaining': '299' } });
+
+  const { client } = makeClient(http); // no onResponse
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-4: a 200 without rate-limit headers still reaches the observer — the seam is unconditional', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const seen = observed();
+  const { client } = makeClient(http, { onResponse: seen.onResponse });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  // Whether a headerless response trains the table is the tracker's call, not this layer's.
+  assert.deepEqual(seen.calls, [{ status: 200, remaining: null }]);
+  http.assertDone();
+  await http.close();
+});
+
+// --- RATE-5: a 429'd GET waits out a reset ≤ 5 s away and retries once ---------------
+//
+// The delay comes from the `rateLimitRetryDelay` seam (the tracker, in production), read
+// only after the observer recorded the 429. Retry budget is shared with NET-3: one retry per
+// request, whatever caused it.
+
+const RATE_LIMITED = { title: 'Too Many Requests' };
+
+test('RATE-5: a GET 429 with the reset 3 s away waits reset + jitter, retries once, succeeds', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => 3_000 });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.deepEqual(sleep.calls, [3_500]); // 3 000 ms to the reset + 500 ms jitter past it
+  http.assertDone(); // exactly two requests
+  await http.close();
+});
+
+test('RATE-5: a reset exactly 5 s away is still waited out (the bound is inclusive)', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => RATE_LIMIT_RETRY_MAX_MS,
+  });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(RATE_LIMIT_RETRY_MAX_MS, 5_000);
+  assert.deepEqual(sleep.calls, [5_500]);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: a reset already passed retries after the jitter alone — never a negative sleep', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => -2_000 });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.deepEqual(sleep.calls, [500]);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: a reset more than 5 s away surfaces the mapped error at once — no wait, no retry', async () => {
+  const http = mockHttp();
+  // Only one interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => 5_001,
+    mapError: () => new XError('rate-limit', 'Rate limit exhausted.'),
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'rate-limit');
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: an untracked bucket (null delay) never retries a 429', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => null });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: without the delay seam a 429 is never retried', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http);
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/NET-3: a write 429 never consults the delay and never retries', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(429, RATE_LIMITED);
+
+  let asked = 0;
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => {
+      asked += 1;
+      return 0;
+    },
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.data.http_status, 429);
+  assert.equal(asked, 0);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: two 429s in a row retry exactly once, then surface the second', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  let asked = 0;
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => {
+      asked += 1;
+      return 1_000;
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.equal(asked, 1); // the second 429 is past the retry budget — not even consulted
+  assert.deepEqual(sleep.calls, [1_500]);
+  http.assertDone(); // exactly two requests, no third
+  await http.close();
+});
+
+test('RATE-5/NET-3: the retry budget is shared — a 5xx retry leaves none for a following 429', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(503, { e: 1 });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => 1_000 });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, [500]); // the 5xx backoff only
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/RATE-1: the observer records the 429 before the delay is read', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(429, RATE_LIMITED, { headers: { 'retry-after': '2' } });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const order: string[] = [];
+  const { client } = makeClient(http, {
+    onResponse: (status) => order.push(`observe ${status}`),
+    rateLimitRetryDelay: () => {
+      order.push('delay');
+      return 2_000;
+    },
+  });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.deepEqual(order, ['observe 429', 'delay', 'observe 200']);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/MCP-7: a cancellation that lands with the 429 stops the retry before any wait', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    rateLimitRetryDelay: () => {
+      controller.abort(); // the host gives up while the 429 is being handled
+      return 1_000;
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/MCP-7: a cancellation during the wait is never re-sent', async () => {
+  const http = mockHttp();
+  // Only one interceptor: a re-send after the abort would need a second and throw.
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const controller = new AbortController();
+  const waits: number[] = [];
+  const { client } = makeClient(http, {
+    signal: controller.signal,
+    rateLimitRetryDelay: () => 1_000,
+    sleep: (ms) => {
+      waits.push(ms);
+      controller.abort();
+      return Promise.resolve();
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(waits, [1_500]);
   http.assertDone();
   await http.close();
 });
