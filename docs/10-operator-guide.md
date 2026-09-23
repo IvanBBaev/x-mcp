@@ -270,7 +270,8 @@ distinctly when the text carries a URL. A loop that posts links is the most expe
 this server can do.
 
 **The platform read cap.** X caps post reads at **2,000,000 per month**, independent of
-credit balance.
+credit balance. Hitting it returns a `billing` error with `platform_title:
+"UsageCapExceeded"` — not a rate limit, so no retry helps until the month renews.
 
 **The guardrail** is the session credit budget:
 
