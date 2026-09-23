@@ -15,7 +15,7 @@ import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
 import type { RawListResponse, RawTweet } from '../core/render.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { createHandleLookup, getMe } from '../api/endpoints/users.js';
@@ -123,12 +123,7 @@ function prepareRequest(input: SharedTimelineInput, nowMs: number): PreparedRequ
     input.max_results !== undefined
       ? clampMaxResults(input.max_results, PAGE_BOUNDS.timeline)
       : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const paginationToken = toCursor(input.page_token);
   const bounds = normalizeTimeBounds(input, nowMs);
 
@@ -183,8 +178,15 @@ function renderTimelinePage(
   raw: boolean,
   notes: readonly string[],
 ): ToolOutput {
+  // Billed per post the timeline returned, not per call (COST-3). The count comes from the
+  // raw envelope, so a `raw` read capped locally still pays for what X sent.
+  const units = billableUnits(res);
   if (raw) {
-    return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+    return {
+      data: res,
+      summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+      units,
+    };
   }
   let page = renderPostPage(res);
   if (notes.length > 0) {
@@ -194,6 +196,7 @@ function renderTimelinePage(
   return {
     data: page,
     summary: `${page.result_count} result(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+    units,
   };
 }
 

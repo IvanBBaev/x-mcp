@@ -57,6 +57,15 @@ export const xUserGet = defineTool({
       wantsMe ? getMe(ctx.http) : undefined,
     ]);
 
+    // Billed per user record returned across ALL the requests this call made (COST-3).
+    // Summed from the raw responses, so a user asked for twice (once by id, once by handle)
+    // is charged twice even though the compact batch below de-duplicates it — X returned
+    // and billed two records. `me` is one record when present.
+    const units =
+      (byIds?.data?.length ?? 0) +
+      (byHandles?.data?.length ?? 0) +
+      (meRes?.data !== undefined ? 1 : 0);
+
     // raw: true → the merged, uncompacted envelope, capped at the endpoint maximum (REND-10).
     if (input.raw === true) {
       const rawUsers: RawUser[] = [];
@@ -73,7 +82,11 @@ export const xUserGet = defineTool({
         data: capped,
         ...(errors.length > 0 ? { errors } : {}),
       };
-      return { data: envelope, summary: rawSummary(`${capped.length} raw user record(s)`) };
+      return {
+        data: envelope,
+        summary: rawSummary(`${capped.length} raw user record(s)`),
+        units,
+      };
     }
 
     // Compact each response, concatenating items + missing and de-duping items by id.
@@ -105,7 +118,7 @@ export const xUserGet = defineTool({
     const summary = `${items.length} user(s)${
       missing.length > 0 ? `, ${missing.length} missing` : ''
     }`;
-    return { data: batch, summary };
+    return { data: batch, summary, units };
   },
 });
 

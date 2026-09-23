@@ -79,7 +79,9 @@ node build/src/index.js authorize
 
 - Opens `https://x.com/i/oauth2/authorize` in your browser, listens once on
   `127.0.0.1:<port>/callback` (nominal port `8371`), verifies the CSRF `state`, exchanges
-  the code with PKCE (S256), and writes the token file.
+  the code with PKCE (S256), and writes the token file. The URL is always printed too; if
+  no browser can be launched (no opener installed, no `DISPLAY`/`WAYLAND_DISPLAY`, or an
+  SSH session) you get a message pointing at the printed URL and at `--manual`.
 - `--manual` — no local listener: print the URL, then paste the **full redirect URL** back.
   A bare authorization code is rejected, because the `state` must be verifiable.
 - The callback wait times out after 5 minutes; nothing is written on timeout.
@@ -270,7 +272,8 @@ distinctly when the text carries a URL. A loop that posts links is the most expe
 this server can do.
 
 **The platform read cap.** X caps post reads at **2,000,000 per month**, independent of
-credit balance.
+credit balance. Hitting it returns a `billing` error with `platform_title:
+"UsageCapExceeded"` — not a rate limit, so no retry helps until the month renews.
 
 **The guardrail** is the session credit budget:
 

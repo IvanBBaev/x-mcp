@@ -166,7 +166,8 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 > [docs/decisions/0001-oauth1-go-no-go.md](decisions/0001-oauth1-go-no-go.md).
 > The signer is never built; OA1-1…4 below are retained for the record and apply
 > only if the decision's revisit triggers fire. The `oauth1` auth mode and the
-> credential quadruple still accepted by `core/config.ts` are removed with T-309.
+> credential quadruple were removed from `core/config.ts` with T-309; `X_MCP_AUTH_MODE=oauth1`
+> is now refused at startup like any other unknown mode.
 
 - **OA1-1 — RFC 5849 reference vector** `P3` `[QA-11]`
   The HMAC-SHA1 signer reproduces the RFC 5849 §3.4.1.1 reference signature and the
@@ -195,7 +196,8 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 - **RATE-2 — Preemptive refusal** `P1` `[QA-16]`
   When the tracked window shows `remaining === 0` and reset is in the future, the
   call is refused locally with a typed `rate-limit` error carrying the reset as ISO
-  8601 **and** `retry_after_seconds` — no HTTP request is made.
+  8601 **and** `retry_after_seconds` — no HTTP request is made, and the session credit
+  budget is not charged (the preflight runs before the budget check).
 
 - **RATE-3 — Past-reset proceeds** `P1` `[QA-17, ARCH-F15]`
   If the recorded reset time has passed, the request proceeds (window presumed
@@ -241,7 +243,15 @@ credits, not tiers, for post-2026-02-06 developers.)*
 - **COST-3 — Per-call cost surfaces in results** `P1` `[X-F4]`
   Every result includes the estimated credit cost of the call (`cost_usd`) and the
   session running total, computed from the static cost table (e.g. $0.005/post
-  read, $0.010/user read, $0.015/post create).
+  read, $0.010/user read, $0.015/post create). Reads are priced **per resource
+  returned** and writes per request ([01 §3.1](01-api-landscape.md)): the handler
+  reports how many billable resources its response carried and the registry settles
+  the reservation at `unit price × count`, so a search returning 100 posts costs
+  $0.50, an empty page costs nothing, and a single-resource lookup is unchanged.
+  A `usd` override (COST-4) is an absolute per-call price and is never multiplied.
+  Because the count is unknowable before the response, the pre-flight reservation
+  holds ONE resource and the settlement moves the ledger by the difference; a
+  settlement never refuses a call whose resources the platform already delivered.
 
 - **COST-4 — URL-bearing post costs $0.20 — warn before spend** `P2` `[X-F4]`
   `post_create` detects URLs in `text`; when present, the result (and, in `hard`
@@ -441,7 +451,9 @@ credits, not tiers, for post-2026-02-06 developers.)*
   200-with-`errors[]` responses (deleted/suspended/protected items in batch or
   single lookups) render successful items plus
   `missing: [{id, reason: "deleted" | "suspended" | "protected" | …}]`. An agent
-  asking for 100 posts and receiving 87 always sees why.
+  asking for 100 posts and receiving 87 always sees why. A single lookup with nothing
+  to render (e.g. `x_list_get` on a missing or foreign private list) fails as a typed
+  `not-found` carrying the reason, instead of rendering an empty object.
 
 - **REND-3 — Long posts are never silently truncated** `P1` `[ARCH-F11, DX-F3]`
   `post-compact` includes `note_tweet`; render prefers `note_tweet.text` over
@@ -481,7 +493,10 @@ credits, not tiers, for post-2026-02-06 developers.)*
 
 - **REND-10 — `raw: true` is capped** `P1` `[DX-F11]`
   With `raw: true`, `max_results` is capped at 25. The raw payload is the exact API
-  JSON including `includes`/`meta`.
+  JSON including `includes`/`meta`. A raw read with **no** `max_results` still sends one
+  — 10, the smallest X default and the largest per-endpoint minimum — because the API's
+  own default is 100 on the social-graph, engagement and list endpoints and would breach
+  the cap (`rawMaxResults`).
   The cap is applied silently: there is **no log layer** in the shipped server (§6 of
   docs/04), so "a warning is logged" — the original wording — described a sink that does
   not exist, and a per-result note would have had to ride on `data`, breaking the
