@@ -228,42 +228,47 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
   const authContext: 'app' | 'user' = config.authMode === 'app-only' ? 'app' : 'user';
   const authorization = oauth2?.authorization ?? createAuthorizationProvider(config);
 
+  const mapError: ErrorMapper = (status, headers, body) =>
+    mapHttpError(status, headers, body, clock.now());
+
   // Each bucket's client signs via the provider; in oauth2 mode it is additionally
   // wrapped with the 401 → refresh → retry-once orchestration (§4A step 6, AUTH-8).
-  function clientFor(mapError: ErrorMapper): EndpointInvoker {
+  // A bucket key wires both rate-limit seams to the tracker: the observer records every
+  // response under it, and the 429 delay query reads the same bucket back (RATE-5).
+  function clientFor(key?: string): EndpointInvoker {
     const client = createHttpClient({
       sleep,
       random,
       baseUrl: config.baseUrl,
       timeoutMs: config.timeoutMs,
       mapError,
+      ...(key !== undefined
+        ? {
+            onResponse: (status: number, headers: Headers) => tracker.record(key, headers, status),
+            rateLimitRetryDelay: () => tracker.retryDelayMs(key),
+          }
+        : {}),
       ...(dispatcher !== undefined ? { dispatcher } : {}),
       ...(authorization !== undefined ? { authorization } : {}),
     });
     return oauth2 === undefined ? client : oauth2.withAuthRetry(client);
   }
 
-  // One http client per endpoint-class bucket (INT-3): its error mapper first records the
-  // response's rate-limit headers into the tracker under the bucket key, then delegates to
-  // the rich mapper — so a 429 (or any limited error) trains the preflight table (RATE-1).
-  // api/http exposes no success-path header hook, so only non-2xx responses feed the
-  // table; see the integrator note in the T-130 report.
+  // One http client per endpoint-class bucket (INT-3): its response observer records every
+  // response's rate-limit headers into the tracker under the bucket key — a 200 that says
+  // `remaining: 0` trains the preflight table exactly as the 429 after it would (RATE-1),
+  // so the refusal is a look-ahead, not a repeat suppressor (T-320 F6, closed). The error
+  // mapper stays pure: mapping and tracking are separate seams of api/http. After a 429 the
+  // client asks the tracker how far the bucket's reset is — the 429 itself already recorded
+  // — and a GET within 5 s of it waits and retries once (RATE-5).
   const invokers = new Map<string, EndpointInvoker>();
   for (const bucket of new Set(Object.values(TOOL_BUCKETS))) {
     if (bucket === null) continue;
-    const key = rateLimitKey(bucket, authContext);
-    invokers.set(
-      bucket,
-      clientFor((status, headers, body) => {
-        tracker.record(key, headers, status);
-        return mapHttpError(status, headers, body, clock.now());
-      }),
-    );
+    invokers.set(bucket, clientFor(rateLimitKey(bucket, authContext)));
   }
-  // Local-only tools still receive a working (non-recording) invoker, defensively.
-  const fallback = clientFor((status, headers, body) =>
-    mapHttpError(status, headers, body, clock.now()),
-  );
+  // Local-only tools still receive a working (non-recording, never-429-retrying) invoker,
+  // defensively.
+  const fallback = clientFor();
   const invokerFor = (toolName: string): EndpointInvoker => {
     const bucket = TOOL_BUCKETS[toolName];
     return (bucket != null ? invokers.get(bucket) : undefined) ?? fallback;
