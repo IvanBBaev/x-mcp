@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A paginated `raw: true` read called without `max_results` now sends `max_results=10`
+  instead of none. X's own default is 100 on the follower/following, liker, bookmark and
+  list endpoints, so the raw payload could exceed its documented 25-item cap (REND-10).
+
 - Hitting X's monthly usage cap now returns a `billing` error that says the cap will not
   lift until the monthly period renews, instead of a `rate-limit` error that suggested
   waiting a few minutes and retrying.

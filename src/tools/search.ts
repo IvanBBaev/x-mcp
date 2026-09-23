@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { defineTool } from '../core/tooldef.js';
 import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { billableUnits, capRawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
 
@@ -86,12 +86,7 @@ export const xSearchRecent = defineTool({
 
     // REND-10: a raw read caps the outgoing max_results at the raw ceiling (25) and returns
     // the exact API JSON; a compact read uses the endpoint-clamped value (10-100).
-    const maxResults =
-      input.raw === true
-        ? input.max_results !== undefined
-          ? capRawMaxResults(input.max_results)
-          : undefined
-        : clamp?.value;
+    const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
 
     const params: SearchRecentParams = {
       query: input.query,

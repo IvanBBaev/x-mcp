@@ -402,16 +402,16 @@ test('REND-10: raw:true returns the exact API JSON and caps max_results at 25', 
   await http.close();
 });
 
-test('REND-10: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('REND-10: raw without max_results sends the raw default (10); a data-less 200 counts as 0', async () => {
   const http = mockHttp();
-  // The intercept carries the field params ONLY — the raw cap applies just when the caller
-  // asked for a size. A degraded envelope with no `data` must still summarize (DRIFT-1).
+  // With no size asked for, the raw read sends the raw default (10) so the page stays under
+  // the 25-item cap. A degraded envelope with no `data` must still summarize (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   http.pool
     .intercept({
       path: '/2/users/50393960/tweets',
       method: 'GET',
-      query: TIMELINE_FIELD_PARAMS,
+      query: { ...TIMELINE_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, envelope);
 

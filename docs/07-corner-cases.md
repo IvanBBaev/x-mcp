@@ -490,7 +490,10 @@ credits, not tiers, for post-2026-02-06 developers.)*
 
 - **REND-10 — `raw: true` is capped** `P1` `[DX-F11]`
   With `raw: true`, `max_results` is capped at 25. The raw payload is the exact API
-  JSON including `includes`/`meta`.
+  JSON including `includes`/`meta`. A raw read with **no** `max_results` still sends one
+  — 10, the smallest X default and the largest per-endpoint minimum — because the API's
+  own default is 100 on the social-graph, engagement and list endpoints and would breach
+  the cap (`rawMaxResults`).
   The cap is applied silently: there is **no log layer** in the shipped server (§6 of
   docs/04), so "a warning is logged" — the original wording — described a sink that does
   not exist, and a per-result note would have had to ride on `data`, breaking the

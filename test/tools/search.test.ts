@@ -193,16 +193,16 @@ test('x_search_recent: raw:true returns the exact envelope and caps the wire at 
   await http.close();
 });
 
-test('x_search_recent: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('x_search_recent: raw without max_results sends the raw default (REND-10); a data-less 200 counts as 0', async () => {
   const http = mockHttp();
-  // No max_results on the wire at all — the raw cap only applies when the caller asked
-  // for a size. A degraded envelope with no `data` must not crash the summary (DRIFT-1).
+  // With no size asked for, the raw read sends the raw default (10) (REND-10). A degraded
+  // envelope with no `data` must not crash the summary (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   http.pool
     .intercept({
       path: '/2/tweets/search/recent',
       method: 'GET',
-      query: { query: 'x', ...SEARCH_FIELD_PARAMS },
+      query: { query: 'x', ...SEARCH_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, envelope);
 

@@ -182,6 +182,15 @@ export interface RawListResponse<T> extends RawEnvelope {
 export const RAW_MAX_RESULTS = 25;
 
 /**
+ * `max_results` a paginated `raw: true` read sends when the caller gave none (REND-10).
+ * Letting the API default stand would breach the raw cap on endpoints whose default is 100
+ * (followers, likers, list members). 10 is the smallest X default and the largest
+ * per-endpoint minimum, so it is valid everywhere and never fetches — or bills — more than
+ * the API default would have.
+ */
+export const RAW_DEFAULT_MAX_RESULTS = 10;
+
+/**
  * Per-result note attached to any page carrying third-party text (REND-6). It is honest
  * about the guarantee: sanitizing removes hidden manipulation but does not make the text
  * trustworthy — the agent must treat it as data, not instructions.
@@ -335,6 +344,15 @@ export function capRawMaxResults(requested: number): number {
   const n = Number.isFinite(requested) ? Math.floor(requested) : RAW_MAX_RESULTS;
   if (n > RAW_MAX_RESULTS) return RAW_MAX_RESULTS;
   return n < 1 ? 1 : n;
+}
+
+/**
+ * The `max_results` a paginated `raw: true` read puts on the wire (REND-10): the
+ * endpoint-clamped request (PAGE-3) capped at {@link RAW_MAX_RESULTS}, or
+ * {@link RAW_DEFAULT_MAX_RESULTS} when the caller asked for no size.
+ */
+export function rawMaxResults(clamped: number | undefined): number {
+  return clamped === undefined ? RAW_DEFAULT_MAX_RESULTS : capRawMaxResults(clamped);
 }
 
 function asArray<T>(data: readonly T[] | undefined): readonly T[] {

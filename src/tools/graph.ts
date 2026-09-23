@@ -31,7 +31,7 @@ import {
 import { createHandleLookup } from '../api/endpoints/users.js';
 import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { billableUnits, capRawMaxResults, rawSummary, renderUserPage } from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderUserPage } from '../core/render.js';
 import type { RawListResponse, RawUser } from '../core/render.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
@@ -115,12 +115,7 @@ interface PreparedListRequest {
 function prepareListRequest(input: SharedListInput, bounds: PageBounds): PreparedListRequest {
   const clamp =
     input.max_results !== undefined ? clampMaxResults(input.max_results, bounds) : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const cursor = toCursor(input.page_token);
 
   const notes: string[] = [];

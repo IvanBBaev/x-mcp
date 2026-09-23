@@ -39,7 +39,7 @@ import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
   billableUnits,
-  capRawMaxResults,
+  rawMaxResults,
   rawSummary,
   renderList,
   renderListPage,
@@ -142,12 +142,7 @@ function preparePage(input: SharedPageInput): PreparedPage {
     input.max_results !== undefined
       ? clampMaxResults(input.max_results, PAGE_BOUNDS.engagementList)
       : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const paginationToken = toCursor(input.page_token);
 
   const notes: string[] = [];

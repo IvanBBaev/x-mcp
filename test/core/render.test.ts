@@ -16,7 +16,9 @@ import {
   renderDmPage,
   renderListPage,
   capRawMaxResults,
+  rawMaxResults,
   toIso,
+  RAW_DEFAULT_MAX_RESULTS,
   RAW_MAX_RESULTS,
 } from '../../src/core/render.js';
 import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
@@ -215,6 +217,15 @@ test('REND-10: raw:true max_results is capped at 25', () => {
   assert.equal(capRawMaxResults(10), 10);
   assert.equal(capRawMaxResults(0), 1);
   assert.equal(RAW_MAX_RESULTS, 25);
+});
+
+test('REND-10: a raw read with no requested size sends the raw default, never the API default', () => {
+  assert.equal(rawMaxResults(undefined), RAW_DEFAULT_MAX_RESULTS);
+  assert.equal(RAW_DEFAULT_MAX_RESULTS, 10);
+  // An endpoint-clamped request (PAGE-3) is still capped at the raw ceiling.
+  assert.equal(rawMaxResults(100), 25);
+  assert.equal(rawMaxResults(10), 10);
+  assert.equal(rawMaxResults(5), 5);
 });
 
 test('DRIFT-1: unknown fields on a raw post are tolerated and never reach the output', () => {

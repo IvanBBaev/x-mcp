@@ -15,13 +15,7 @@ import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import {
-  billableUnits,
-  capRawMaxResults,
-  rawSummary,
-  renderPostPage,
-  toIso,
-} from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
 import type { RawListResponse, RawTweet } from '../core/render.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { createHandleLookup, getMe } from '../api/endpoints/users.js';
@@ -129,12 +123,7 @@ function prepareRequest(input: SharedTimelineInput, nowMs: number): PreparedRequ
     input.max_results !== undefined
       ? clampMaxResults(input.max_results, PAGE_BOUNDS.timeline)
       : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const paginationToken = toCursor(input.page_token);
   const bounds = normalizeTimeBounds(input, nowMs);
 

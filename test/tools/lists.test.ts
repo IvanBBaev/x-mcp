@@ -476,19 +476,19 @@ test('REND-8: an unknown handle is not-found and the owned-lists read is never s
   await mock.close();
 });
 
-test('REND-10: owned raw:true without max_results sends no cap and returns the exact page', async () => {
+test('REND-10: owned raw:true without max_results sends the raw default and returns the exact page', async () => {
   const fixture = loadFixture<RawListResponse<RawList>>('lists/owned-page.json');
   const mock = mockHttp();
   mock.pool
     .intercept({ path: '/2/users/me', method: 'GET', query: USERS_PROJECTION })
     .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/me.json'));
-  // The intercept carries the projection ONLY — the raw cap applies just when the caller
-  // asked for a size, so no max_results param goes out.
+  // With no size asked for, the raw read sends the raw default (10) — X's own default for
+  // owned lists is 100, which would breach the 25-item raw cap.
   mock.pool
     .intercept({
       path: `/2/users/${USERS_ME_ID}/owned_lists`,
       method: 'GET',
-      query: LIST_PROJECTION,
+      query: { ...LIST_PROJECTION, max_results: '10' },
     })
     .reply(200, fixture);
 
@@ -552,9 +552,14 @@ test('PAGE-3: members clamps max_results above the 1-100 window down to 100 and 
 test('REND-10: members raw:true returns the envelope; a data-less 200 counts as 0', async () => {
   const mock = mockHttp();
   // DRIFT-1: a degraded envelope with no `data` array still summarizes rather than crash.
+  // REND-10: with no size asked for, the raw read sends the raw default (10), not X's 100.
   const envelope = { meta: { result_count: 0 } };
   mock.pool
-    .intercept({ path: `/2/lists/${LIST_ID}/members`, method: 'GET', query: MEMBERS_PROJECTION })
+    .intercept({
+      path: `/2/lists/${LIST_ID}/members`,
+      method: 'GET',
+      query: { ...MEMBERS_PROJECTION, max_results: '10' },
+    })
     .reply(200, envelope);
 
   const out = await xListMembers.handler({ list_id: LIST_ID, raw: true }, contextFor(mock));
