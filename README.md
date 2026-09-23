@@ -46,7 +46,7 @@ model picks the tool. Three representative asks:
 // "Like that launch post for me."
 {
   "tool": "x_like_set",
-  "arguments": { "post_id": "1899…", "action": "like" }
+  "arguments": { "post": "1899…", "action": "like" }
 }
 ```
 

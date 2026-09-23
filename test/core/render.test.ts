@@ -152,6 +152,23 @@ test('REND-5: missing author expansion degrades to the numeric id, never crashes
   assert.equal(post.url, 'https://x.com/i/status/1');
 });
 
+test('REND-5: a reply whose parent is absent from includes keeps the id and omits the author', () => {
+  // The parent is neither in `includes.tweets` nor resolvable to a user: the reference must
+  // still carry the id (the caller can fetch it), with no author rather than a crash or a
+  // fabricated handle. The post's own author id is also absent here — the compactor must
+  // degrade to an empty handle, not throw.
+  const post = renderPost(
+    {
+      id: '31',
+      text: 'a reply',
+      referenced_tweets: [{ type: 'replied_to', id: '77' }],
+    },
+    { users: [{ id: 'u1', username: 'bob' }] },
+  );
+  assert.deepEqual(post.reply_to, { id: '77' });
+  assert.equal(post.author, '');
+});
+
 test('REND-5: an unknown media type is dropped without dropping the whole post', () => {
   const post = renderPost(
     { id: '1', author_id: 'u1', attachments: { media_keys: ['k1', 'k2'] } },
