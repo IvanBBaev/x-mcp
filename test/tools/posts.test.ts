@@ -130,6 +130,37 @@ test('partial failure yields one item and one classified missing entry', async (
   await mock.close();
 });
 
+test('REND-5: missing author, reply parent, and media expansions degrade per-field, never crash', async () => {
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111,222') })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('posts/degraded-includes.json'));
+
+  const out = await xPostGet.handler({ ids: ['111', '222'] }, contextFor(mock));
+  const batch = out.data as BatchResult<CompactPost>;
+
+  // Both posts still render; a partial `includes` never drops an item (REND-5).
+  assert.equal(batch.items.length, 2);
+  assert.equal(batch.missing, undefined);
+  const [first, second] = batch.items;
+  assert.ok(first && second);
+
+  // Post 111: the attached media key has no matching includes.media entry, so it is
+  // dropped from the media array without dropping the post itself.
+  assert.equal(first.id, '111');
+  assert.equal(first.media, undefined);
+
+  // Post 222: author_id has no matching includes.users entry, so the author degrades to
+  // the raw numeric id; the reply parent has no matching includes.tweets entry, so it
+  // keeps its id and omits the unresolvable author.
+  assert.equal(second.id, '222');
+  assert.equal(second.author, '99');
+  assert.deepEqual(second.reply_to, { id: '444' });
+
+  mock.assertDone();
+  await mock.close();
+});
+
 test('status URLs are accepted and normalized to numeric ids', async () => {
   const mock = mockHttp();
   mock.pool
