@@ -10,6 +10,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_search_recent`, `x_search_archive`, `x_post_counts_recent` and
+  `x_post_counts_archive` now handle `start_time`/`end_time` the way the timeline tools
+  do. An `end_time` inside the last 10 seconds, which X rejects with a 400, is moved to
+  10 seconds in the past and the result's `note` says so. A value that is not a
+  recognizable timestamp is refused with a `validation` error before anything is sent,
+  and other forms (such as a `+02:00` offset) are sent as ISO 8601 UTC. Count buckets
+  always report their `start`/`end` in ISO 8601 UTC.
+
 - Paginated reads (search, timelines, followers/following, user search, owned lists,
   list members and timelines, bookmarks, DMs) now report the per-item `errors[]` X
   returns alongside an HTTP 200 as a `missing[]` list of `{id, reason}`, the same shape

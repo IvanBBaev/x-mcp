@@ -315,6 +315,7 @@ const COUNTS_DATA: SchemaNode = {
     },
     total: NUM,
     next_token: STR,
+    note: STR,
   },
   required: ['counts', 'total'],
 };

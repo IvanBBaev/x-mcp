@@ -155,7 +155,8 @@ test('PAGE-3: under-bound max_results clamps UP to 10 on the wire (both directio
 test('PAGE-1: page_token round-trips verbatim as next_token, alongside time window and sort order', async () => {
   const http = mockHttp();
   // The cursor from a previous page ('arch-next-1') must reach the wire untouched — the
-  // intercept pins it verbatim together with the optional start/end/sort params.
+  // intercept pins it verbatim together with the optional start/end/sort params (the time
+  // window re-emitted as canonical ISO-8601 UTC, REND-9).
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
@@ -164,8 +165,8 @@ test('PAGE-1: page_token round-trips verbatim as next_token, alongside time wind
         query: 'x api',
         ...ARCHIVE_FIELD_PARAMS,
         next_token: 'arch-next-1',
-        start_time: '2014-01-01T00:00:00Z',
-        end_time: '2015-12-31T23:59:59Z',
+        start_time: '2014-01-01T00:00:00.000Z',
+        end_time: '2015-12-31T23:59:59.000Z',
         sort_order: 'relevancy',
       },
     })
@@ -428,7 +429,7 @@ test('x_post_counts_archive: a data-less compact envelope renders an empty histo
   await http.close();
 });
 
-test('x_post_counts_archive: granularity, time window, and page_token (PAGE-1) reach the wire verbatim', async () => {
+test('x_post_counts_archive: granularity, ISO-normalized time window (REND-9), and page_token (PAGE-1) reach the wire', async () => {
   const http = mockHttp();
   http.pool
     .intercept({
@@ -437,8 +438,8 @@ test('x_post_counts_archive: granularity, time window, and page_token (PAGE-1) r
       query: {
         query: 'x api',
         granularity: 'day',
-        start_time: '2014-06-20T00:00:00Z',
-        end_time: '2014-06-23T00:00:00Z',
+        start_time: '2014-06-20T00:00:00.000Z',
+        end_time: '2014-06-23T00:00:00.000Z',
         next_token: 'counts-next-1',
       },
     })
