@@ -8,12 +8,18 @@
 //   NET-3   — GET retries exactly once on 5xx/network; writes never auto-retry
 //   MCP-7   — host cancellation before AND during the response; a cancelled write is POST-4-ambiguous
 //   RATE-1/2/4 — the onResponse seam (T-320 F6): every response, once per attempt, before any decision
+//   RATE-5  — a GET 429 whose reset is ≤ 5 s away waits it out and retries once; writes never
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { XError } from '../../src/core/errors.js';
-import { createHttpClient, shouldAttachAuth, DEFAULT_API_BASE_URL } from '../../src/api/http.js';
+import {
+  createHttpClient,
+  shouldAttachAuth,
+  DEFAULT_API_BASE_URL,
+  RATE_LIMIT_RETRY_MAX_MS,
+} from '../../src/api/http.js';
 import type { HttpClientConfig } from '../../src/api/http.js';
 import type { Dispatcher } from '../../src/core/ports.js';
 import { mockHttp, fakeClock, fakeSleep, fakeRandom } from '../helpers/index.js';
@@ -767,6 +773,225 @@ test('RATE-4: a 200 without rate-limit headers still reaches the observer — th
 
   // Whether a headerless response trains the table is the tracker's call, not this layer's.
   assert.deepEqual(seen.calls, [{ status: 200, remaining: null }]);
+  http.assertDone();
+  await http.close();
+});
+
+// --- RATE-5: a 429'd GET waits out a reset ≤ 5 s away and retries once ---------------
+//
+// The delay comes from the `rateLimitRetryDelay` seam (the tracker, in production), read
+// only after the observer recorded the 429. Retry budget is shared with NET-3: one retry per
+// request, whatever caused it.
+
+const RATE_LIMITED = { title: 'Too Many Requests' };
+
+test('RATE-5: a GET 429 with the reset 3 s away waits reset + jitter, retries once, succeeds', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => 3_000 });
+  const body = await client.send<{ data: { id: string } }>({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(body.data.id, '1');
+  assert.deepEqual(sleep.calls, [3_500]); // 3 000 ms to the reset + 500 ms jitter past it
+  http.assertDone(); // exactly two requests
+  await http.close();
+});
+
+test('RATE-5: a reset exactly 5 s away is still waited out (the bound is inclusive)', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => RATE_LIMIT_RETRY_MAX_MS,
+  });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.equal(RATE_LIMIT_RETRY_MAX_MS, 5_000);
+  assert.deepEqual(sleep.calls, [5_500]);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: a reset already passed retries after the jitter alone — never a negative sleep', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => -2_000 });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.deepEqual(sleep.calls, [500]);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: a reset more than 5 s away surfaces the mapped error at once — no wait, no retry', async () => {
+  const http = mockHttp();
+  // Only one interceptor: a retry would need a second and throw (net connect disabled).
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => 5_001,
+    mapError: () => new XError('rate-limit', 'Rate limit exhausted.'),
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'rate-limit');
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: an untracked bucket (null delay) never retries a 429', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => null });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: without the delay seam a 429 is never retried', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http);
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/NET-3: a write 429 never consults the delay and never retries', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(429, RATE_LIMITED);
+
+  let asked = 0;
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => {
+      asked += 1;
+      return 0;
+    },
+  });
+  const err = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+
+  assert.equal(err.data.http_status, 429);
+  assert.equal(asked, 0);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5: two 429s in a row retry exactly once, then surface the second', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  let asked = 0;
+  const { client, sleep } = makeClient(http, {
+    rateLimitRetryDelay: () => {
+      asked += 1;
+      return 1_000;
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.equal(asked, 1); // the second 429 is past the retry budget — not even consulted
+  assert.deepEqual(sleep.calls, [1_500]);
+  http.assertDone(); // exactly two requests, no third
+  await http.close();
+});
+
+test('RATE-5/NET-3: the retry budget is shared — a 5xx retry leaves none for a following 429', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(503, { e: 1 });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const { client, sleep } = makeClient(http, { rateLimitRetryDelay: () => 1_000 });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.data.http_status, 429);
+  assert.deepEqual(sleep.calls, [500]); // the 5xx backoff only
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/RATE-1: the observer records the 429 before the delay is read', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/tweets/1', method: 'GET' })
+    .reply(429, RATE_LIMITED, { headers: { 'retry-after': '2' } });
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(200, { data: { id: '1' } });
+
+  const order: string[] = [];
+  const { client } = makeClient(http, {
+    onResponse: (status) => order.push(`observe ${status}`),
+    rateLimitRetryDelay: () => {
+      order.push('delay');
+      return 2_000;
+    },
+  });
+  await client.send({ method: 'GET', path: '/2/tweets/1' });
+
+  assert.deepEqual(order, ['observe 429', 'delay', 'observe 200']);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/MCP-7: a cancellation that lands with the 429 stops the retry before any wait', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const controller = new AbortController();
+  const { client, sleep } = makeClient(http, {
+    signal: controller.signal,
+    rateLimitRetryDelay: () => {
+      controller.abort(); // the host gives up while the 429 is being handled
+      return 1_000;
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(sleep.calls, []);
+  http.assertDone();
+  await http.close();
+});
+
+test('RATE-5/MCP-7: a cancellation during the wait is never re-sent', async () => {
+  const http = mockHttp();
+  // Only one interceptor: a re-send after the abort would need a second and throw.
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(429, RATE_LIMITED);
+
+  const controller = new AbortController();
+  const waits: number[] = [];
+  const { client } = makeClient(http, {
+    signal: controller.signal,
+    rateLimitRetryDelay: () => 1_000,
+    sleep: (ms) => {
+      waits.push(ms);
+      controller.abort();
+      return Promise.resolve();
+    },
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+
+  assert.equal(err.kind, 'network');
+  assert.match(err.message, /cancelled/i);
+  assert.deepEqual(waits, [1_500]);
   http.assertDone();
   await http.close();
 });

@@ -166,7 +166,8 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 > [docs/decisions/0001-oauth1-go-no-go.md](decisions/0001-oauth1-go-no-go.md).
 > The signer is never built; OA1-1…4 below are retained for the record and apply
 > only if the decision's revisit triggers fire. The `oauth1` auth mode and the
-> credential quadruple still accepted by `core/config.ts` are removed with T-309.
+> credential quadruple were removed from `core/config.ts` with T-309; `X_MCP_AUTH_MODE=oauth1`
+> is now refused at startup like any other unknown mode.
 
 - **OA1-1 — RFC 5849 reference vector** `P3` `[QA-11]`
   The HMAC-SHA1 signer reproduces the RFC 5849 §3.4.1.1 reference signature and the

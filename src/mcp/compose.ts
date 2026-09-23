@@ -11,7 +11,7 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 
 import { mapHttpError } from '../api/errors.js';
 import { createHttpClient } from '../api/http.js';
-import type { AuthorizationProvider, ErrorMapper, ResponseObserver } from '../api/http.js';
+import type { AuthorizationProvider, ErrorMapper } from '../api/http.js';
 import { createConfiguredTokenStore } from '../api/oauth2/store.js';
 import { createFetchRefreshHttp, createOAuth2Auth } from '../api/oauth2/index.js';
 import type { OAuth2Auth } from '../api/oauth2/index.js';
@@ -233,14 +233,21 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
 
   // Each bucket's client signs via the provider; in oauth2 mode it is additionally
   // wrapped with the 401 → refresh → retry-once orchestration (§4A step 6, AUTH-8).
-  function clientFor(onResponse?: ResponseObserver): EndpointInvoker {
+  // A bucket key wires both rate-limit seams to the tracker: the observer records every
+  // response under it, and the 429 delay query reads the same bucket back (RATE-5).
+  function clientFor(key?: string): EndpointInvoker {
     const client = createHttpClient({
       sleep,
       random,
       baseUrl: config.baseUrl,
       timeoutMs: config.timeoutMs,
       mapError,
-      ...(onResponse !== undefined ? { onResponse } : {}),
+      ...(key !== undefined
+        ? {
+            onResponse: (status: number, headers: Headers) => tracker.record(key, headers, status),
+            rateLimitRetryDelay: () => tracker.retryDelayMs(key),
+          }
+        : {}),
       ...(dispatcher !== undefined ? { dispatcher } : {}),
       ...(authorization !== undefined ? { authorization } : {}),
     });
@@ -251,17 +258,16 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
   // response's rate-limit headers into the tracker under the bucket key — a 200 that says
   // `remaining: 0` trains the preflight table exactly as the 429 after it would (RATE-1),
   // so the refusal is a look-ahead, not a repeat suppressor (T-320 F6, closed). The error
-  // mapper stays pure: mapping and tracking are separate seams of api/http.
+  // mapper stays pure: mapping and tracking are separate seams of api/http. After a 429 the
+  // client asks the tracker how far the bucket's reset is — the 429 itself already recorded
+  // — and a GET within 5 s of it waits and retries once (RATE-5).
   const invokers = new Map<string, EndpointInvoker>();
   for (const bucket of new Set(Object.values(TOOL_BUCKETS))) {
     if (bucket === null) continue;
-    const key = rateLimitKey(bucket, authContext);
-    invokers.set(
-      bucket,
-      clientFor((status, headers) => tracker.record(key, headers, status)),
-    );
+    invokers.set(bucket, clientFor(rateLimitKey(bucket, authContext)));
   }
-  // Local-only tools still receive a working (non-recording) invoker, defensively.
+  // Local-only tools still receive a working (non-recording, never-429-retrying) invoker,
+  // defensively.
   const fallback = clientFor();
   const invokerFor = (toolName: string): EndpointInvoker => {
     const bucket = TOOL_BUCKETS[toolName];

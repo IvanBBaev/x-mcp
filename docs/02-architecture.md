@@ -365,7 +365,8 @@ tool call
   → MCP result
 ```
 
-Retry policy: GETs retry once on 5xx/network with jittered 250–750 ms backoff; writes
+Retry policy: GETs retry once on 5xx/network with jittered 250–750 ms backoff, or on a
+429 whose reset is ≤ 5 s away (RATE-5, §7) — one retry per request whatever the cause; writes
 never auto-retry (a timed-out `POST /2/tweets` may have landed — the error says so, and
 the safe probe is re-issuing the **identical** text: a duplicate-`403` (`forbidden`)
 proves the original landed, a success proves it did not; POST-4). This recovery never
@@ -381,6 +382,19 @@ depends on a paid timeline read.
 - Preemptive refusal when `remaining === 0` and reset is in the future (skew-tolerant,
   `reset − 5 s`); on 429, idempotent GETs may retry once if reset ≤ 5 s away, writes
   never (RATE-2/3/5).
+- **The 429 retry reads the table back** (RATE-5). A fourth `api/http` seam,
+  `rateLimitRetryDelay`, is consulted only after a GET came back 429 — after the observer
+  below has already recorded it — and returns the milliseconds to the bucket's reset, or
+  `null`. `mcp/compose` wires it to `tracker.retryDelayMs` under the same bucket key as
+  the observer, so the delay already reflects the 429's own `retry-after` and
+  `x-rate-limit-reset`, reconciled later-wins (RATE-7). Within `RATE_LIMIT_RETRY_MAX_MS`
+  (5 s, the same bound as the preflight skew) the client sleeps the delay plus the
+  250–750 ms jitter — X reports resets in whole seconds, so landing exactly on the
+  boundary would risk a second 429 — and retries once; beyond it, or with nothing
+  tracked, the typed `rate-limit` error returns at once. The retry shares the NET-3
+  budget: a GET that already retried a 5xx does not retry a following 429. Only the
+  standard 15-minute window is consulted; the 24-hour app window rides on write
+  endpoints, which never retry.
 - **Every response trains the table** (T-320 F6, closed 2026-09-19). `api/http` exposes
   a third seam beside `mapError` and `authorization`: an `onResponse` observer called
   synchronously with each response's status and headers, once per attempt, before the

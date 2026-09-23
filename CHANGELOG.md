@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A read that hits a rate limit whose window renews within 5 seconds now waits for the
+  reset and retries once instead of failing: the 429 is absorbed and the call returns
+  normally, a few seconds later. A reset further away still returns the `rate-limit`
+  error immediately, and writes are never retried on any status.
+
 - Rate-limit tracking now learns from every response, not only from failures: a successful
   call whose headers report an exhausted window trains the table, so the next call in that
   bucket is refused locally before the platform answers 429, and `x_rate_limit_status`
