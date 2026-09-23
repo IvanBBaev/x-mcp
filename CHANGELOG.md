@@ -10,6 +10,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- In a batch lookup's `missing[]`, a suspended account is now reported as `suspended`
+  rather than `not-found`, and a "Not Authorized" item as `protected` rather than
+  `unavailable`. X sends a suspended user with a generic not-found type, and only the
+  error detail names the suspension. The detail is read to classify the item but is still
+  never echoed.
+
 - `x_list_get` on a list X cannot return (missing, or private to someone else) now fails
   with a `not-found` error naming the reason. X answers such a lookup with a 200 that
   carries only `errors[]`, and the tool used to render that as an empty list.

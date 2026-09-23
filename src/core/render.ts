@@ -640,8 +640,9 @@ function renderListWith(raw: RawList, inc: IncludesIndex): CompactList {
 
 /**
  * Map a 200-response `errors[]` array to `missing[]`. The `reason` is drawn from a fixed
- * vocabulary derived from the error's structural `title`/`type` only — no `detail` or
- * other third-party text is ever echoed (REND-7).
+ * vocabulary — no `detail` or other third-party text is ever echoed (REND-7). `detail` is
+ * still read for classification: X reports a suspended user as `title: "Forbidden"` with a
+ * `resource-not-found` type, and only the detail says "suspended".
  */
 export function renderMissing(errors: readonly RawError[] | undefined): readonly Missing[] {
   const out: Missing[] = [];
@@ -653,13 +654,19 @@ export function renderMissing(errors: readonly RawError[] | undefined): readonly
 }
 
 function reasonFor(err: RawError): MissingReason {
-  const hay = `${err.title ?? ''} ${err.type ?? ''}`.toLowerCase();
-  if (hay.includes('not-found') || hay.includes('not found')) return 'not-found';
+  const hay = `${err.title ?? ''} ${err.type ?? ''} ${err.detail ?? ''}`.toLowerCase();
+  // The specific signals win over the generic not-found type they often arrive with.
   if (hay.includes('suspend')) return 'suspended';
   if (hay.includes('delet')) return 'deleted';
-  if (hay.includes('protect') || hay.includes('not-authorized') || hay.includes('forbidden')) {
+  if (
+    hay.includes('protect') ||
+    hay.includes('not-authorized') ||
+    hay.includes('not authorized') ||
+    hay.includes('forbidden')
+  ) {
     return 'protected';
   }
+  if (hay.includes('not-found') || hay.includes('not found')) return 'not-found';
   return 'unavailable';
 }
 

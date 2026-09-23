@@ -25,8 +25,8 @@
 //     reads. Only OUR remediation prose is exempt — this codebase authors it, so there is
 //     nothing to strip and clipping it would destroy the DX-F13 instructions.
 //   • REND-2 — a batch/single lookup that partially fails (HTTP 200 with an `errors[]` array)
-//     is NOT an error: `collectMissing` returns the `missing[]` list so the tool can render
-//     found items + why the rest are absent.
+//     is NOT an error: `renderMissing` (core/render) turns it into the `missing[]` list so the
+//     tool can render found items + why the rest are absent.
 
 import {
   apiError,
@@ -40,7 +40,6 @@ import {
   type XErrorData,
 } from '../core/errors.js';
 import { pageTokenError } from '../core/paginate.js';
-import type { Missing, MissingReason } from '../core/render-shapes.js';
 import { sanitizePlatformText } from '../core/sanitize.js';
 
 // --- Public input types ----------------------------------------------------------
@@ -398,51 +397,4 @@ function mapRateLimit(
       'once when the reset is imminent; writes must not auto-retry (RATE-5).',
     { data },
   );
-}
-
-// --- Partial failures (REND-2) ---------------------------------------------------
-
-function classifyMissing(entry: Record<string, unknown>): MissingReason {
-  const hay = `${asString(entry['title']) ?? ''} ${asString(entry['detail']) ?? ''} ${
-    asString(entry['type']) ?? ''
-  }`.toLowerCase();
-  if (hay.includes('suspend')) return 'suspended';
-  if (hay.includes('protect')) return 'protected';
-  if (hay.includes('deleted')) return 'deleted';
-  if (
-    hay.includes('not authorized') ||
-    hay.includes('not-authorized') ||
-    hay.includes('unauthorized')
-  ) {
-    return 'unauthorized';
-  }
-  return 'not-found';
-}
-
-/**
- * Extract the partial-failure `missing[]` list from an HTTP-200 batch/single lookup body that
- * carries an `errors[]` array (REND-2). Total and never-throwing: a body with no `errors[]`
- * (a full success, or an explicit zero-results page — REND-1) yields `[]`. The tool renders
- * `data` items plus this list; it never raises. Only safe scalars are surfaced — no raw
- * platform `detail` prose (REND-7).
- */
-export function collectMissing(body: unknown): readonly Missing[] {
-  const obj = asRecord(body);
-  if (obj === undefined) return [];
-  const errors = obj['errors'];
-  if (!Array.isArray(errors)) return [];
-
-  const out: Missing[] = [];
-  for (const raw of errors) {
-    const entry = asRecord(raw);
-    if (entry === undefined) continue;
-    const id = asString(entry['resource_id']) ?? asString(entry['value']) ?? '';
-    const resourceType = asString(entry['resource_type']);
-    out.push({
-      id,
-      reason: classifyMissing(entry),
-      ...(resourceType !== undefined ? { resource_type: resourceType } : {}),
-    });
-  }
-  return out;
 }

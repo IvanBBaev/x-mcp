@@ -9,8 +9,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { XError } from '../../src/core/errors.js';
-import { mapHttpError, collectMissing } from '../../src/api/errors.js';
-import type { Missing } from '../../src/api/errors.js';
+import { mapHttpError } from '../../src/api/errors.js';
+import { renderMissing, renderPosts } from '../../src/core/render.js';
+import type { RawListResponse, RawTweet } from '../../src/core/render.js';
 import { PAGE_TOKEN_INVALID_MESSAGE } from '../../src/core/paginate.js';
 import { FIELD_CAPS, TRUNCATION_MARKER } from '../../src/core/sanitize.js';
 import { loadFixture } from '../helpers/index.js';
@@ -409,54 +410,47 @@ test('a zero-width character cannot steer a response into the wrong error class'
 
 test('200-with-errors[] yields missing[] with classified reasons, never throws — REND-2', () => {
   const fx = load('200-partial-missing.json');
-  // The partial path is a pure extraction — it must not go through mapHttpError / throw.
-  const missing: readonly Missing[] = collectMissing(fx.body);
-  assert.equal(missing.length, 3);
-
-  const byId = new Map(missing.map((m) => [m.id, m]));
-  assert.equal(byId.get('20')?.reason, 'not-found');
-  assert.equal(byId.get('20')?.resource_type, 'tweet');
-  assert.equal(byId.get('111111')?.reason, 'suspended');
-  assert.equal(byId.get('999999')?.reason, 'unauthorized');
+  // The partial path is a pure render — it must not go through mapHttpError / throw.
+  const out = renderPosts(fx.body as RawListResponse<RawTweet>);
+  assert.equal(out.items.length, 1);
+  assert.deepEqual(out.missing, [
+    { id: '20', reason: 'not-found' },
+    // X sends a suspended user as `Forbidden` + resource-not-found; only `detail` says why.
+    { id: '111111', reason: 'suspended' },
+    { id: '999999', reason: 'protected' },
+  ]);
 });
 
-test('collectMissing surfaces only safe scalars — no raw platform detail leaks — REND-2, REND-7', () => {
+test('missing[] surfaces only safe scalars — no raw platform detail leaks — REND-2, REND-7', () => {
   const fx = load('200-partial-missing.json');
-  const missing = collectMissing(fx.body);
-  const serialized = JSON.stringify(missing);
+  const serialized = JSON.stringify(renderPosts(fx.body as RawListResponse<RawTweet>).missing);
   assert.equal(serialized.includes('SENTINEL_SECRET'), false);
   assert.equal(serialized.includes('Could not find'), false); // no free-form detail prose
 });
 
-test('collectMissing classifies protected and deleted targets and tolerates sparse entries — REND-2', () => {
-  // The fixture covers not-found / suspended / unauthorized with fully populated entries; the
-  // remaining reasons and the fallbacks for a thin entry are pinned here. `deepEqual` (strict)
-  // also proves an absent `resource_type` is left OUT, not written as `undefined`.
-  const missing = collectMissing({
-    data: [],
-    errors: [
+test('missing[] classifies detail-only protected and deleted signals and tolerates sparse entries — REND-2', () => {
+  assert.deepEqual(
+    renderMissing([
       // No `resource_id` → the requested `value` is the id.
       { value: '1', title: 'Forbidden', detail: 'User [1] is protected.' },
       { resource_id: '2', resource_type: 'tweet', detail: 'The Tweet [2] has been deleted.' },
-      // Neither id field, no classifiable text at all → empty id, not-found.
       { title: 'Not Found Error' },
+      // No id field and no classifiable text at all → empty id, unavailable.
       {},
-      'not-an-object',
+    ]),
+    [
+      { id: '1', reason: 'protected' },
+      { id: '2', reason: 'deleted' },
+      { id: '', reason: 'not-found' },
+      { id: '', reason: 'unavailable' },
     ],
-  });
-  assert.deepEqual(missing, [
-    { id: '1', reason: 'protected' },
-    { id: '2', reason: 'deleted', resource_type: 'tweet' },
-    { id: '', reason: 'not-found' },
-    { id: '', reason: 'not-found' },
-  ]);
+  );
 });
 
-test('collectMissing is total: a full-success or zero-results body yields []', () => {
-  assert.deepEqual(collectMissing({ data: [{ id: '1' }] }), []);
-  assert.deepEqual(collectMissing({ meta: { result_count: 0 } }), []); // REND-1 zero-results
-  assert.deepEqual(collectMissing('not-an-object'), []);
-  assert.deepEqual(collectMissing(null), []);
+test('missing[] is total: no errors[] yields no missing key — REND-2', () => {
+  assert.deepEqual(renderMissing(undefined), []);
+  assert.equal('missing' in renderPosts({ data: [{ id: '1' }] }), false);
+  assert.equal('missing' in renderPosts({ meta: { result_count: 0 } }), false); // REND-1
 });
 
 test('an unparseable x-rate-limit-reset is treated as absent — backoff prose, no reset_at — RATE-4', () => {
