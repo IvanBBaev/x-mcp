@@ -1,0 +1,11 @@
+{
+  "_provenance": "PROVISIONAL. X API v2 402 standing in for a pay-per-use credit-exhaustion rejection. The real body is not publicly documented — COST-6 names capturing it a Phase-1 live-test task, after which this fixture is locked. RFC-7807 problem shape with a deliberately neutral title/detail (no credit / entitlement wording) so the test proves the STATUS alone selects the billing class, not the body sniff the 403 variant relies on. Captured 2026-09-19. Exercises: billing class from a bare 402 (COST-6), distinct from the local budget class.",
+  "status": 402,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Client Error",
+    "type": "about:blank",
+    "status": 402,
+    "detail": "The request could not be completed for this project."
+  }
+}

@@ -19,6 +19,7 @@ import {
   createFetchTokenExchangeHttp,
   createNodeLoopbackListen,
   createStdinReadLine,
+  createSystemBrowserOpener,
 } from './cli/authorize.js';
 import { createDoctorCli } from './cli/doctor.js';
 import type { DoctorStat } from './cli/doctor.js';
@@ -230,6 +231,7 @@ async function runAuthorize(rest: readonly string[]): Promise<number> {
     readLine: createStdinReadLine(),
     stdout: writeLine(process.stdout),
     stderr: writeLine(process.stderr),
+    openBrowser: createSystemBrowserOpener(),
   });
   return run(rest);
 }

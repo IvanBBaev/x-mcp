@@ -51,6 +51,15 @@ import { authError } from '../../core/errors.js';
 export const TOKEN_FILE_SCHEMA_VERSION = 1;
 
 /**
+ * The on-disk form of `TokenPair.expires_in`: the lifetime when it is known, `null` when it
+ * is not (AUTH-11). The refresh machine stores an unknown lifetime as NaN, which JSON would
+ * silently turn into `null` anyway — writing it explicitly keeps the round trip deliberate.
+ */
+export function persistedLifetime(expiresIn: number): number | null {
+  return Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : null;
+}
+
+/**
  * A foreign lock older than this is "expired". The refresh HTTP timeout (25 s, in the
  * machine) is strictly below it, so a live refresh always finishes — or dies — before
  * its own lock can be judged expired (AUTH-5).
@@ -290,10 +299,16 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (typeof obtainedAt !== 'number' || !Number.isFinite(obtainedAt)) {
       corruptError('is missing a numeric "obtained_at" field');
     }
-    const expiresIn = parsed['expires_in'];
-    if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
+    // `null` is the persisted form of an UNKNOWN lifetime (AUTH-11) — loaded back as NaN,
+    // which the refresh machine reads as "no eager refresh". Absent or non-numeric is corrupt.
+    const rawExpiresIn = parsed['expires_in'];
+    if (
+      rawExpiresIn !== null &&
+      (typeof rawExpiresIn !== 'number' || !Number.isFinite(rawExpiresIn))
+    ) {
       corruptError('is missing a numeric "expires_in" field');
     }
+    const expiresIn = rawExpiresIn === null ? Number.NaN : rawExpiresIn;
     const refreshToken = parsed['refresh_token'];
     if (refreshToken !== undefined && (typeof refreshToken !== 'string' || refreshToken === '')) {
       corruptError('has a malformed "refresh_token" field');
@@ -443,7 +458,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
       revision: (pair.version ?? 0) + 1,
       access_token: pair.access_token,
       obtained_at: pair.obtained_at,
-      expires_in: pair.expires_in,
+      expires_in: persistedLifetime(pair.expires_in),
     };
     if (pair.refresh_token !== undefined) body['refresh_token'] = pair.refresh_token;
     const payload = `${JSON.stringify(body, null, 2)}\n`;

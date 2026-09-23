@@ -16,7 +16,9 @@ import {
   renderDmPage,
   renderListPage,
   capRawMaxResults,
+  rawMaxResults,
   toIso,
+  RAW_DEFAULT_MAX_RESULTS,
   RAW_MAX_RESULTS,
 } from '../../src/core/render.js';
 import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
@@ -152,6 +154,23 @@ test('REND-5: missing author expansion degrades to the numeric id, never crashes
   assert.equal(post.url, 'https://x.com/i/status/1');
 });
 
+test('REND-5: a reply whose parent is absent from includes keeps the id and omits the author', () => {
+  // The parent is neither in `includes.tweets` nor resolvable to a user: the reference must
+  // still carry the id (the caller can fetch it), with no author rather than a crash or a
+  // fabricated handle. The post's own author id is also absent here — the compactor must
+  // degrade to an empty handle, not throw.
+  const post = renderPost(
+    {
+      id: '31',
+      text: 'a reply',
+      referenced_tweets: [{ type: 'replied_to', id: '77' }],
+    },
+    { users: [{ id: 'u1', username: 'bob' }] },
+  );
+  assert.deepEqual(post.reply_to, { id: '77' });
+  assert.equal(post.author, '');
+});
+
 test('REND-5: an unknown media type is dropped without dropping the whole post', () => {
   const post = renderPost(
     { id: '1', author_id: 'u1', attachments: { media_keys: ['k1', 'k2'] } },
@@ -198,6 +217,15 @@ test('REND-10: raw:true max_results is capped at 25', () => {
   assert.equal(capRawMaxResults(10), 10);
   assert.equal(capRawMaxResults(0), 1);
   assert.equal(RAW_MAX_RESULTS, 25);
+});
+
+test('REND-10: a raw read with no requested size sends the raw default, never the API default', () => {
+  assert.equal(rawMaxResults(undefined), RAW_DEFAULT_MAX_RESULTS);
+  assert.equal(RAW_DEFAULT_MAX_RESULTS, 10);
+  // An endpoint-clamped request (PAGE-3) is still capped at the raw ceiling.
+  assert.equal(rawMaxResults(100), 25);
+  assert.equal(rawMaxResults(10), 10);
+  assert.equal(rawMaxResults(5), 5);
 });
 
 test('DRIFT-1: unknown fields on a raw post are tolerated and never reach the output', () => {
