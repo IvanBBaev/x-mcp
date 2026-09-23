@@ -21,6 +21,8 @@ import {
   LOCK_STALE_MS,
   LOCK_WAIT_MS,
   TOKEN_FILE_SCHEMA_VERSION,
+  tokenFilePermissionWarning,
+  tokenFileStartupWarnings,
   WIN32_RENAME_ATTEMPTS,
   WIN32_RENAME_DELAY_MS,
 } from '../../../src/api/oauth2/filestore.js';
@@ -250,6 +252,29 @@ test('AUTH-9: invalid JSON and missing required fields fail closed, file untouch
     mode: 0o600,
   });
   await assertAuthError(store.load(), h.path, 'expires_in');
+
+  await fsp.writeFile(
+    h.path,
+    JSON.stringify({ version: 1, access_token: 'a', obtained_at: 5, expires_in: '7200' }),
+    { mode: 0o600 },
+  );
+  await assertAuthError(store.load(), h.path, 'expires_in');
+});
+
+test('AUTH-11: an unknown lifetime persists as null and loads back as unknown, not corrupt', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+
+  // The refresh machine marks a response without expires_in as NaN (unknown lifetime).
+  await store.persist({ ...PAIR, expires_in: Number.NaN });
+  const onDisk = JSON.parse(await fsp.readFile(h.path, 'utf8')) as Record<string, unknown>;
+  assert.equal(onDisk['expires_in'], null);
+
+  const loaded = await store.load();
+  assert.ok(loaded !== null);
+  assert.ok(Number.isNaN(loaded.expires_in), 'unknown stays unknown — no default is assumed');
+  assert.equal(loaded.access_token, PAIR.access_token);
+  assert.deepEqual(h.warnings, []);
 });
 
 test('T1: token file wider than 0600 warns once across repeated loads', async (t) => {
@@ -278,10 +303,88 @@ test('SEC-T13: group/other-writable token directory is refused by load and persi
 });
 
 // ---------------------------------------------------------------------------
+// AUTH-12: the shared permission rule and the startup check
+// ---------------------------------------------------------------------------
+
+/** A fake `lstat` result for the startup-check seam. */
+function fakeStat(mode: number, isFile = true): { mode: number; isFile(): boolean } {
+  return { mode, isFile: () => isFile };
+}
+
+test('AUTH-12: tokenFilePermissionWarning is null at 0600/0400 and names path, mode, and fix above', () => {
+  assert.equal(tokenFilePermissionWarning('/t/tokens.json', 0o100600), null);
+  assert.equal(tokenFilePermissionWarning('/t/tokens.json', 0o100400), null);
+  const warning = tokenFilePermissionWarning('/t/tokens.json', 0o100640);
+  assert.ok(warning !== null);
+  assert.ok(warning.includes('/t/tokens.json'));
+  assert.ok(warning.includes('mode 640'));
+  assert.ok(warning.includes('chmod 600 /t/tokens.json'));
+  assert.ok(!warning.includes('\n'), 'the warning must be a single line');
+});
+
+test('AUTH-12: startup check warns once for a group/other-accessible token file on POSIX', () => {
+  const warnings = tokenFileStartupWarnings('/t/tokens.json', {
+    platform: 'linux',
+    lstat: () => fakeStat(0o100604),
+  });
+  assert.deepEqual(warnings, [tokenFilePermissionWarning('/t/tokens.json', 0o100604)]);
+});
+
+test('AUTH-12: startup check is silent for 0600, missing, non-regular, and win32', () => {
+  const missing = (): never => {
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  };
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'linux',
+      lstat: () => fakeStat(0o100600),
+    }),
+    [],
+  );
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', { platform: 'linux', lstat: missing }),
+    [],
+  );
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'linux',
+      lstat: () => fakeStat(0o120777, false), // a symlink — the store refuses it on use
+    }),
+    [],
+  );
+  let probed = false;
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'win32',
+      lstat: () => {
+        probed = true;
+        return fakeStat(0o100777);
+      },
+    }),
+    [],
+  );
+  assert.equal(probed, false, 'win32 must not consult POSIX mode bits at all');
+});
+
+test(
+  'AUTH-12: startup check reads the real file mode through the default lstat',
+  { skip: SIMULATED_MODES ? 'win32 has no POSIX mode bits' : false },
+  async (t) => {
+    const h = await makeHarness(t);
+    await h.store().persist(PAIR);
+    assert.deepEqual(tokenFileStartupWarnings(h.path), []);
+    await h.chmod(h.path, 0o644);
+    const warnings = tokenFileStartupWarnings(h.path);
+    assert.equal(warnings.length, 1);
+    assert.ok(warnings[0]?.includes('mode 644'));
+  },
+);
+
+// ---------------------------------------------------------------------------
 // PLAT-2: explicit degradation on win32
 // ---------------------------------------------------------------------------
 
-test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warning', async (t) => {
+test('PLAT-2/AUTH-12: POSIX permission checks are skipped on win32 with a one-time warning', async (t) => {
   const h = await makeHarness(t);
   const store = h.store({ platform: 'win32' });
   await store.persist(PAIR);
@@ -291,6 +394,11 @@ test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warni
   await store.load();
   const permsWarnings = h.warnings.filter((w) => w.includes('POSIX permission checks'));
   assert.equal(permsWarnings.length, 1);
+  // AUTH-12 — the wording hands the operator the responsibility and the exact commands.
+  assert.ok(permsWarnings[0]?.includes('not enforced'));
+  assert.ok(permsWarnings[0]?.includes("operator's responsibility"));
+  assert.ok(permsWarnings[0]?.includes(`icacls "${h.path}"`));
+  assert.ok(permsWarnings[0]?.includes('npx x-mcp-ai doctor'));
   assert.equal(
     h.warnings.filter((w) => w.includes('chmod 600')).length,
     0, // the file-perms warning must not fire on win32
@@ -1062,4 +1170,181 @@ test('the default warn sink is console.warn when no override is injected', async
   assert.ok(warned.mock.calls.length >= 1);
   const messages = warned.mock.calls.map((call) => String(call.arguments[0]));
   assert.ok(messages.some((m) => m.includes('PLAT-2')));
+});
+
+// ---------------------------------------------------------------------------
+// errCode() fallback: fs failures that carry NO errno at all
+//
+// Every typed error above interpolates `errCode(err) ?? 'unknown error'`. The fallback
+// arm matters because a `TokenFs` rejection is not guaranteed to be a Node errno error
+// (a wrapping seam, a FUSE/network mount or a future Node major can reject with a bare
+// Error) — and a bare Error must still surface as the SAME typed `auth` error with the
+// same remediation, never as an "undefined" in the message or an unhandled crash.
+// ---------------------------------------------------------------------------
+
+/** A rejection with no `code` property at all — the shape errCode() cannot classify. */
+function bareError(): Error {
+  return new Error('no errno here');
+}
+
+/** `base` with every handle opened for `predicate` paths failing the given operation. */
+function handleFailingFs(
+  base: TokenFs,
+  predicate: (path: string) => boolean,
+  failing: 'readFile' | 'writeFile',
+): TokenFs {
+  return {
+    ...base,
+    open: async (path, flags, mode) => {
+      const handle = await base.open(path, flags, mode);
+      if (!predicate(path)) return handle;
+      return {
+        readFile: (options) =>
+          failing === 'readFile' ? Promise.reject(bareError()) : handle.readFile(options),
+        writeFile: (data, options) =>
+          failing === 'writeFile' ? Promise.reject(bareError()) : handle.writeFile(data, options),
+        stat: () => handle.stat(),
+        sync: () => handle.sync(),
+        close: () => handle.close(),
+      };
+    },
+  };
+}
+
+test('a directory stat failure without an errno code maps to "unknown error" on the directory', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    stat: (path) => (path === h.dir ? Promise.reject(bareError()) : h.fs.stat(path)),
+  };
+  const err = await assertAuthError(
+    h.store({ fs: faultyFs }).load(),
+    h.dir,
+    'Cannot inspect the token directory',
+    '(unknown error)',
+    'Check the configured token file path',
+  );
+  assert.ok(!err.message.includes('undefined')); // the fallback, never a stringified hole
+});
+
+test('AUTH-9: load failures without an errno code report "unknown error" and keep the authorize hint', async (t) => {
+  const h = await makeHarness(t);
+
+  // The open itself rejects without a code: not ENOENT (so not "no token"), not a
+  // symlink refusal — the generic "Cannot open" path with the re-authorize instruction.
+  const openFails: TokenFs = { ...h.fs, open: () => Promise.reject(bareError()) };
+  await assertAuthError(
+    h.store({ fs: openFails }).load(),
+    h.path,
+    'Cannot open the token file',
+    '(unknown error)',
+    'npx x-mcp-ai authorize',
+  );
+
+  // The open succeeds and only the read on the handle rejects without a code.
+  await h.store().persist(PAIR);
+  const readFails = handleFailingFs(h.fs, (path) => path === h.path, 'readFile');
+  await assertAuthError(
+    h.store({ fs: readFails }).load(),
+    h.path,
+    'Cannot read the token file',
+    '(unknown error)',
+    'npx x-mcp-ai authorize',
+  );
+  assert.equal((await h.store().load())?.access_token, PAIR.access_token); // file untouched
+});
+
+test('persist: tmp-file open/write failures without an errno code report "unknown error" and "NOT saved"', async (t) => {
+  const h = await makeHarness(t);
+
+  // A code-less open failure is NOT the EEXIST "try the next candidate" case — it must
+  // fail closed immediately rather than spin through every candidate name.
+  let tmpOpens = 0;
+  const openFails: TokenFs = {
+    ...h.fs,
+    open: (path, flags, mode) => {
+      if (!path.endsWith('.tmp')) return h.fs.open(path, flags, mode);
+      tmpOpens += 1;
+      return Promise.reject(bareError());
+    },
+  };
+  await assertAuthError(
+    h.store({ fs: openFails }).persist(PAIR),
+    h.path,
+    'Cannot create a temporary file next to',
+    '(unknown error)',
+    'NOT saved',
+  );
+  assert.equal(tmpOpens, 1);
+  await assert.rejects(fsp.access(h.path));
+
+  // The tmp file opens fine and the write on its handle rejects without a code: the
+  // half-written tmp file is still unlinked and the token file still never appears.
+  const writeFails = handleFailingFs(h.fs, (path) => path.endsWith('.tmp'), 'writeFile');
+  await assertAuthError(
+    h.store({ fs: writeFails }).persist(PAIR),
+    h.path,
+    'Cannot write the token file next to',
+    '(unknown error)',
+    'NOT saved',
+  );
+  const leftovers = (await fsp.readdir(h.dir)).filter((name) => name.endsWith('.tmp'));
+  assert.deepEqual(leftovers, []);
+  await assert.rejects(fsp.access(h.path));
+});
+
+test('AUTH-5: lock create/write failures without an errno code fail closed with "unknown error"', async (t) => {
+  const h = await makeHarness(t);
+  let ran = 0;
+  const critical = (): Promise<void> => {
+    ran += 1;
+    return Promise.resolve();
+  };
+
+  // O_EXCL create rejects without a code: not EEXIST, so it is not "held by a peer" —
+  // it is a broken lock directory, and fn must never run without the lock.
+  const createFails: TokenFs = {
+    ...h.fs,
+    open: (path, flags, mode) =>
+      path === h.lockPath && (flags & FSC.O_CREAT) !== 0
+        ? Promise.reject(bareError())
+        : h.fs.open(path, flags, mode),
+  };
+  await assertAuthError(
+    h.store({ fs: createFails }).withLock(critical),
+    h.lockPath,
+    'Cannot create the refresh lock',
+    '(unknown error)',
+    'Check the token directory',
+  );
+
+  // The lock file is created and writing `{pid, timestamp}` into it rejects without a
+  // code: the empty lock is removed (a peer must not read it as "held") and fn never runs.
+  const writeFails = handleFailingFs(h.fs, (path) => path === h.lockPath, 'writeFile');
+  await assertAuthError(
+    h.store({ fs: writeFails }).withLock(critical),
+    h.lockPath,
+    'Cannot write the refresh lock',
+    '(unknown error)',
+    'Check the token directory',
+  );
+  assert.equal(ran, 0);
+  await assert.rejects(fsp.access(h.lockPath));
+});
+
+test('AUTH-5: release warns with "unknown error" when unlink fails without an errno code', async (t) => {
+  const h = await makeHarness(t);
+  const faultyFs: TokenFs = {
+    ...h.fs,
+    unlink: (path) => (path === h.lockPath ? Promise.reject(bareError()) : h.fs.unlink(path)),
+  };
+  // The critical section still completes: a failed release is an operator warning, not a
+  // failure of the refresh that already happened.
+  assert.equal(await h.store({ fs: faultyFs }).withLock(() => Promise.resolve('done')), 'done');
+  const unlinkWarnings = h.warnings.filter((w) => w.includes('could not remove the refresh lock'));
+  assert.equal(unlinkWarnings.length, 1);
+  assert.ok(unlinkWarnings[0]?.includes(h.lockPath));
+  assert.ok(unlinkWarnings[0]?.includes('(unknown error)'));
+  assert.ok(unlinkWarnings[0]?.includes('remove it manually'));
+  await fsp.access(h.lockPath); // it really was left behind for the operator
 });

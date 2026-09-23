@@ -164,7 +164,7 @@ Takes no input fields.
 | `max_results` | integer |  | Results per page (10-100); out-of-range values are clamped into the window. |
 | `page_token` | string |  | Opaque pagination cursor returned as next_token by a previous call. |
 | `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
 | `sort_order` | `recency` \| `relevancy` |  | Result ordering; defaults to recency. |
 | `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
 
@@ -181,7 +181,7 @@ Takes no input fields.
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query to count. |
 | `granularity` | `minute` \| `hour` \| `day` |  | Histogram bucket size; defaults to hour. |
 | `start_time` | string |  | Oldest bucket timestamp (ISO-8601 UTC). |
-| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC). |
+| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
 | `page_token` | string |  | Opaque pagination cursor returned as next_token by a previous call. |
 | `raw` | boolean |  | Return the exact API JSON instead of the compact histogram. |
 
@@ -625,7 +625,7 @@ Takes no input fields.
 | `max_results` | integer |  | Results per page (10-500); out-of-range values are clamped into the window. |
 | `page_token` | string |  | Opaque pagination cursor returned as next_token by a previous call. |
 | `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
 | `sort_order` | `recency` \| `relevancy` |  | Result ordering; defaults to recency. |
 | `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
 
@@ -642,7 +642,7 @@ Takes no input fields.
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query to count. |
 | `granularity` | `minute` \| `hour` \| `day` |  | Histogram bucket size; defaults to hour. |
 | `start_time` | string |  | Oldest bucket timestamp (ISO-8601 UTC). |
-| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC). |
+| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
 | `page_token` | string |  | Opaque pagination cursor returned as next_token by a previous call. |
 | `raw` | boolean |  | Return the exact API JSON instead of the compact histogram. |
 

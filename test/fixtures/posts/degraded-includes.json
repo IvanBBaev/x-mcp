@@ -1,0 +1,39 @@
+{
+  "_provenance": "Synthetic HTTP-200 GET /2/tweets?ids=111,222 batch lookup where `includes` is present but partial, the DRIFT-1/REND-5 shape a real platform response can take when an author or referenced tweet has been suspended/deleted since the tweet was indexed. Post 111 attaches a media key with no matching `includes.media` entry (an unknown/unsupported media type from the platform's point of view); post 222's author_id (99) has no matching `includes.users` entry, and its reply_to id (444) has no matching `includes.tweets` entry either. Exercises: REND-5 per-field degrade (author falls back to the raw numeric id, the unresolvable reply_to keeps its id and omits author, the unmatched media item is dropped) at the tool-integration boundary (mock HTTP -> x_post_get handler -> compaction), never a crash, never a dropped item.",
+  "data": [
+    {
+      "id": "111",
+      "text": "Post with a media attachment that has no matching includes.media entry.",
+      "created_at": "2026-07-20T14:30:00.000Z",
+      "author_id": "11",
+      "public_metrics": {
+        "retweet_count": 0,
+        "reply_count": 0,
+        "like_count": 0,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 0
+      },
+      "attachments": { "media_keys": ["3_missing"] }
+    },
+    {
+      "id": "222",
+      "text": "Post whose author and reply parent are both absent from includes.",
+      "created_at": "2026-07-20T15:00:00.000Z",
+      "author_id": "99",
+      "public_metrics": {
+        "retweet_count": 0,
+        "reply_count": 0,
+        "like_count": 0,
+        "quote_count": 0,
+        "bookmark_count": 0,
+        "impression_count": 0
+      },
+      "referenced_tweets": [{ "type": "replied_to", "id": "444" }]
+    }
+  ],
+  "includes": {
+    "users": [{ "id": "11", "username": "author_one", "name": "Author One", "verified": true }]
+  },
+  "meta": { "result_count": 2 }
+}
