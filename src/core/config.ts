@@ -16,9 +16,10 @@
 // Corner cases handled here: CFG-1 (`~` expansion), CFG-2 (default token path), CFG-3
 // (profiles vs direct creds), CFG-4 (empty string = unset), CFG-5 (fatal contract), CFG-6
 // (profiles content re-validation AND resolution of the selected profile), CFG-7 (base-URL
-// gating — the value rules; proxy-ignore is api/http's concern), CFG-8 (unknown `X_MCP_*`
-// warnings). The *permission* half of CFG-6 (warn when the profiles file is group/other
-// readable) belongs to the composition root — `core` does no I/O.
+// gating — the value rules, plus the warning when Node's own env proxying would override
+// api/http's proxy-ignore), CFG-8 (unknown `X_MCP_*` warnings). The *permission* half of
+// CFG-6 (warn when the profiles file is group/other readable) belongs to the composition
+// root — `core` does no I/O.
 //
 // Auth modes are `oauth2` and `app-only` — nothing else. OAuth 1.0a was resolved NO-GO
 // (`docs/decisions/0001-oauth1-go-no-go.md`, T-307): the signer was never built, so T-309
@@ -98,6 +99,7 @@ const KNOWN_VARS: ReadonlySet<string> = new Set([
   'X_MCP_PROFILE',
   'X_MCP_BASE_URL',
   'X_MCP_ALLOW_INSECURE_BASE_URL',
+  'X_MCP_ALLOW_PROXY',
   'X_MCP_TIMEOUT_MS',
   'X_MCP_LOG_LEVEL',
 ]);
@@ -157,10 +159,29 @@ export interface Config {
   readonly profile?: ProfileSelection;
   readonly baseUrl: string;
   readonly allowInsecureBaseUrl: boolean;
+  /**
+   * The proxy variable Node's built-in env proxying would route API traffic through
+   * (CFG-7/AUTH-14); absent when env proxying is off or no proxy variable is set.
+   */
+  readonly envProxy?: EnvProxy;
   readonly timeoutMs: number;
   readonly logLevel: LogLevel;
   /** Non-fatal startup notices for the composition root to log (CFG-7, CFG-8). */
   readonly warnings: readonly string[];
+}
+
+/** Node's built-in env proxying is active for this process (see {@link envProxyInUse}). */
+export interface EnvProxy {
+  /** The first proxy variable found set, e.g. `HTTPS_PROXY`. Its value is never kept. */
+  readonly variable: string;
+  /** `X_MCP_ALLOW_PROXY=1` — the operator opted in, so no startup warning is raised. */
+  readonly allowed: boolean;
+}
+
+/** Process facts `parseConfig` cannot read from the env snapshot alone. */
+export interface ConfigRuntime {
+  /** Node's own CLI flags (the root passes `process.execArgv`). */
+  readonly execArgv?: readonly string[];
 }
 
 // --- Small pure helpers ----------------------------------------------------------------
@@ -256,6 +277,31 @@ function baseUrlIssue(baseUrl: string, allowInsecure: boolean): string | null {
     return `X_MCP_BASE_URL host "${u.hostname.toLowerCase()}" is not *.${CREDENTIAL_DOMAIN}; set X_MCP_ALLOW_INSECURE_BASE_URL=1 to allow a non-x.com base URL`;
   }
   return null;
+}
+
+/** Proxy variables Node's env proxying reads, in the order they are reported. */
+const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'] as const;
+
+/**
+ * CFG-7/AUTH-14 — is Node's built-in env proxying (Node 22.21+ / 24+) switched on for this
+ * process with a proxy variable set? `fetch` ignores `HTTP(S)_PROXY` by default, but
+ * `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` (in `NODE_OPTIONS` or on the command line)
+ * makes it honour them — and then every bearer-token request tunnels through that proxy.
+ * The last `--[no-]use-env-proxy` flag wins; command-line flags are read after
+ * `NODE_OPTIONS`, as Node itself does. Returns the first proxy variable set, or null.
+ */
+export function envProxyInUse(
+  env: Readonly<Record<string, string | undefined>>,
+  execArgv: readonly string[] = [],
+): string | null {
+  let enabled = env.NODE_USE_ENV_PROXY?.trim() === '1';
+  const flags = [...(env.NODE_OPTIONS ?? '').split(/\s+/), ...execArgv];
+  for (const flag of flags) {
+    if (flag === '--use-env-proxy') enabled = true;
+    else if (flag === '--no-use-env-proxy') enabled = false;
+  }
+  if (!enabled) return null;
+  return PROXY_VARS.find((name) => norm(env[name]) !== undefined) ?? null;
 }
 
 /**
@@ -392,6 +438,7 @@ const EnvObject = z.object({
   X_MCP_PROFILE: z.string().optional(),
   X_MCP_BASE_URL: z.string().default(DEFAULT_BASE_URL),
   X_MCP_ALLOW_INSECURE_BASE_URL: flag().default('0'),
+  X_MCP_ALLOW_PROXY: flag().default('0'),
   X_MCP_TIMEOUT_MS: timeoutField().default(String(DEFAULT_TIMEOUT_MS)),
   X_MCP_LOG_LEVEL: enumField(LOG_LEVELS).default('info'),
 });
@@ -445,7 +492,8 @@ const EnvSchema = EnvObject.superRefine((d, ctx) => {
     }
   }
 
-  // CFG-7 — base-URL value rules (proxy-ignore is enforced later, in api/http).
+  // CFG-7 — base-URL value rules. Proxy env is ignored by api/http's default dispatcher;
+  // Node's own env proxying overriding that is a startup WARNING in parseConfig, not a refusal.
   const issue = baseUrlIssue(d.X_MCP_BASE_URL, d.X_MCP_ALLOW_INSECURE_BASE_URL === '1');
   if (issue) add('X_MCP_BASE_URL', issue);
 });
@@ -661,10 +709,12 @@ function resolveProfile(profilesJson: unknown, name: string, env: EnvSelection):
  *
  * @param env          A snapshot of the environment (the root passes `process.env`).
  * @param profilesJson The parsed contents of `X_MCP_PROFILES_FILE`, if the root read it.
+ * @param runtime      Process facts outside the env snapshot (Node's `execArgv`).
  */
 export function parseConfig(
   env: Record<string, string | undefined>,
   profilesJson?: unknown,
+  runtime: ConfigRuntime = {},
 ): Config {
   const raw = {
     X_MCP_AUTH_MODE: normTrim(env.X_MCP_AUTH_MODE),
@@ -685,6 +735,7 @@ export function parseConfig(
     X_MCP_PROFILE: normTrim(env.X_MCP_PROFILE),
     X_MCP_BASE_URL: normTrim(env.X_MCP_BASE_URL),
     X_MCP_ALLOW_INSECURE_BASE_URL: normTrim(env.X_MCP_ALLOW_INSECURE_BASE_URL),
+    X_MCP_ALLOW_PROXY: normTrim(env.X_MCP_ALLOW_PROXY),
     X_MCP_TIMEOUT_MS: normTrim(env.X_MCP_TIMEOUT_MS),
     X_MCP_LOG_LEVEL: normTrim(env.X_MCP_LOG_LEVEL),
   };
@@ -725,6 +776,11 @@ export function parseConfig(
   const egressIssue = credentialEgressIssue(baseUrl, authMode);
   if (egressIssue !== null) throw validationError(`invalid configuration — ${egressIssue}`);
   const timeoutMs = Number(d.X_MCP_TIMEOUT_MS);
+  const proxyVariable = envProxyInUse(env, runtime.execArgv);
+  const envProxy: EnvProxy | undefined =
+    proxyVariable === null
+      ? undefined
+      : { variable: proxyVariable, allowed: d.X_MCP_ALLOW_PROXY === '1' };
 
   // Credentials come from exactly one source: env OR the profile (CFG-3 refuses both).
   const clientId = d.X_MCP_CLIENT_ID ?? resolved?.clientId;
@@ -788,6 +844,14 @@ export function parseConfig(
         'host go out unauthenticated (docs/04 T10).',
     );
   }
+  // CFG-7/AUTH-14 — Node's env proxying would tunnel bearer-token traffic through a proxy.
+  if (envProxy !== undefined && !envProxy.allowed) {
+    warnings.push(
+      `Node env proxying is enabled (NODE_USE_ENV_PROXY / --use-env-proxy) and ${envProxy.variable} is set — ` +
+        'API requests, including their Authorization header, go through that proxy. ' +
+        'Unset it, or set X_MCP_ALLOW_PROXY=1 if the proxy is trusted.',
+    );
+  }
 
   const config: Config = {
     authMode,
@@ -802,6 +866,7 @@ export function parseConfig(
     ...(profile !== undefined ? { profile } : {}),
     baseUrl,
     allowInsecureBaseUrl,
+    ...(envProxy !== undefined ? { envProxy } : {}),
     timeoutMs,
     logLevel: d.X_MCP_LOG_LEVEL,
     warnings,

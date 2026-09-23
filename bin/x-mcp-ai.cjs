@@ -25,7 +25,11 @@ const { pathToFileURL } = require('node:url');
 const entry = path.join(__dirname, '..', 'build', 'src', 'index.js');
 
 import(pathToFileURL(entry).href).catch((err) => {
-  const reason = err && err.message ? err.message : String(err);
+  // CFG-5: one stderr line, so a multi-line message (a `Require stack:` trailer, a
+  // SyntaxError's code frame) is folded into single spaces.
+  const reason = (err && err.message ? err.message : String(err))
+    .replace(/\s*[\r\n]+\s*/g, ' ')
+    .trim();
   process.stderr.write(`x-mcp-ai: fatal: ${reason}\n`);
   process.exit(1);
 });
