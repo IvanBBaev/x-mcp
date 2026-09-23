@@ -259,7 +259,7 @@ test('lock leftovers: a stale <token-file>.lock is noted with its age (AUTH-5)',
   assert.match(f.stdout(), /AUTH-5/);
 });
 
-test('win32: POSIX permission checks degrade with an explicit note (PLAT-2)', async () => {
+test('win32: POSIX permission checks degrade with an explicit note naming icacls (PLAT-2, AUTH-12)', async () => {
   const f = makeDeps({
     env: HEALTHY_ENV,
     files: {
@@ -273,6 +273,9 @@ test('win32: POSIX permission checks degrade with an explicit note (PLAT-2)', as
   assert.equal(code, 0);
   const output = f.stdout();
   assert.match(output, /\[note\]\s+permissions: PLAT-2/);
+  // AUTH-12 — the note names the operator's responsibility and the literal ACL command.
+  assert.ok(output.includes("operator's responsibility"));
+  assert.ok(output.includes(`icacls "${TOKEN_FILE}"`));
   assert.doesNotMatch(output, /\[fail\]/);
 });
 

@@ -260,10 +260,16 @@ async function checkPaths(deps: DoctorDeps, config: Config, report: Report): Pro
   const dirnameOf = (p: string): string => (posix ? path.posix.dirname(p) : path.win32.dirname(p));
 
   if (!posix) {
+    // AUTH-12 — mode bits are not enforced on Windows; name the exact ACL command to run.
+    const aclHint =
+      config.tokenFile !== undefined && !config.tokenKeychain
+        ? `: icacls "${config.tokenFile}"`
+        : '';
     report(
       'note',
       'permissions',
-      'PLAT-2: POSIX permission checks do not apply on Windows — inspect the token file ACLs manually',
+      'PLAT-2: POSIX permission checks do not apply on Windows — securing the token file is ' +
+        `the operator's responsibility; inspect its ACLs manually${aclHint}`,
     );
   }
 

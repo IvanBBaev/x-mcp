@@ -97,7 +97,10 @@ expanded):
 | Windows | `%APPDATA%\x-mcp\tokens.json` |
 | Everything else | `$XDG_CONFIG_HOME/x-mcp/tokens.json`, else `~/.config/x-mcp/tokens.json` |
 
-The file is created `0600` (owner read/write only) with `O_NOFOLLOW`/`O_EXCL`. Keep it
+The file is created `0600` (owner read/write only) with `O_NOFOLLOW`/`O_EXCL`. If it is
+later widened, the server prints a one-line `chmod 600` warning to stderr at startup.
+On Windows mode bits are not enforced, so restricting the file is up to you: inspect it
+with `icacls "<tokenFile>"` (`doctor` prints the command with the real path). Keep it
 out of cloud-synced folders — `doctor` warns if it is inside one.
 
 Authorize with the **same env** you will serve with. If the client config points at a

@@ -21,6 +21,8 @@ import {
   LOCK_STALE_MS,
   LOCK_WAIT_MS,
   TOKEN_FILE_SCHEMA_VERSION,
+  tokenFilePermissionWarning,
+  tokenFileStartupWarnings,
   WIN32_RENAME_ATTEMPTS,
   WIN32_RENAME_DELAY_MS,
 } from '../../../src/api/oauth2/filestore.js';
@@ -301,10 +303,88 @@ test('SEC-T13: group/other-writable token directory is refused by load and persi
 });
 
 // ---------------------------------------------------------------------------
+// AUTH-12: the shared permission rule and the startup check
+// ---------------------------------------------------------------------------
+
+/** A fake `lstat` result for the startup-check seam. */
+function fakeStat(mode: number, isFile = true): { mode: number; isFile(): boolean } {
+  return { mode, isFile: () => isFile };
+}
+
+test('AUTH-12: tokenFilePermissionWarning is null at 0600/0400 and names path, mode, and fix above', () => {
+  assert.equal(tokenFilePermissionWarning('/t/tokens.json', 0o100600), null);
+  assert.equal(tokenFilePermissionWarning('/t/tokens.json', 0o100400), null);
+  const warning = tokenFilePermissionWarning('/t/tokens.json', 0o100640);
+  assert.ok(warning !== null);
+  assert.ok(warning.includes('/t/tokens.json'));
+  assert.ok(warning.includes('mode 640'));
+  assert.ok(warning.includes('chmod 600 /t/tokens.json'));
+  assert.ok(!warning.includes('\n'), 'the warning must be a single line');
+});
+
+test('AUTH-12: startup check warns once for a group/other-accessible token file on POSIX', () => {
+  const warnings = tokenFileStartupWarnings('/t/tokens.json', {
+    platform: 'linux',
+    lstat: () => fakeStat(0o100604),
+  });
+  assert.deepEqual(warnings, [tokenFilePermissionWarning('/t/tokens.json', 0o100604)]);
+});
+
+test('AUTH-12: startup check is silent for 0600, missing, non-regular, and win32', () => {
+  const missing = (): never => {
+    throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  };
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'linux',
+      lstat: () => fakeStat(0o100600),
+    }),
+    [],
+  );
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', { platform: 'linux', lstat: missing }),
+    [],
+  );
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'linux',
+      lstat: () => fakeStat(0o120777, false), // a symlink — the store refuses it on use
+    }),
+    [],
+  );
+  let probed = false;
+  assert.deepEqual(
+    tokenFileStartupWarnings('/t/tokens.json', {
+      platform: 'win32',
+      lstat: () => {
+        probed = true;
+        return fakeStat(0o100777);
+      },
+    }),
+    [],
+  );
+  assert.equal(probed, false, 'win32 must not consult POSIX mode bits at all');
+});
+
+test(
+  'AUTH-12: startup check reads the real file mode through the default lstat',
+  { skip: SIMULATED_MODES ? 'win32 has no POSIX mode bits' : false },
+  async (t) => {
+    const h = await makeHarness(t);
+    await h.store().persist(PAIR);
+    assert.deepEqual(tokenFileStartupWarnings(h.path), []);
+    await h.chmod(h.path, 0o644);
+    const warnings = tokenFileStartupWarnings(h.path);
+    assert.equal(warnings.length, 1);
+    assert.ok(warnings[0]?.includes('mode 644'));
+  },
+);
+
+// ---------------------------------------------------------------------------
 // PLAT-2: explicit degradation on win32
 // ---------------------------------------------------------------------------
 
-test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warning', async (t) => {
+test('PLAT-2/AUTH-12: POSIX permission checks are skipped on win32 with a one-time warning', async (t) => {
   const h = await makeHarness(t);
   const store = h.store({ platform: 'win32' });
   await store.persist(PAIR);
@@ -314,6 +394,11 @@ test('PLAT-2: POSIX permission checks are skipped on win32 with a one-time warni
   await store.load();
   const permsWarnings = h.warnings.filter((w) => w.includes('POSIX permission checks'));
   assert.equal(permsWarnings.length, 1);
+  // AUTH-12 — the wording hands the operator the responsibility and the exact commands.
+  assert.ok(permsWarnings[0]?.includes('not enforced'));
+  assert.ok(permsWarnings[0]?.includes("operator's responsibility"));
+  assert.ok(permsWarnings[0]?.includes(`icacls "${h.path}"`));
+  assert.ok(permsWarnings[0]?.includes('npx x-mcp-ai doctor'));
   assert.equal(
     h.warnings.filter((w) => w.includes('chmod 600')).length,
     0, // the file-perms warning must not fire on win32

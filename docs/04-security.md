@@ -226,8 +226,13 @@ Roadmap open question 2, resolved (WP-0.4; ratified over hide-by-default):
 - The token path is never followed through a symlink.
 - Startup **refuses to operate** if the token directory is writable by group or other
   (a symlink-plant / lock-race precondition); the token file itself warns at wider-than
-  `0600` perms (T1). On win32 the POSIX perm/`O_NOFOLLOW` checks degrade explicitly with a
-  one-time warning (PLAT-2); `doctor` can inspect ACLs.
+  `0600` perms (T1) — once at server startup (`src/index.ts`, via
+  `tokenFileStartupWarnings`) and once on the store's first load, both from the same
+  `tokenFilePermissionWarning` rule (AUTH-12). On win32 the POSIX perm/`O_NOFOLLOW` checks
+  degrade explicitly with a one-time warning (PLAT-2) that states mode bits are not
+  enforced, that securing the file is the operator's responsibility, and names
+  `icacls "<tokenFile>"` and `npx x-mcp-ai doctor`; `doctor` prints the same `icacls`
+  command with the real path.
 - The same `0600`-and-warn discipline extends to the **profiles file** and any
   client-secret material at rest (T16/CFG-6); the profiles file's `policy` is re-validated
   at load. **It warns, it does not refuse** (`src/index.ts`, `profilesPermissionWarning`) —

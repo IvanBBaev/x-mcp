@@ -13,6 +13,7 @@ import { join } from 'node:path';
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { tokenFileStartupWarnings } from './api/oauth2/filestore.js';
 import { createConfiguredTokenStore } from './api/oauth2/store.js';
 import {
   createAuthorizeCli,
@@ -127,14 +128,25 @@ function loadConfig(): ConfigLoad {
   }
 }
 
+/**
+ * AUTH-12 — the token file's permission warning at startup, only when the file backend is
+ * the one `createConfiguredTokenStore` will actually build (OAuth2, no keychain).
+ */
+function tokenFileWarnings(config: Config): string[] {
+  if (config.authMode !== 'oauth2' || config.tokenKeychain || config.tokenFile === undefined) {
+    return [];
+  }
+  return tokenFileStartupWarnings(config.tokenFile);
+}
+
 async function serve(): Promise<void> {
   const { config, warnings } = loadConfig();
 
-  // Non-fatal startup notices (CFG-6/CFG-7/CFG-8) go to stderr ONLY, so stdout stays
-  // protocol-pure (MCP-1) at every log level. The pre-validation findings come first:
-  // "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
+  // Non-fatal startup notices (CFG-6/CFG-7/CFG-8, AUTH-12) go to stderr ONLY, so stdout
+  // stays protocol-pure (MCP-1) at every log level. The file-permission findings come
+  // first: "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
   if (config.logLevel !== 'silent') {
-    for (const warning of [...warnings, ...config.warnings]) {
+    for (const warning of [...warnings, ...tokenFileWarnings(config), ...config.warnings]) {
       process.stderr.write(`x-mcp-ai: warning: ${warning}\n`);
     }
   }

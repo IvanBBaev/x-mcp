@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A token file readable by group or other now triggers a one-line `chmod 600` warning
+  on stderr as soon as the server starts, not only on its first X call. On Windows the
+  warning and `doctor` now say that securing the file is your responsibility and print
+  the `icacls "<tokenFile>"` command to inspect it.
+
 - A startup failure is now always a single `x-mcp-ai: fatal:` line on stderr, even when
   the reason contains line breaks (a profiles-file path with a newline, or a multi-line
   module-load error from the `npx` launcher). Hosts that read the first stderr line now
