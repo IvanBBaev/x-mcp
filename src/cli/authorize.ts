@@ -21,10 +21,11 @@
 //
 // Everything ambient is injected through `AuthorizeDeps`, so the whole flow runs under
 // `node --test` with fakes (in-memory listener, fake token endpoint, scripted stdin).
-// The integrator composes the real adapters — fetch/node:http/readline based defaults
-// are exported at the bottom of this module. Routing stays in cli/dispatch.ts and is
+// The integrator composes the real adapters — fetch/node:http/readline/child_process
+// based defaults are exported at the bottom of this module. Routing stays in cli/dispatch.ts and is
 // intentionally NOT wired here.
 
+import { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
@@ -182,8 +183,9 @@ export interface AuthorizeDeps {
   readonly stderr: (line: string) => void;
   /**
    * Optional browser opener; resolves `false` (or throws) on launch failure, which falls
-   * back to manual instructions (AUTH-16). Omit it entirely to only print the URL — no
-   * `open`-style dependency exists or is wanted.
+   * back to manual instructions (AUTH-16). Omit it entirely to only print the URL. The
+   * production adapter is {@link createSystemBrowserOpener}, which spawns the platform's
+   * own opener — no `open`-style npm dependency exists or is wanted.
    */
   readonly openBrowser?: (url: string) => Promise<boolean>;
 }
@@ -752,6 +754,114 @@ export function createStdinReadLine(): (prompt: string) => Promise<string> {
         resolve(answer);
       });
     });
+}
+
+/** The slice of a spawned `ChildProcess` the browser opener relies on. */
+export interface BrowserProcess {
+  once(event: 'error', listener: (err: Error) => void): unknown;
+  once(event: 'exit', listener: (code: number | null) => void): unknown;
+  unref(): void;
+}
+
+/** The slice of `child_process.spawn` the browser opener relies on. */
+export type BrowserSpawn = (
+  command: string,
+  args: readonly string[],
+  options: { stdio: 'ignore'; detached: boolean },
+) => BrowserProcess;
+
+/** Injection points for {@link createSystemBrowserOpener}; each defaults to the real one. */
+export interface SystemBrowserOpenerDeps {
+  readonly spawn?: BrowserSpawn;
+  readonly platform?: NodeJS.Platform;
+  readonly env?: NodeJS.ProcessEnv;
+  /**
+   * How long an opener that has neither exited nor failed is given before it counts as
+   * launched (default {@link BROWSER_LAUNCH_GRACE_MS}).
+   */
+  readonly graceMs?: number;
+}
+
+/**
+ * `open` and most `xdg-open` backends hand the URL off and exit within milliseconds; some
+ * `xdg-open` fallbacks (a `$BROWSER` set to a terminal browser) instead run the browser in
+ * the foreground. An opener still alive after this grace has not failed to launch, so it
+ * counts as launched — the wait stays bounded either way (AUTH-16).
+ */
+export const BROWSER_LAUNCH_GRACE_MS = 2_000;
+
+/**
+ * Production `openBrowser` (AUTH-16): spawns the platform's own URL opener, detached and
+ * unref'd with stdio ignored, and resolves `false` on any launch failure so the flow falls
+ * back to manual instructions instead of waiting out the callback timeout.
+ *
+ *   • darwin → `open <url>`.
+ *   • win32 → `rundll32 url.dll,FileProtocolHandler <url>`. Not `cmd /c start`: cmd would
+ *     split the URL at every `&` of its query string, and escaping for cmd's parser on top
+ *     of Node's own argv quoting is fragile. rundll32 takes the URL as a plain argument.
+ *   • anything else → `xdg-open <url>`, but only with a graphical session: no `DISPLAY` and
+ *     no `WAYLAND_DISPLAY`, or an SSH session (`SSH_CONNECTION`/`SSH_TTY`), resolves `false`
+ *     without spawning — a browser there would open on the wrong machine, or not at all.
+ *
+ * The URL is a single argv element and is visible in the process table, which is why it
+ * only ever carries `state` and the `code_challenge` — never the code or the verifier
+ * (AUTH-13).
+ */
+export function createSystemBrowserOpener(
+  deps: SystemBrowserOpenerDeps = {},
+): (url: string) => Promise<boolean> {
+  const spawn: BrowserSpawn = deps.spawn ?? nodeSpawn;
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  const graceMs = deps.graceMs ?? BROWSER_LAUNCH_GRACE_MS;
+  return (url) => {
+    const command = browserCommand(platform, env, url);
+    if (command === null) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      // Armed first so every path below settles through `settle`, which disarms it.
+      const timer = setTimeout(() => {
+        settle(true);
+      }, graceMs);
+      const settle = (launched: boolean): void => {
+        clearTimeout(timer);
+        resolve(launched);
+      };
+      let child: BrowserProcess;
+      try {
+        child = spawn(command.file, command.args, { stdio: 'ignore', detached: true });
+      } catch {
+        settle(false);
+        return;
+      }
+      // ENOENT (no `xdg-open` installed) and friends arrive here, asynchronously.
+      child.once('error', () => {
+        settle(false);
+      });
+      child.once('exit', (code) => {
+        settle(code === 0);
+      });
+      child.unref();
+    });
+  };
+}
+
+function browserCommand(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  url: string,
+): { file: string; args: string[] } | null {
+  if (platform === 'darwin') return { file: 'open', args: [url] };
+  if (platform === 'win32') {
+    return { file: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
+  }
+  const graphical = isSet(env['DISPLAY']) || isSet(env['WAYLAND_DISPLAY']);
+  const overSsh = isSet(env['SSH_CONNECTION']) || isSet(env['SSH_TTY']);
+  if (!graphical || overSsh) return null;
+  return { file: 'xdg-open', args: [url] };
+}
+
+function isSet(value: string | undefined): boolean {
+  return value !== undefined && value !== '';
 }
 
 // Tolerant JSON parse for token-endpoint bodies (same discipline as api/http, NET-1):

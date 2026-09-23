@@ -258,7 +258,12 @@ initial tokens). Invariants:
   `authorize --manual` prints the authorization URL and accepts the **full redirect URL
   pasted back**; `state` is still validated and the code is still consumed exactly once —
   no listener is opened. The default browser flow **detects launch failure and falls back
-  to these manual instructions instead of hanging.**
+  to these manual instructions instead of hanging.** It spawns the platform's own opener
+  (`open` on macOS, `rundll32 url.dll,FileProtocolHandler` on Windows, `xdg-open`
+  elsewhere); a missing opener, a non-zero exit, or — off macOS/Windows — no `DISPLAY` /
+  `WAYLAND_DISPLAY` or an SSH session (`SSH_CONNECTION` / `SSH_TTY`, checked before
+  anything is spawned) counts as a failure. The opener's argv carries the authorization
+  URL, i.e. `state` and `code_challenge` only, never the code or the verifier.
 
 ### 4.4 Authorization header host-scoping (confused-deputy control) (T10/AUTH-14)
 

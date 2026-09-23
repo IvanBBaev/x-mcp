@@ -10,6 +10,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `authorize` now opens the authorization URL in your default browser (`open` on macOS,
+  `xdg-open` on Linux, `rundll32` on Windows). When no browser can be launched — no opener
+  installed, no graphical session, or an SSH session — it says so right away and points
+  at the printed URL and `--manual`, instead of silently waiting out the 5-minute
+  callback timeout.
+
 - When `X_MCP_CREDIT_BUDGET_MODE=hard` refuses an `x_post_create` whose text contains a
   URL, the refusal now says the post is priced at $0.20 instead of the $0.015 base. URL
   detection also covers internationalized and punycode domains (for example `xn--p1ai`)

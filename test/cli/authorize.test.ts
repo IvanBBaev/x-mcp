@@ -8,12 +8,14 @@
 // clock/random/token-store helpers. No socket is opened, no real time passes — except in
 // the final "production adapters" section, which exercises the exported fetch/node:http/
 // readline adapters over strictly local resources (a MockAgent dispatcher, a one-shot
-// 127.0.0.1 ephemeral-port server, a child process with a piped stdin).
+// 127.0.0.1 ephemeral-port server, a child process with a piped stdin) and the browser
+// opener over a fake spawn — no real browser is ever launched.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 import { fakeClock, inMemoryTokenStore, mockHttp } from '../helpers/index.js';
 import type { Random, Sleep, TokenStore } from '../../src/core/ports.js';
@@ -25,7 +27,10 @@ import {
   createAuthorizeCli,
   createFetchTokenExchangeHttp,
   createNodeLoopbackListen,
+  createSystemBrowserOpener,
   type AuthorizeDeps,
+  type BrowserProcess,
+  type BrowserSpawn,
   type LoopbackListen,
   type LoopbackRequest,
   type TokenEndpointResponse,
@@ -1011,4 +1016,157 @@ test('createStdinReadLine: prompts on stdout and resolves the first stdin line',
   assert.equal(exitCode, 0, `child failed: ${stderr}`);
   assert.ok(stdout.includes('Redirect URL: '), 'the prompt reached stdout');
   assert.ok(stdout.includes('ANSWER:  https://127.0.0.1/cb?code=x  '), 'the raw line came back');
+});
+
+// --- createSystemBrowserOpener (AUTH-16) over a fake spawn ------------------------------
+
+const OPEN_URL =
+  'https://x.com/i/oauth2/authorize?response_type=code&client_id=cid&state=st-1&code_challenge=cc-1&code_challenge_method=S256';
+
+interface SpawnCall {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly options: { stdio: 'ignore'; detached: boolean };
+}
+
+/**
+ * Fake spawn: records every call and hands back an EventEmitter child whose fate the
+ * `script` decides on the next tick (`'hang'` = never exits, never errors).
+ */
+function fakeSpawn(script: { exitCode: number | null } | { error: string } | 'hang'): {
+  readonly spawn: BrowserSpawn;
+  readonly calls: SpawnCall[];
+  unrefCount(): number;
+} {
+  const calls: SpawnCall[] = [];
+  let unrefs = 0;
+  const spawn: BrowserSpawn = (command, args, options) => {
+    calls.push({ command, args, options });
+    const child = new EventEmitter();
+    setImmediate(() => {
+      if (script === 'hang') return;
+      if ('error' in script) {
+        child.emit('error', Object.assign(new Error(script.error), { code: 'ENOENT' }));
+      } else {
+        child.emit('exit', script.exitCode);
+      }
+    });
+    const proc: BrowserProcess = Object.assign(child, {
+      unref: () => {
+        unrefs += 1;
+      },
+    });
+    return proc;
+  };
+  return { spawn, calls, unrefCount: () => unrefs };
+}
+
+const GRAPHICAL_ENV = { DISPLAY: ':0' };
+
+test('AUTH-16: createSystemBrowserOpener — opener ENOENT resolves false (manual fallback)', async () => {
+  const fake = fakeSpawn({ error: 'spawn xdg-open ENOENT' });
+  const open = createSystemBrowserOpener({
+    spawn: fake.spawn,
+    platform: 'linux',
+    env: GRAPHICAL_ENV,
+  });
+  assert.equal(await open(OPEN_URL), false);
+  assert.equal(fake.calls.length, 1);
+});
+
+test('AUTH-16: createSystemBrowserOpener — a non-zero opener exit resolves false', async () => {
+  const fake = fakeSpawn({ exitCode: 3 });
+  const open = createSystemBrowserOpener({
+    spawn: fake.spawn,
+    platform: 'linux',
+    env: GRAPHICAL_ENV,
+  });
+  assert.equal(await open(OPEN_URL), false);
+});
+
+test("AUTH-16: createSystemBrowserOpener — exit 0 resolves true; detached, unref'd, stdio ignored", async () => {
+  const fake = fakeSpawn({ exitCode: 0 });
+  const open = createSystemBrowserOpener({
+    spawn: fake.spawn,
+    platform: 'linux',
+    env: { WAYLAND_DISPLAY: 'wayland-0' },
+  });
+  assert.equal(await open(OPEN_URL), true);
+  const call = fake.calls[0];
+  assert.ok(call);
+  assert.equal(call.command, 'xdg-open');
+  assert.deepEqual(call.args, [OPEN_URL]);
+  assert.deepEqual(call.options, { stdio: 'ignore', detached: true });
+  assert.equal(fake.unrefCount(), 1, 'the opener never holds the CLI process open');
+});
+
+test('AUTH-16: createSystemBrowserOpener — an opener still running after the grace counts as launched', async () => {
+  const fake = fakeSpawn('hang');
+  const open = createSystemBrowserOpener({
+    spawn: fake.spawn,
+    platform: 'linux',
+    env: GRAPHICAL_ENV,
+    graceMs: 5,
+  });
+  assert.equal(await open(OPEN_URL), true, 'bounded — resolves instead of hanging');
+});
+
+test('AUTH-16: createSystemBrowserOpener — a synchronous spawn throw resolves false', async () => {
+  const open = createSystemBrowserOpener({
+    spawn: () => {
+      throw new Error('spawn EINVAL');
+    },
+    platform: 'darwin',
+  });
+  assert.equal(await open(OPEN_URL), false);
+});
+
+test('AUTH-16: createSystemBrowserOpener — headless linux (no DISPLAY/WAYLAND_DISPLAY) resolves false without spawning', async () => {
+  const fake = fakeSpawn({ exitCode: 0 });
+  const open = createSystemBrowserOpener({
+    spawn: fake.spawn,
+    platform: 'linux',
+    env: { DISPLAY: '', PATH: '/usr/bin' },
+  });
+  assert.equal(await open(OPEN_URL), false);
+  assert.equal(fake.calls.length, 0, 'nothing was spawned');
+});
+
+test('AUTH-16: createSystemBrowserOpener — an SSH session resolves false without spawning, even with a DISPLAY', async () => {
+  for (const sshVar of ['SSH_CONNECTION', 'SSH_TTY']) {
+    const fake = fakeSpawn({ exitCode: 0 });
+    const open = createSystemBrowserOpener({
+      spawn: fake.spawn,
+      platform: 'linux',
+      env: { DISPLAY: 'localhost:10.0', [sshVar]: '10.0.0.1 51234 10.0.0.2 22' },
+    });
+    assert.equal(await open(OPEN_URL), false, sshVar);
+    assert.equal(fake.calls.length, 0, `${sshVar}: nothing was spawned`);
+  }
+});
+
+test('AUTH-16: createSystemBrowserOpener — darwin runs `open` with the URL as one argv element', async () => {
+  const fake = fakeSpawn({ exitCode: 0 });
+  // darwin needs no DISPLAY.
+  const open = createSystemBrowserOpener({ spawn: fake.spawn, platform: 'darwin', env: {} });
+  assert.equal(await open(OPEN_URL), true);
+  assert.deepEqual(
+    fake.calls.map((c) => [c.command, ...c.args]),
+    [['open', OPEN_URL]],
+  );
+});
+
+test('AUTH-16 + AUTH-13: createSystemBrowserOpener — win32 uses rundll32, the `&`-laden URL intact in one argv element', async () => {
+  const fake = fakeSpawn({ exitCode: 0 });
+  const open = createSystemBrowserOpener({ spawn: fake.spawn, platform: 'win32', env: {} });
+  assert.equal(await open(OPEN_URL), true);
+  const call = fake.calls[0];
+  assert.ok(call);
+  assert.equal(call.command, 'rundll32');
+  assert.deepEqual(call.args, ['url.dll,FileProtocolHandler', OPEN_URL]);
+  // AUTH-13 argv clause: the URL on argv carries only state + code_challenge.
+  const onArgv = new URL(call.args[1] ?? '');
+  assert.equal(onArgv.searchParams.get('state'), 'st-1');
+  assert.equal(onArgv.searchParams.has('code'), false);
+  assert.equal(onArgv.searchParams.has('code_verifier'), false);
 });
