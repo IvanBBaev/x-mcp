@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createHttpClient } from '../../src/api/http.js';
+import { WRITE_AMBIGUITY, createHttpClient } from '../../src/api/http.js';
 import { mapHttpError } from '../../src/api/errors.js';
 import {
   xPostGet,
@@ -176,6 +176,7 @@ test('raw: true returns the uncompacted, size-capped envelope', async () => {
   assert.ok(raw.includes?.users);
   // `raw` skips sanitization, so it must NOT skip the REND-6 warning too (T-320 F4).
   assert.equal(out.summary, `2 raw post(s) ${UNTRUSTED_CONTENT_NOTE}`);
+  assert.equal(out.units, 2); // COST-3: billed per post returned
 
   mock.assertDone();
   await mock.close();
@@ -714,6 +715,8 @@ test('NET-4: a 5xx on delete carries the delete-specific ambiguity note', async 
       const xerr = err as XError;
       // Re-issuing a delete is SAFE (POST-5 makes it idempotent) — the note says so.
       assert.match(xerr.message, /Re-issuing this delete is safe/);
+      // The generic "do NOT re-issue" note is replaced, never stacked against the safe advice.
+      assert.equal(xerr.message.includes(WRITE_AMBIGUITY), false);
       assert.equal(xerr.retryable, false);
       return true;
     },
@@ -907,6 +910,8 @@ test('raw: a data-less envelope (all ids missing) counts 0 and keeps the warning
   const raw = out.data as RawListResponse<RawTweet>;
 
   assert.deepEqual(raw.data, []); // normalized to [] for the cap, never a crash
+  // Every id came back in `errors[]`: no resource was returned, so nothing is charged.
+  assert.equal(out.units, 0);
   // Zero results still carry the REND-6 warning: `errors[]` titles are platform text too.
   assert.equal(out.summary, `0 raw post(s) ${UNTRUSTED_CONTENT_NOTE}`);
 
@@ -934,6 +939,9 @@ test('REND-10: a raw batch larger than 25 is capped in order and says so', async
   assert.equal(raw.data?.[24]?.id, '25');
   // The summary states the truncation so the agent knows the envelope is not complete.
   assert.equal(out.summary, `25 raw post(s) (capped at 25) ${UNTRUSTED_CONTENT_NOTE}`);
+  // …and the price follows what X SENT, not what survived the local cap: 30 posts came
+  // back in one request and all 30 were billed, however few we hand on (COST-3/REND-10).
+  assert.equal(out.units, 30);
 
   mock.assertDone();
   await mock.close();

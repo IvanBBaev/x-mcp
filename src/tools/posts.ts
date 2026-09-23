@@ -18,9 +18,11 @@ import {
   setReplyHidden,
 } from '../api/endpoints/posts.js';
 import type { RawCreatedPost } from '../api/endpoints/posts.js';
+import { WRITE_AMBIGUITY } from '../api/http.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
 import {
   RAW_MAX_RESULTS,
+  billableUnits,
   capRawMaxResults,
   postUrl,
   rawSummary,
@@ -73,6 +75,11 @@ export const xPostGet = defineTool({
     const ids = [...new Set(input.ids.map(parsePostId))];
     const res = await getPosts(ctx.http, { ids });
 
+    // Billed per post X actually returned, not per call and not per id asked for (COST-3):
+    // ids that came back in `errors[]` (deleted, protected) returned no resource. Counted
+    // from the raw envelope so the REND-10 cap below does not change the price.
+    const units = billableUnits(res);
+
     if (input.raw === true) {
       const all = res.data ?? [];
       const capped = all.slice(0, capRawMaxResults(all.length));
@@ -82,6 +89,7 @@ export const xPostGet = defineTool({
         summary: rawSummary(
           `${capped.length} raw post(s)${truncated ? ` (capped at ${RAW_MAX_RESULTS})` : ''}`,
         ),
+        units,
       };
     }
 
@@ -91,6 +99,7 @@ export const xPostGet = defineTool({
       summary: `${batch.items.length} post(s)${
         batch.missing?.length ? `, ${batch.missing.length} missing` : ''
       }`,
+      units,
     };
   },
 });
@@ -173,6 +182,24 @@ function withGuidance(err: XError, guidance: string, retryable: boolean): XError
 }
 
 /**
+ * POST-4 / NET-4: api/http already ends an ambiguous write failure with the generic
+ * {@link WRITE_AMBIGUITY} note. These tools know more — a create has a safe probe, a delete
+ * or hide is safe to repeat — so their guidance REPLACES that note rather than following a
+ * "do not re-issue" it may contradict.
+ */
+function withAmbiguityGuidance(err: XError, guidance: string): XError {
+  const base = err.message.endsWith(WRITE_AMBIGUITY)
+    ? err.message.slice(0, -WRITE_AMBIGUITY.length)
+    : err.message;
+  return new XError(err.kind, base + guidance, {
+    retryable: false,
+    fix: err.fix,
+    data: err.data,
+    cause: err,
+  });
+}
+
+/**
  * Give a failed `POST /2/tweets` its write-specific meaning (POST-2/3/4/7/9, NET-4).
  * The generic status -> XError mapping already happened in api/errors (frozen); this
  * narrows it using the platform's `title`/`detail` passed through in `data`.
@@ -222,7 +249,7 @@ function mapCreateFailure(err: XError, hasReplyTo: boolean, text: string): XErro
     );
   } else if (isAmbiguousWriteFailure(err)) {
     // POST-4 / NET-4: decorate, never remap the class.
-    mapped = withGuidance(err, CREATE_AMBIGUITY_GUIDANCE, false);
+    mapped = withAmbiguityGuidance(err, CREATE_AMBIGUITY_GUIDANCE);
   }
 
   // POST-9: thread guidance rides on WHATEVER the failure became.
@@ -436,7 +463,7 @@ export const xPostDelete = defineTool({
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
         // NET-4 on a destructive write: decorate with the (delete-safe) ambiguity note.
-        throw withGuidance(err, DELETE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, DELETE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
@@ -516,7 +543,7 @@ export const xPostHideReply = defineTool({
         throw withGuidance(err, HIDE_FORBIDDEN_GUIDANCE, false);
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
-        throw withGuidance(err, HIDE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, HIDE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
