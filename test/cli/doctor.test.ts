@@ -27,6 +27,7 @@ interface FakeDepsOptions {
   readonly platform?: NodeJS.Platform;
   readonly http?: DoctorHttpGet;
   readonly nowMs?: number;
+  readonly execArgv?: readonly string[];
 }
 
 interface FakeDoctor {
@@ -74,6 +75,7 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDoctor {
     stderr: (line) => errLines.push(line),
     clock: fakeClock(opts.nowMs ?? 1_700_000_000_000),
     platform: opts.platform ?? 'linux',
+    ...(opts.execArgv !== undefined ? { execArgv: opts.execArgv } : {}),
   };
 
   return { deps, outLines, errLines, httpCalls, stdout: () => outLines.join('\n') };
@@ -259,7 +261,7 @@ test('lock leftovers: a stale <token-file>.lock is noted with its age (AUTH-5)',
   assert.match(f.stdout(), /AUTH-5/);
 });
 
-test('win32: POSIX permission checks degrade with an explicit note (PLAT-2)', async () => {
+test('win32: POSIX permission checks degrade with an explicit note naming icacls (PLAT-2, AUTH-12)', async () => {
   const f = makeDeps({
     env: HEALTHY_ENV,
     files: {
@@ -273,6 +275,9 @@ test('win32: POSIX permission checks degrade with an explicit note (PLAT-2)', as
   assert.equal(code, 0);
   const output = f.stdout();
   assert.match(output, /\[note\]\s+permissions: PLAT-2/);
+  // AUTH-12 — the note names the operator's responsibility and the literal ACL command.
+  assert.ok(output.includes("operator's responsibility"));
+  assert.ok(output.includes(`icacls "${TOKEN_FILE}"`));
   assert.doesNotMatch(output, /\[fail\]/);
 });
 
@@ -469,6 +474,40 @@ test('--connect network failure exits 1 with a network-flavored remediation', as
   const output = f.stdout();
   assert.match(output, /\[fail\]\s+connectivity: GET .* failed — getaddrinfo ENOTFOUND/);
   assert.match(output, /check DNS\/TLS/);
+});
+
+// --- Proxy (CFG-7/AUTH-14) -----------------------------------------------------------------
+
+test('CFG-7/AUTH-14: env proxying without the opt-in is a [warn] config line, not a failure', async () => {
+  const f = makeDeps({
+    env: { ...HEALTHY_ENV, HTTPS_PROXY: 'http://proxy.corp:3128' },
+    files: HEALTHY_FILES,
+    execArgv: ['--use-env-proxy'],
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  assert.match(f.stdout(), /\[warn\]\s+config: Node env proxying is enabled .*HTTPS_PROXY is set/);
+  assert.doesNotMatch(f.stdout(), /\[note\]\s+proxy:/);
+});
+
+test('CFG-7/AUTH-14: an opted-in proxy is a [note] line, and --connect failures point at it', async () => {
+  const f = makeDeps({
+    env: {
+      ...HEALTHY_ENV,
+      NODE_USE_ENV_PROXY: '1',
+      HTTPS_PROXY: 'http://proxy.corp:3128',
+      X_MCP_ALLOW_PROXY: '1',
+    },
+    files: HEALTHY_FILES,
+    http: () => Promise.reject(new Error('connect ECONNREFUSED')),
+  });
+  const code = await createDoctorCli(f.deps)(['--connect']);
+  assert.equal(code, 1);
+  const output = f.stdout();
+  assert.match(output, /\[note\]\s+proxy: Node env proxying is enabled and HTTPS_PROXY is set/);
+  assert.doesNotMatch(output, /\[warn\]\s+config: Node env proxying/);
+  assert.match(output, /requests go through HTTPS_PROXY — check that proxy too/);
+  assert.doesNotMatch(output, /ignores proxy environment variables/);
 });
 
 // --- Argument handling ----------------------------------------------------------------------

@@ -1,5 +1,5 @@
 {
-  "_provenance": "X API v2 400 with a JSON problem body the mapper does not special-case (an invalid-request the query pre-validator did not catch). Per taxonomy, `validation` is reserved for LOCAL pre-call checks, so an API-returned 400 degrades to `api` with platform detail (DRIFT-2), non-retryable. Source: docs.x.com/x-api/fundamentals/errors invalid-request. Captured 2026-07-23. Exercises: api class from an unmapped 4xx, non-retryable.",
+  "_provenance": "X API v2 400 with a JSON problem body the mapper does not special-case (an invalid-request the query pre-validator did not catch). Per taxonomy, `validation` is reserved for LOCAL pre-call checks, so an API-returned 400 degrades to `api` with platform detail (DRIFT-2), non-retryable — except a rejected pagination cursor (PAGE-2, see 400-invalid-pagination-token.json). Source: docs.x.com/x-api/fundamentals/errors invalid-request. Captured 2026-07-23. Exercises: api class from an unmapped 4xx, non-retryable.",
   "status": 400,
   "headers": { "content-type": "application/json; charset=utf-8" },
   "body": {
