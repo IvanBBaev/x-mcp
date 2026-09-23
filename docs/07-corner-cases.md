@@ -450,15 +450,20 @@ credits, not tiers, for post-2026-02-06 developers.)*
 - **REND-1 — Zero results render explicitly** `P1` `[DX-F3]`
   v2 omits `data` entirely on empty result sets. The render is
   `{result_count: 0, note: "no matching results"}` — never an empty object, never
-  an error.
+  an error. An empty page whose 200 carried `errors[]` is not a zero-results case:
+  it gets a distinct "requested resource unavailable, see `missing[]`" note instead
+  (REND-2).
 
 - **REND-2 — Partial failures surface as `missing[]`** `P1` `[ARCH-F5]`
   200-with-`errors[]` responses (deleted/suspended/protected items in batch or
-  single lookups) render successful items plus
+  single lookups, and paginated reads) render successful items plus
   `missing: [{id, reason: "deleted" | "suspended" | "protected" | …}]`. An agent
   asking for 100 posts and receiving 87 always sees why. A single lookup with nothing
   to render (e.g. `x_list_get` on a missing or foreign private list) fails as a typed
   `not-found` carrying the reason, instead of rendering an empty object.
+  A paginated page that carried only `errors[]` renders `result_count: 0` +
+  `missing[]` + an "unavailable" note — never the REND-1 zero-results note, which would
+  hide why nothing came back.
 
 - **REND-3 — Long posts are never silently truncated** `P1` `[ARCH-F11, DX-F3]`
   `post-compact` includes `note_tweet`; render prefers `note_tweet.text` over

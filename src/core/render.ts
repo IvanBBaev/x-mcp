@@ -5,7 +5,8 @@
 //
 // Corner cases implemented here (docs/07 §11, authoritative for the REND-* ids):
 //   REND-1  empty result sets render `{ result_count: 0, note: ZERO_RESULTS_NOTE }`.
-//   REND-2  200-with-`errors[]` partial failures surface as a `missing[]` list.
+//   REND-2  200-with-`errors[]` partial failures surface as a `missing[]` list — on batch
+//           lookups AND paginated reads; an errors-only page gets ALL_MISSING_NOTE.
 //   REND-3  long/repost posts carry full body via `note_tweet` + `truncated`.
 //   REND-4  every post gets the canonical `https://x.com/i/status/<id>` permalink.
 //   REND-5  degraded `includes` (missing author expansion) never crash — id-only fallback.
@@ -14,7 +15,7 @@
 //   REND-9  timestamps normalise to ISO-8601 UTC (never epoch / locale).
 //   REND-10 `raw: true` payloads are capped at 25 items (capRawMaxResults).
 
-import { ZERO_RESULTS_NOTE } from './render-shapes.js';
+import { ALL_MISSING_NOTE, ZERO_RESULTS_NOTE } from './render-shapes.js';
 import type {
   BatchResult,
   CompactDm,
@@ -317,6 +318,7 @@ interface MutablePage<T> {
   result_count: number;
   next_token?: string;
   note?: string;
+  missing?: readonly Missing[];
 }
 
 // ---------------------------------------------------------------------------------------
@@ -696,24 +698,30 @@ export function renderUsers(res: RawListResponse<RawUser>): BatchResult<CompactU
 }
 
 // ---------------------------------------------------------------------------------------
-// Paginated envelopes -> Page<T> (REND-1 / REND-6 / REND-10).
+// Paginated envelopes -> Page<T> (REND-1 / REND-2 / REND-6 / REND-10).
 // ---------------------------------------------------------------------------------------
 
 interface PageOptions {
   readonly untrusted?: boolean;
   readonly nextToken?: string;
   readonly extraNotes?: readonly string[];
+  /** Already-mapped partial failures (REND-2); an empty list is treated as absent. */
+  readonly missing?: readonly Missing[];
 }
 
 /**
  * Build a `Page<T>` envelope. Empty pages carry only {@link ZERO_RESULTS_NOTE} (REND-1);
  * non-empty pages of third-party content carry {@link UNTRUSTED_CONTENT_NOTE} (REND-6).
+ * Partial failures ride along as `missing[]` (REND-2). An empty page that has `missing[]`
+ * is NOT a zero-results case — X refused or could not resolve what was asked — so it
+ * carries {@link ALL_MISSING_NOTE} instead of the zero-results note.
  * `next_token` is omitted on the last page. `result_count` is this page's item count.
  */
 export function buildPage<T>(items: readonly T[], opts: PageOptions = {}): Page<T> {
+  const missing = opts.missing ?? [];
   const notes: string[] = [];
   if (items.length === 0) {
-    notes.push(ZERO_RESULTS_NOTE); // REND-1
+    notes.push(missing.length > 0 ? ALL_MISSING_NOTE : ZERO_RESULTS_NOTE); // REND-2 / REND-1
   } else if (opts.untrusted === true) {
     notes.push(UNTRUSTED_CONTENT_NOTE); // REND-6
   }
@@ -722,6 +730,7 @@ export function buildPage<T>(items: readonly T[], opts: PageOptions = {}): Page<
   const page: MutablePage<T> = { items, result_count: items.length };
   if (opts.nextToken !== undefined && opts.nextToken !== '') page.next_token = opts.nextToken;
   if (notes.length > 0) page.note = notes.join(' ');
+  if (missing.length > 0) page.missing = missing;
   return page;
 }
 
@@ -729,13 +738,13 @@ export function buildPage<T>(items: readonly T[], opts: PageOptions = {}): Page<
 export function renderPostPage(res: RawListResponse<RawTweet>): Page<CompactPost> {
   const inc = buildIncludes(res.includes);
   const items = asArray(res.data).map((t) => renderPostWith(t, inc));
-  return pageFrom(items, res.meta);
+  return pageFrom(items, res);
 }
 
 /** Compact a paginated user response (followers, list members, …). */
 export function renderUserPage(res: RawListResponse<RawUser>): Page<CompactUser> {
   const items = asArray(res.data).map((u) => renderUser(u));
-  return pageFrom(items, res.meta);
+  return pageFrom(items, res);
 }
 
 /** Compact a paginated DM-event response. */
@@ -745,25 +754,32 @@ export function renderDmPage(
 ): Page<CompactDm> {
   const inc = buildIncludes(res.includes);
   const items = asArray(res.data).map((d) => renderDmWith(d, inc));
-  return pageFrom(items, res.meta, extraNotes);
+  return pageFrom(items, res, extraNotes);
 }
 
 /** Compact a paginated list response. */
 export function renderListPage(res: RawListResponse<RawList>): Page<CompactList> {
   const inc = buildIncludes(res.includes);
   const items = asArray(res.data).map((l) => renderListWith(l, inc));
-  return pageFrom(items, res.meta);
+  return pageFrom(items, res);
 }
 
+/**
+ * Shared tail of the paged renderers: cursor from `meta`, and the response's `errors[]`
+ * mapped through {@link renderMissing} (REND-2/REND-7) — never platform `detail` prose.
+ */
 function pageFrom<T>(
   items: readonly T[],
-  meta: RawMeta | undefined,
+  res: RawEnvelope,
   extraNotes?: readonly string[],
 ): Page<T> {
+  const meta = res.meta;
+  const missing = renderMissing(res.errors);
   const opts: PageOptions = {
     untrusted: true,
     ...(meta?.next_token !== undefined ? { nextToken: meta.next_token } : {}),
     ...(extraNotes !== undefined ? { extraNotes } : {}),
+    ...(missing.length > 0 ? { missing } : {}),
   };
   return buildPage(items, opts);
 }

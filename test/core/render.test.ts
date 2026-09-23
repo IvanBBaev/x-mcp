@@ -20,8 +20,12 @@ import {
   toIso,
   RAW_DEFAULT_MAX_RESULTS,
   RAW_MAX_RESULTS,
+  UNTRUSTED_CONTENT_NOTE,
 } from '../../src/core/render.js';
-import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
+import type { RawListResponse, RawTweet } from '../../src/core/render.js';
+import { ALL_MISSING_NOTE, ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
+
+import { loadFixture } from '../helpers/index.js';
 
 test('REND-1: empty result set renders result_count 0 with the zero-results note', () => {
   const page = renderPostPage({ meta: { result_count: 0 } });
@@ -70,6 +74,88 @@ test('REND-7: third-party error detail text never leaks into the mapped result',
   });
   assert.equal(JSON.stringify(out).includes('hunter2'), false);
   assert.equal(JSON.stringify(out).includes('secret content'), false);
+});
+
+// --- REND-2 on paginated reads: errors[] is never dropped from a Page<T> ----------------
+
+/** A 200 page body that carries ONLY `errors[]` — e.g. a timeline of a protected account. */
+const ERRORS_ONLY = {
+  errors: [
+    {
+      title: 'Authorization Error',
+      type: 'https://api.twitter.com/2/problems/not-authorized-for-resource',
+      resource_id: '42',
+      detail: 'Sorry, you are not authorized to see the user with id: [42]. PAGE_SENTINEL',
+    },
+  ],
+} as const;
+
+test('REND-2: an errors-only page surfaces missing[] and is not reported as zero results', () => {
+  const page = renderPostPage(ERRORS_ONLY);
+  assert.deepEqual(page, {
+    items: [],
+    result_count: 0,
+    note: ALL_MISSING_NOTE,
+    missing: [{ id: '42', reason: 'protected' }],
+  });
+  // The REND-1 note would claim nothing matched; the page must say WHY nothing came back.
+  assert.equal(page.note?.includes(ZERO_RESULTS_NOTE), false);
+});
+
+test('REND-2: every paged renderer carries missing[] from an errors-only page', () => {
+  const pages = [
+    renderPostPage(ERRORS_ONLY),
+    renderUserPage(ERRORS_ONLY),
+    renderDmPage(ERRORS_ONLY),
+    renderListPage(ERRORS_ONLY),
+  ];
+  for (const page of pages) {
+    assert.equal(page.result_count, 0);
+    assert.equal(page.note, ALL_MISSING_NOTE);
+    assert.deepEqual(page.missing, [{ id: '42', reason: 'protected' }]);
+  }
+});
+
+test('REND-2: extra notes and next_token survive on an errors-only page', () => {
+  const page = renderDmPage({ ...ERRORS_ONLY, meta: { result_count: 0, next_token: 'n2' } }, [
+    'DMs are private correspondence.',
+  ]);
+  assert.equal(page.next_token, 'n2');
+  assert.equal(page.note, `${ALL_MISSING_NOTE} DMs are private correspondence.`);
+  assert.equal(page.missing?.length, 1);
+});
+
+test('REND-2: a page with both data and errors keeps the items and adds missing[]', () => {
+  const page = renderPostPage(
+    loadFixture<{ body: RawListResponse<RawTweet> }>('errors/200-partial-missing.json').body,
+  );
+  assert.equal(page.result_count, 1);
+  assert.equal(page.items[0]?.id, '1460323737035677698');
+  // Non-empty page: the REND-6 untrusted note, not the zero-results/all-missing note.
+  assert.equal(page.note, UNTRUSTED_CONTENT_NOTE);
+  assert.deepEqual(
+    page.missing?.map((m) => m.id),
+    ['20', '111111', '999999'],
+  );
+});
+
+test('REND-7: platform detail prose on a paged errors[] never reaches the rendered page', () => {
+  const fromFixture = renderPostPage(
+    loadFixture<{ body: RawListResponse<RawTweet> }>('errors/200-partial-missing.json').body,
+  );
+  const fromInline = renderUserPage(ERRORS_ONLY);
+  for (const page of [fromFixture, fromInline]) {
+    const json = JSON.stringify(page);
+    assert.equal(json.includes('SENTINEL'), false);
+    assert.equal(json.includes('Could not find'), false);
+    assert.equal(json.includes('not authorized to see'), false);
+  }
+});
+
+test('REND-1: an empty errors[] array is not a partial failure', () => {
+  const page = renderPostPage({ errors: [], meta: { result_count: 0 } });
+  assert.deepEqual(page, { items: [], result_count: 0, note: ZERO_RESULTS_NOTE });
+  assert.equal(Object.hasOwn(page, 'missing'), false);
 });
 
 test('REND-3: long-form posts expose the full body via note_tweet and set truncated', () => {

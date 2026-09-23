@@ -10,6 +10,15 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- Paginated reads (search, timelines, followers/following, user search, owned lists,
+  list members and timelines, bookmarks, DMs) now report the per-item `errors[]` X
+  returns alongside an HTTP 200 as a `missing[]` list of `{id, reason}`, the same shape
+  batch lookups already use. A page that came back with only errors no longer reads "No
+  results matched this query."; its note says X reported the requested resource as
+  unavailable and points at `missing[]`. X's own error prose is still never echoed. The
+  O_NOFOLLOW fallback notice on Windows now uses the standard `x-mcp-ai: warning:`
+  stderr prefix.
+
 - If Node's own env proxying is switched on (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy`
   in `NODE_OPTIONS`) and `HTTPS_PROXY`/`HTTP_PROXY` is set, the server now prints a
   one-line startup warning that API requests, including their `Authorization` header, go

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { createHttpClient } from '../../src/api/http.js';
 import { XError } from '../../src/core/errors.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
+import { ALL_MISSING_NOTE } from '../../src/core/render-shapes.js';
 import type {
   RawListResponse,
   RawSingleResponse,
@@ -373,6 +374,41 @@ test('REND-1/PAGE-4: an empty timeline page carries the zero-results note and no
   assert.equal(page.result_count, 0);
   assert.equal(page.next_token, undefined);
   assert.equal(page.note, 'No results matched this query.');
+
+  http.assertDone();
+  await http.close();
+});
+
+test('REND-2/REND-7: an errors-only 200 timeline page surfaces missing[], not zero results', async () => {
+  const http = mockHttp();
+  // A 200 with no `data` and only `errors[]` (a protected account's timeline): the agent
+  // must learn WHY nothing came back, and the platform `detail` prose must stay out.
+  http.pool
+    .intercept({
+      path: '/2/users/50393960/tweets',
+      method: 'GET',
+      query: TIMELINE_FIELD_PARAMS,
+    })
+    .reply(200, {
+      errors: [
+        {
+          title: 'Authorization Error',
+          type: 'https://api.twitter.com/2/problems/not-authorized-for-resource',
+          resource_id: '50393960',
+          detail: 'Sorry, you are not authorized to see the user with id: [50393960].',
+        },
+      ],
+    });
+
+  const out = await xTimelineUser.handler({ user: '50393960' }, makeCtx(http));
+  const page = out.data as CompactPageResult & {
+    readonly missing?: readonly { readonly id: string; readonly reason: string }[];
+  };
+
+  assert.equal(page.result_count, 0);
+  assert.equal(page.note, ALL_MISSING_NOTE);
+  assert.deepEqual(page.missing, [{ id: '50393960', reason: 'protected' }]);
+  assert.equal(JSON.stringify(out).includes('not authorized to see'), false);
 
   http.assertDone();
   await http.close();

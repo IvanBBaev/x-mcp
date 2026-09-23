@@ -109,12 +109,14 @@ Every catalogued tool is registered.
   argument accepts the canonical id, and where noted a `@handle`/handle or a status
   URL; the server resolves them before calling the API.
 - **Pagination**: all list-returning tools take `max_results` + `page_token`, return
-  `next_token` + `result_count`. `page_token` bridges to the v2 request cursor verbatim
-  (corner case PAGE-1); a cursor X rejects as stale or invalid comes back as a
-  `validation` error telling the agent to restart from the first page (PAGE-2).
-  `max_results` is clamped to each endpoint's bounds in both directions (PAGE-3). Every
-  read tool except the DM reads accepts optional `raw: true` (uncompacted payload,
-  size-capped per corner case REND-10).
+  `next_token` + `result_count`, and — when X reported per-item errors on an HTTP 200 —
+  a `missing[]` of `{id, reason}` like batch lookups (REND-2; a page with only errors
+  says so in its `note` instead of the zero-results note). `page_token` bridges to the
+  v2 request cursor verbatim (corner case PAGE-1); a cursor X rejects as stale or
+  invalid comes back as a `validation` error telling the agent to restart from the first
+  page (PAGE-2). `max_results` is clamped to each endpoint's bounds in both directions
+  (PAGE-3). Every read tool except the DM reads accepts optional `raw: true`
+  (uncompacted payload, size-capped per corner case REND-10).
 - **Untrusted content**: post/user/DM text is third-party data and is rendered as
   inert content, never as instructions (corner case REND-6).
 - **Destructive-op rule**: irreversible **content deletion** is never hidden behind
