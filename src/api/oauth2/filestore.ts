@@ -46,6 +46,7 @@ import { dirname } from 'node:path';
 
 import type { Clock, Sleep, TokenPair, TokenStore } from '../../core/ports.js';
 import { authError } from '../../core/errors.js';
+import { formatLogLine } from '../../core/log.js';
 
 /** On-disk schema version this build reads and writes (docs/05 §8.7). */
 export const TOKEN_FILE_SCHEMA_VERSION = 1;
@@ -93,8 +94,8 @@ const AUTHORIZE_HINT = 'Run `npx x-mcp-ai authorize` to create a fresh token fil
  * The one token-file permission rule (T1, AUTH-12), shared by the store's first `load()`
  * and the server's startup check so both say the same thing: a file accessible by group
  * or other is a warning — never a refusal, since the next persist rewrites it 0600.
- * Returns `null` for a tight mode. The message carries no `x-mcp-ai:` prefix; each sink
- * adds its own.
+ * Returns `null` for a tight mode. The message carries no prefix of its own; each sink
+ * wraps it (single-line JSON on stderr — CFG-5).
  */
 export function tokenFilePermissionWarning(path: string, mode: number): string | null {
   if ((mode & 0o077) === 0) return null;
@@ -230,7 +231,9 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
   const fs = options.fs ?? nodeTokenFs;
   const platform = options.platform ?? process.platform;
   const isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const warn =
+    options.warn ??
+    ((message: string) => console.warn(formatLogLine('warn', message, new Date().toISOString())));
 
   const dir = dirname(path);
   const lockPath = `${path}.lock`;
@@ -251,7 +254,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (win32) {
       warnOnce(
         'nofollow-win32',
-        `x-mcp-ai: O_NOFOLLOW is unavailable on Windows; symlink refusal for ${path} degrades to plain opens (PLAT-2).`,
+        `O_NOFOLLOW is unavailable on Windows; symlink refusal for ${path} degrades to plain opens (PLAT-2).`,
       );
       return 0;
     }
@@ -277,7 +280,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (win32) {
       warnOnce(
         'posix-perms-win32',
-        `x-mcp-ai: POSIX permission checks for ${path} are skipped on Windows — mode bits ` +
+        `POSIX permission checks for ${path} are skipped on Windows — mode bits ` +
           "are not enforced there, so securing the token file is the operator's " +
           `responsibility; inspect its ACL with: icacls "${path}" and run: npx x-mcp-ai doctor ` +
           '(PLAT-2, AUTH-12).',
@@ -397,7 +400,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
         // fstat on the open handle (not a second path lookup) → no TOCTOU window (T1).
         const { mode } = await handle.stat();
         const permsWarning = tokenFilePermissionWarning(path, mode);
-        if (permsWarning !== null) warnOnce('token-file-perms', `x-mcp-ai: ${permsWarning}`);
+        if (permsWarning !== null) warnOnce('token-file-perms', permsWarning);
       }
       text = await handle.readFile({ encoding: 'utf8' });
     } catch (err) {
@@ -634,7 +637,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     if (holder === 'gone') return;
     if (holder === 'unreadable' || holder.pid !== process.pid) {
       warn(
-        `x-mcp-ai: not removing the refresh lock ${lockPath}: it no longer looks like this ` +
+        `not removing the refresh lock ${lockPath}: it no longer looks like this ` +
           "process's lock (a peer may have reclaimed it). Remove it manually if no other " +
           'x-mcp-ai process is running.',
       );
@@ -643,7 +646,7 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
     await fs.unlink(lockPath).catch((err: unknown) => {
       if (errCode(err) !== 'ENOENT') {
         warn(
-          `x-mcp-ai: could not remove the refresh lock ${lockPath} ` +
+          `could not remove the refresh lock ${lockPath} ` +
             `(${errCode(err) ?? 'unknown error'}); remove it manually.`,
         );
       }

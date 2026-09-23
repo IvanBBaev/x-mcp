@@ -39,8 +39,11 @@ test('MEDIA-5/PLAT-2: with no warn port the degradation notice lands on stderr, 
   assert.equal(notices.length, 1, `expected one stderr notice, got ${String(notices.length)}`);
   assert.match(notices[0] ?? '', /O_NOFOLLOW is unavailable/);
   assert.match(notices[0] ?? '', /PLAT-2/);
-  // Same stderr prefix as every other non-fatal notice (`x-mcp-ai: warning: <text>`).
-  assert.match(notices[0] ?? '', /^x-mcp-ai: warning: O_NOFOLLOW/);
-  // The default writer terminates the message itself — stderr is a stream, not a logger.
+  // Same single-line JSON envelope as every other non-fatal notice (CFG-5): {ts, level, msg}.
+  const record: unknown = JSON.parse(notices[0] ?? '');
+  assert.deepEqual(Object.keys(record as object).sort(), ['level', 'msg', 'ts']);
+  assert.equal((record as { level: string }).level, 'warn');
+  assert.match((record as { msg: string }).msg, /^O_NOFOLLOW is unavailable/);
+  // The default writer terminates the line itself — stderr is a stream, not a logger.
   assert.ok((notices[0] ?? '').endsWith('\n'));
 });

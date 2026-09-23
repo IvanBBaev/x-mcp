@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- Non-fatal stderr notices (startup permission warnings, the O_NOFOLLOW degradation
+  notice, the keychain single-process-lock notice) are now single-line JSON,
+  `{"ts", "level", "msg"}`, instead of a plain-text `x-mcp-ai: warning: <text>` line.
+  The fatal-startup line (`x-mcp-ai: fatal: <reason>`) is unchanged.
+
 - `x_search_recent`, `x_search_archive`, `x_post_counts_recent` and
   `x_post_counts_archive` now handle `start_time`/`end_time` the way the timeline tools
   do. An `end_time` inside the last 10 seconds, which X rejects with a 400, is moved to
@@ -23,9 +28,7 @@ development chronology lives in `WORKLOG.md`.
   returns alongside an HTTP 200 as a `missing[]` list of `{id, reason}`, the same shape
   batch lookups already use. A page that came back with only errors no longer reads "No
   results matched this query."; its note says X reported the requested resource as
-  unavailable and points at `missing[]`. X's own error prose is still never echoed. The
-  O_NOFOLLOW fallback notice on Windows now uses the standard `x-mcp-ai: warning:`
-  stderr prefix.
+  unavailable and points at `missing[]`. X's own error prose is still never echoed.
 
 - If Node's own env proxying is switched on (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy`
   in `NODE_OPTIONS`) and `HTTPS_PROXY`/`HTTP_PROXY` is set, the server now prints a

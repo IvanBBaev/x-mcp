@@ -28,6 +28,7 @@ import { parseSubcommand } from './cli/dispatch.js';
 import { parseConfig } from './core/config.js';
 import type { Config } from './core/config.js';
 import { XError } from './core/errors.js';
+import { formatLogLine } from './core/log.js';
 import type { Clock, Random, Sleep } from './core/ports.js';
 import { composeServer } from './mcp/compose.js';
 
@@ -43,6 +44,11 @@ function fatal(reason: string): never {
 
 function oneLine(text: string): string {
   return text.replace(/\s*[\r\n]+\s*/g, ' ').trim();
+}
+
+/** Every non-fatal notice (CFG-6/CFG-8/CFG-9, AUTH-12): single-line JSON on stderr (CFG-5). */
+function warn(message: string): void {
+  process.stderr.write(`${formatLogLine('warn', message, new Date().toISOString())}\n`);
 }
 
 function errorMessage(error: unknown): string {
@@ -150,7 +156,7 @@ async function serve(): Promise<void> {
   // first: "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
   if (config.logLevel !== 'silent') {
     for (const warning of [...warnings, ...tokenFileWarnings(config), ...config.warnings]) {
-      process.stderr.write(`x-mcp-ai: warning: ${warning}\n`);
+      warn(warning);
     }
   }
 
@@ -228,7 +234,7 @@ const writeLine =
 
 async function runAuthorize(rest: readonly string[]): Promise<number> {
   const { config, warnings } = loadConfig();
-  for (const warning of warnings) process.stderr.write(`x-mcp-ai: warning: ${warning}\n`);
+  for (const warning of warnings) warn(warning);
   // Whichever backend the server will READ from is the one authorize must WRITE to — the
   // selector is shared with mcp/compose precisely so the two cannot disagree. app-only
   // mode resolves nothing, and minting a user token there would be meaningless.

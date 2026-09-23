@@ -285,7 +285,11 @@ test('CFG-6: a group/other-readable profiles file warns on stderr and still star
   child.stdin.end();
   await once(child, 'exit');
 
-  assert.match(stderr(), /^x-mcp-ai: warning: .*profiles\.json is readable by group or other/m);
+  // Non-fatal notices are single-line JSON (CFG-5): {"ts","level","msg"}, in that key order.
+  assert.match(
+    stderr(),
+    /^\{"ts":"[^"]+","level":"warn","msg":"[^"]*profiles\.json is readable by group or other/m,
+  );
   assert.match(stderr(), /mode 644.*chmod 600/);
 });
 

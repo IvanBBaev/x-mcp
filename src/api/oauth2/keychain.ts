@@ -50,6 +50,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import { authError } from '../../core/errors.js';
+import { formatLogLine } from '../../core/log.js';
 import type { TokenPair, TokenStore } from '../../core/ports.js';
 import { TOKEN_FILE_SCHEMA_VERSION, persistedLifetime } from './filestore.js';
 
@@ -458,7 +459,9 @@ export function createKeychainTokenStore(options: KeychainTokenStoreOptions = {}
   const account = assertSafeIdentifier('account', options.account ?? KEYCHAIN_ACCOUNT);
   const label = assertSafeIdentifier('label', options.label ?? KEYCHAIN_LABEL);
   const runner = options.runner ?? nodeKeychainRunner;
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const warn =
+    options.warn ??
+    ((message: string) => console.warn(formatLogLine('warn', message, new Date().toISOString())));
   const tool = PLATFORM_TOOL[platform];
   const entry = `${service}/${account}`;
 
@@ -588,7 +591,7 @@ export function createKeychainTokenStore(options: KeychainTokenStoreOptions = {}
     if (!warnedAboutLock) {
       warnedAboutLock = true;
       warn(
-        `x-mcp-ai: the OS keychain backend serializes token refresh within THIS process only; ` +
+        'the OS keychain backend serializes token refresh within THIS process only; ' +
           'unlike the file store it has no cross-process refresh lock. If several x-mcp-ai ' +
           'processes share this account, use X_MCP_TOKEN_FILE so concurrent refreshes stay ' +
           'single-flight (AUTH-5).',

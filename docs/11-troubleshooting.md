@@ -12,10 +12,12 @@ There are exactly two failure surfaces, and they need different responses.
 | **Startup** | One line on **stderr**: `x-mcp-ai: fatal: <reason>`, then exit code 1. The client shows the server as failed/disconnected. | The operator, in the env. |
 | **A tool call** | A structured tool error (`isError: true`) carrying `kind`, `message`, `retryable`, `fix`. The server stays up. | `fix: "agent"` → the model retries or corrects arguments. `fix: "operator"` → you change config or credentials. |
 
-Non-fatal startup notices appear as `x-mcp-ai: warning: <text>` on stderr and are
-suppressed at `X_MCP_LOG_LEVEL=silent`. **stdout is JSON-RPC only** — if you see anything
-else there, something in your wrapper is polluting it and the client will fail to parse the
-stream.
+Non-fatal startup notices (CFG-5) appear on stderr as single-line JSON, one object per
+line, in the fixed key order `{"ts": "<ISO-8601>", "level": "warn", "msg": "<text>"}` — for
+example `{"ts":"2026-09-24T12:00:00.000Z","level":"warn","msg":"profiles file ... is
+readable by group or other ..."}`. They are suppressed at `X_MCP_LOG_LEVEL=silent`.
+**stdout is JSON-RPC only** — if you see anything else there, something in your wrapper is
+polluting it and the client will fail to parse the stream.
 
 The 11 error classes and their defaults:
 
