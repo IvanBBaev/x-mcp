@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A startup failure is now always a single `x-mcp-ai: fatal:` line on stderr, even when
+  the reason contains line breaks (a profiles-file path with a newline, or a multi-line
+  module-load error from the `npx` launcher). Hosts that read the first stderr line now
+  get the whole reason.
+
 - `authorize` now opens the authorization URL in your default browser (`open` on macOS,
   `xdg-open` on Linux, `rundll32` on Windows). When no browser can be launched — no opener
   installed, no graphical session, or an SSH session — it says so right away and points

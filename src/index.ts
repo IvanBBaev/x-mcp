@@ -30,10 +30,18 @@ import { XError } from './core/errors.js';
 import type { Clock, Random, Sleep } from './core/ports.js';
 import { composeServer } from './mcp/compose.js';
 
-/** The CFG-5 startup contract: one legible stderr line, non-zero exit, silent stdout. */
+/**
+ * The CFG-5 startup contract: one legible stderr line, non-zero exit, silent stdout. A
+ * reason can carry line breaks of its own (an operator path, a multi-line error message),
+ * so they are folded into single spaces rather than trusted to be absent.
+ */
 function fatal(reason: string): never {
-  process.stderr.write(`x-mcp-ai: fatal: ${reason}\n`);
+  process.stderr.write(`x-mcp-ai: fatal: ${oneLine(reason)}\n`);
   process.exit(1);
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s*[\r\n]+\s*/g, ' ').trim();
 }
 
 function errorMessage(error: unknown): string {
@@ -177,8 +185,7 @@ async function serve(): Promise<void> {
   // a write-crash-write loop.
   process.stdout.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EPIPE') process.exit(0);
-    process.stderr.write(`x-mcp-ai: fatal: stdout error — ${errorMessage(error)}\n`);
-    process.exit(1);
+    fatal(`stdout error — ${errorMessage(error)}`);
   });
 
   await server.connect(new StdioServerTransport());
