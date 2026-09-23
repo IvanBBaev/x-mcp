@@ -250,6 +250,29 @@ test('AUTH-9: invalid JSON and missing required fields fail closed, file untouch
     mode: 0o600,
   });
   await assertAuthError(store.load(), h.path, 'expires_in');
+
+  await fsp.writeFile(
+    h.path,
+    JSON.stringify({ version: 1, access_token: 'a', obtained_at: 5, expires_in: '7200' }),
+    { mode: 0o600 },
+  );
+  await assertAuthError(store.load(), h.path, 'expires_in');
+});
+
+test('AUTH-11: an unknown lifetime persists as null and loads back as unknown, not corrupt', async (t) => {
+  const h = await makeHarness(t);
+  const store = h.store();
+
+  // The refresh machine marks a response without expires_in as NaN (unknown lifetime).
+  await store.persist({ ...PAIR, expires_in: Number.NaN });
+  const onDisk = JSON.parse(await fsp.readFile(h.path, 'utf8')) as Record<string, unknown>;
+  assert.equal(onDisk['expires_in'], null);
+
+  const loaded = await store.load();
+  assert.ok(loaded !== null);
+  assert.ok(Number.isNaN(loaded.expires_in), 'unknown stays unknown — no default is assumed');
+  assert.equal(loaded.access_token, PAIR.access_token);
+  assert.deepEqual(h.warnings, []);
 });
 
 test('T1: token file wider than 0600 warns once across repeated loads', async (t) => {

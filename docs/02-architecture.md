@@ -285,6 +285,8 @@ stateDiagram-v2
    obtained_at, expires_in}` to a tmp file (`O_CREAT|O_EXCL|O_NOFOLLOW`, `0600`) and
    `rename` over the token file (win32 rename-over-open-file retried briefly, then
    surfaced as `auth` — PLAT-1) **before** the new access token is used on any request.
+   An unknown lifetime is written as `expires_in: null` and loads back as unknown — never
+   as a corrupt file and never as an assumed default (AUTH-11).
 6. **Release the lock**, update the in-memory pair, resolve the shared promise. The
    triggering 401 request is retried **exactly once**; a second 401 after a completed
    refresh is terminal (`FAILED_CLOSED`, AUTH-8).
