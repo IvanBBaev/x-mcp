@@ -293,11 +293,19 @@ lives in `api/http`:
   the code plus PKCE verifier — to the configured host. There is no degraded mode to fall
   back to, so the process does not start. The check runs *after* profile resolution,
   because a profile may set `auth_mode` (it cannot set the base URL).
-- **Redirects are not followed** for token-bearing requests. A 301/302/307/308 on such a
-  request surfaces as a typed `api` error — a redirect must never carry the token to a new
-  host.
-- **Proxy env vars** (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`) are **ignored** for
-  token-bearing calls unless explicitly opted in (CFG-7).
+- **Redirects are not followed** for token-bearing requests. Every fetch uses
+  `redirect: 'manual'`; a 301/302/307/308 (on any method) surfaces as a typed `api` error
+  — a redirect must never carry the token to a new host. The OAuth2 token refresh and the
+  `authorize` code exchange do not follow a 3xx either, so the refresh token, the code and
+  the PKCE verifier never chase a `Location` (AUTH-14).
+- **Proxy env vars** (`HTTP_PROXY`/`HTTPS_PROXY`) are **ignored** by the default fetch
+  dispatcher, and `ALL_PROXY` is never read. The exception is Node's own env proxying:
+  with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` (in `NODE_OPTIONS` or on the command
+  line) Node routes every fetch — `Authorization` header included — through the proxy.
+  When that is on and a proxy var is set, startup prints a single-line warning (not a
+  refusal) and `doctor` repeats it, unless `X_MCP_ALLOW_PROXY=1` records that the proxy is
+  trusted (CFG-7, AUTH-14). The warning names the variable, never its value (a proxy URL
+  may carry credentials).
 - `X_MCP_BASE_URL` is **env-only** (never a tool parameter), requires `https://`, and only
   takes effect for a non-`*.x.com` host when `X_MCP_ALLOW_INSECURE_BASE_URL=1` is set. When
   active it appears in the startup banner and in `auth_status` (CFG-7).

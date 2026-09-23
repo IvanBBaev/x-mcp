@@ -121,7 +121,10 @@ interface ConfigLoad {
 function loadConfig(): ConfigLoad {
   const profiles = loadProfilesJson(process.env);
   try {
-    return { config: parseConfig(process.env, profiles.value), warnings: profiles.warnings };
+    return {
+      config: parseConfig(process.env, profiles.value, { execArgv: process.execArgv }),
+      warnings: profiles.warnings,
+    };
   } catch (error) {
     // parseConfig throws a `validation` XError carrying one legible reason (CFG-5).
     fatal(XError.is(error) ? error.message : errorMessage(error));
@@ -258,6 +261,7 @@ async function runAuthorize(rest: readonly string[]): Promise<number> {
 async function runDoctor(rest: readonly string[]): Promise<number> {
   const run = createDoctorCli({
     env: process.env,
+    execArgv: process.execArgv,
     fs: {
       // lstat, not stat — the doctor reports on symlinks instead of following them.
       stat: (p) =>

@@ -436,6 +436,31 @@ test('fetch adapter: rejections with an EMPTY or malformed error body carry only
   await mock.close();
 });
 
+test('AUTH-14: a 3xx from the token endpoint is not followed — the refresh token never chases Location', async () => {
+  const mock = mockHttp();
+  // One interceptor per status: following the redirect would need a second request to the
+  // Location host, which — net connect disabled — would reject instead of mapping to ok:false.
+  for (const status of [301, 302, 307, 308]) {
+    mock.pool
+      .intercept({ path: TOKEN_ENDPOINT_PATH, method: 'POST' })
+      .reply(status, '', { headers: { location: 'https://evil.example/token' } });
+  }
+
+  const http = createFetchRefreshHttp({
+    baseUrl: 'https://api.x.com',
+    clientId: 'client-1',
+    clientSecret: 'secret-1',
+    dispatcher: mock.dispatcher,
+  });
+  for (const status of [301, 302, 307, 308]) {
+    // A plain rejection: the machine fails closed on it and the stored pair is untouched.
+    assert.deepEqual(await http('refresh-1'), { ok: false, status });
+  }
+
+  mock.assertDone();
+  await mock.close();
+});
+
 // --- isTimeout(): the two shapes fetch can surface a timeout in, and the fall-through -----
 //
 // The MockAgent can only stage the WRAPPED shape (undici reports every dispatcher failure

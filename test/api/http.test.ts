@@ -198,6 +198,79 @@ test('AUTH-14: a redirect is refused, never followed (token cannot chase Locatio
   await http.close();
 });
 
+// Every redirect status, on a read AND on a write. 307/308 are the dangerous pair for a
+// write: a client that followed them would re-send the method, the body AND the header to
+// the Location host. Each case pins a single interceptor, so a chase would need a second
+// request and — net connect disabled — fail as `network` instead of the `api` refusal.
+for (const [method, status] of [
+  ['GET', 301],
+  ['GET', 307],
+  ['GET', 308],
+  ['POST', 301],
+  ['POST', 302],
+  ['POST', 307],
+  ['POST', 308],
+] as const) {
+  test(`AUTH-14: a ${String(status)} on a ${method} is refused, never followed with the Authorization header`, async () => {
+    const http = mockHttp();
+    const seen: unknown[] = [];
+    http.pool.intercept({ path: '/2/redir', method }).reply((opts) => {
+      seen.push(opts.headers);
+      return {
+        statusCode: status,
+        data: '',
+        responseOptions: { headers: { location: 'https://evil.example/steal' } },
+      };
+    });
+
+    const { client } = makeClient(http, {
+      authorization: () => Promise.resolve('Bearer TOKEN-123'),
+    });
+    const err = await rejects(
+      client.send(
+        method === 'GET'
+          ? { method, path: '/2/redir' }
+          : { method, path: '/2/redir', body: { text: 'hi' } },
+      ),
+    );
+
+    assert.equal(err.kind, 'api');
+    assert.equal(err.data.http_status, status);
+    // The header went to the API origin exactly once, and nowhere else.
+    assert.equal(seen.length, 1);
+    assert.equal(headerValue(seen[0], 'authorization'), 'Bearer TOKEN-123');
+    http.assertDone();
+    await http.close();
+  });
+}
+
+test('AUTH-14: an opaqueredirect response (spec-compliant manual mode) is refused without a status', async (t) => {
+  // Node's fetch hands `redirect: 'manual'` back as the raw 3xx (covered above); a
+  // spec-compliant fetch yields an opaque-redirect filtered response instead — type
+  // `opaqueredirect`, status 0, no readable headers. The client refuses that shape too.
+  const opaque = new Response(null);
+  Object.defineProperty(opaque, 'type', { value: 'opaqueredirect' });
+  Object.defineProperty(opaque, 'status', { value: 0 });
+  const fetchMock = t.mock.method(globalThis, 'fetch', () => Promise.resolve(opaque));
+
+  const seenStatuses: number[] = [];
+  const client = createHttpClient({
+    sleep: fakeSleep(fakeClock(0)).fn,
+    random: fakeRandom([0.5]),
+    authorization: () => Promise.resolve('Bearer TOKEN-123'),
+    onResponse: (status) => seenStatuses.push(status),
+  });
+  const err = await rejects(client.send({ method: 'GET', path: '/2/redir' }));
+
+  assert.equal(err.kind, 'api');
+  assert.match(err.message, /redirects are not followed/);
+  assert.equal(err.data.http_status, undefined); // status 0 is not reported as an HTTP status
+  assert.deepEqual(seenStatuses, [0]); // observed, then refused — never retried
+  assert.equal(fetchMock.mock.callCount(), 1);
+  const init = fetchMock.mock.calls[0]?.arguments[1] as { redirect?: string } | undefined;
+  assert.equal(init?.redirect, 'manual');
+});
+
 // --- CFG-7: proxy env ignored ----------------------------------------------------
 
 test('CFG-7: proxy env vars are ignored — the client never builds a ProxyAgent', async () => {

@@ -132,6 +132,7 @@ lists an `X_MCP_*` variable defers to this one.
 | `X_MCP_PROFILE` | — | Selects the active profile; **required** when `X_MCP_PROFILES_FILE` is set |
 | `X_MCP_BASE_URL` | `https://api.x.com` | API base override; env-only, must be `https://`; a non-`*.x.com` host also requires `X_MCP_ALLOW_INSECURE_BASE_URL=1` (CFG-7) |
 | `X_MCP_ALLOW_INSECURE_BASE_URL` | `0` | Dev flag enabling a non-`*.x.com` `X_MCP_BASE_URL` |
+| `X_MCP_ALLOW_PROXY` | `0` | Marks a proxy as trusted: silences the startup warning when Node env proxying (`NODE_USE_ENV_PROXY=1` / `--use-env-proxy`) is on and a proxy var is set (CFG-7, AUTH-14) |
 | `X_MCP_TIMEOUT_MS` | `30000` | Per-**HTTP-request** timeout (not per tool call — one tool may make several requests) |
 | `X_MCP_LOG_LEVEL` | `info` | `silent` \| `error` \| `info` \| `debug` (§9) |
 

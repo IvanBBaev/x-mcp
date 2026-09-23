@@ -189,6 +189,7 @@ X_MCP_AUTH_MODE=oauth2 X_MCP_CLIENT_ID=… node build/src/index.js authorize
 | `X_MCP_PROFILE` | | | Active profile name (required with a profiles file). |
 | `X_MCP_BASE_URL` | `https://api.x.com` | | API base URL; must be `https://` and `*.x.com`. |
 | `X_MCP_ALLOW_INSECURE_BASE_URL` | `0` | | `1` → permit a non-`x.com` base URL (testing only). |
+| `X_MCP_ALLOW_PROXY` | `0` | | `1` → silence the startup warning when Node env proxying (`NODE_USE_ENV_PROXY=1` / `--use-env-proxy`) sends requests through a proxy var. |
 | `X_MCP_TIMEOUT_MS` | `30000` | | Per-request timeout, milliseconds. |
 | `X_MCP_LOG_LEVEL` | `info` | | `silent` \| `error` \| `info` \| `debug`. |
 
@@ -390,7 +391,8 @@ A summary; the full threat model and operator checklist live in
 
 - **Host-scoped auth.** The `Authorization` header is attached only for the configured API
   origin; redirects are never followed on token-bearing requests (confused-deputy defense).
-  Proxy environment variables are ignored.
+  Proxy environment variables are ignored; if Node's own env proxying is switched on, startup
+  warns unless `X_MCP_ALLOW_PROXY=1`.
 - **Token file hardening.** Written `0600` with `O_NOFOLLOW`/`O_EXCL`; refresh is
   single-flight with reload-under-lock and fails closed rather than racing.
 - **Untrusted content.** Post/user/DM text returned to the model is marked as untrusted.

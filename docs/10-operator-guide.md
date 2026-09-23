@@ -432,7 +432,11 @@ and are rejected by the config contract.
 - **Startup is fail-closed.** A configuration problem prints one
   `x-mcp-ai: fatal: <reason>` line and exits non-zero rather than starting degraded.
 - **Proxy variables are ignored.** `HTTP_PROXY`/`HTTPS_PROXY` have no effect; the client
-  dials the API origin directly.
+  dials the API origin directly. The one exception is Node's own env proxying
+  (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy` in `NODE_OPTIONS`): then every request,
+  including its `Authorization` header, goes through the proxy, and startup and `doctor`
+  warn about it. If the proxy is yours and trusted, set `X_MCP_ALLOW_PROXY=1` to silence
+  the warning (`doctor` then shows it as a note).
 - **The base URL is pinned** to `https://api.x.com`. Any other host needs
   `X_MCP_ALLOW_INSECURE_BASE_URL=1` and is warned about loudly — testing only.
 - **Tell the agent to call `x_auth_status` first** in any session that will write or needs

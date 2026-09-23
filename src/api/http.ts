@@ -368,8 +368,8 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
       // window that the tracker should not miss.
       config.onResponse?.(response.status, response.headers);
 
-      // AUTH-14: redirects are refused. With redirect: 'manual', a real fetch yields an
-      // opaque redirect (status 0); undici's MockAgent yields the raw 3xx. Both are refused.
+      // AUTH-14: redirects are refused. With redirect: 'manual', Node's fetch (undici) yields
+      // the raw 3xx; a spec-strict fetch yields an opaque redirect (status 0). Both are refused.
       if (isRedirect(response)) {
         await discardBody(response);
         throw apiError(

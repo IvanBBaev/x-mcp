@@ -143,10 +143,15 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 
 - **AUTH-14 — Auth header is host-scoped** `P1` `[SEC-T10/F4]`
   The `Authorization` header is attached **only** when the resolved request host is
-  on the hardcoded allowlist (`api.x.com`, `upload.x.com`, plus the explicit dev
-  override host from CFG-7). Redirects (301/302/307) are **not followed** for
-  token-bearing requests — a redirect is surfaced as an `api` error. Proxy env vars
-  are ignored for token-bearing calls unless explicitly opted in.
+  on the hardcoded allowlist (`api.x.com`, `upload.x.com`) and matches the configured
+  origin. The CFG-7 dev override host is deliberately **not** on the list: requests to it
+  go out unauthenticated, and OAuth2 refuses to start against it. Redirects
+  (301/302/307/308, on any method, including the OAuth2 token refresh and the `authorize`
+  code exchange) are **not followed** for token-bearing requests — a redirect is surfaced
+  as an `api` error. Proxy env vars are ignored by the default fetch; if Node's own env
+  proxying is switched on (`NODE_USE_ENV_PROXY=1` or `--use-env-proxy`) while a proxy var
+  is set, startup prints a one-line warning (not a refusal) unless `X_MCP_ALLOW_PROXY=1`,
+  and `doctor` reports it.
 
 - **AUTH-15 — `auth_status` in app-only mode** `P1` `[ARCH-F14]`
   App-only context has no authenticated user: `auth_status` returns

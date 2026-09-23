@@ -10,6 +10,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- If Node's own env proxying is switched on (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy`
+  in `NODE_OPTIONS`) and `HTTPS_PROXY`/`HTTP_PROXY` is set, the server now prints a
+  one-line startup warning that API requests, including their `Authorization` header, go
+  through that proxy; `doctor` reports the same. It still starts. Set
+  `X_MCP_ALLOW_PROXY=1` to mark the proxy as trusted and silence the warning.
+
 - A token file readable by group or other now triggers a one-line `chmod 600` warning
   on stderr as soon as the server starts, not only on its first X call. On Windows the
   warning and `doctor` now say that securing the file is your responsibility and print

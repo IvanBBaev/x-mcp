@@ -963,6 +963,40 @@ test('createFetchTokenExchangeHttp: posts the form, parses JSON, tolerates empty
   await mock.close();
 });
 
+test('AUTH-14: createFetchTokenExchangeHttp does not follow a 3xx — the code and verifier never chase Location', async () => {
+  const mock = mockHttp();
+  const http = createFetchTokenExchangeHttp(mock.dispatcher);
+  // One interceptor per status: a followed redirect would need a second request to the
+  // Location host, which — net connect disabled — would reject instead of resolving.
+  for (const status of [301, 302, 307, 308]) {
+    mock.pool
+      .intercept({ path: '/2/oauth2/token', method: 'POST' })
+      .reply(status, '', { headers: { location: 'https://evil.example/token' } });
+  }
+  for (const status of [301, 302, 307, 308]) {
+    const response = await http(
+      DEFAULT_TOKEN_URL,
+      { grant_type: 'authorization_code', code: 'code-1', code_verifier: 'verifier-1' },
+      { authorization: 'Basic Zm9vOmJhcg==' },
+    );
+    assert.equal(response.status, status);
+  }
+  mock.assertDone();
+  await mock.close();
+});
+
+test('AUTH-14: a 3xx token-exchange response fails the run as [api]; nothing persisted', async () => {
+  const bag = makeDeps({ exchange: { status: 307, body: undefined } });
+  const browser = completingBrowser(bag);
+  const cli = createAuthorizeCli({ ...bag.deps, openBrowser: browser.open });
+
+  assert.equal(await cli([]), 1);
+  const stderrText = bag.errs.join('\n');
+  assert.match(stderrText, /\[api\]/);
+  assert.match(stderrText, /307/);
+  assert.equal(bag.store.persistCount(), 0);
+});
+
 test('createFetchTokenExchangeHttp: without a dispatcher, a transport failure rejects raw', async () => {
   // No dispatcher → the default-dispatcher arm; an unparseable URL rejects inside fetch
   // itself, before any network I/O.
