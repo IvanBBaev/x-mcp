@@ -295,7 +295,7 @@ function xErrorOf(kind: ErrorClass, pattern: RegExp): (err: unknown) => boolean 
 }
 
 /** Resolve x_post_create's per-call cost — the tool declares a resolver, not a class. */
-function createCostFor(text: string): { class: string; usd?: number } {
+function createCostFor(text: string): { class: string; usd?: number; note?: string } {
   const spec = xPostCreate.cost;
   assert.ok(typeof spec === 'function', 'x_post_create cost must be an input-dependent resolver');
   return spec({ text });
@@ -426,10 +426,22 @@ test('COST-4: the cost resolver prices URL-bearing text at $0.20, plain text at 
   // Plain text -> class only; the budget layer prices it from the $0.015 table entry.
   assert.deepEqual(createCostFor('plain words, nothing linkable'), { class: 'w:post' });
 
-  // Explicit scheme and bare auto-linkable domain both trigger the override (detection
-  // errs toward warning).
-  assert.deepEqual(createCostFor('read https://example.com/post'), { class: 'w:post', usd: 0.2 });
-  assert.deepEqual(createCostFor('read example.com for details'), { class: 'w:post', usd: 0.2 });
+  // Explicit scheme, bare auto-linkable domains (including IDN and punycode) and a domain
+  // glued to a word by `_` all trigger the override (detection errs toward warning).
+  for (const text of [
+    'read https://example.com/post',
+    'read example.com for details',
+    'read WWW.EXAMPLE.COM',
+    'siehe m\u00fcnchen.de',
+    'see \u043f\u0440\u0438\u043c\u0435\u0440.\u0440\u0444',
+    'see xn--e1afmkfd.xn--p1ai',
+    'see foo_bar.com',
+  ]) {
+    const cost = createCostFor(text);
+    assert.equal(cost.usd, 0.2, text);
+    // The note travels with the estimate, so a hard-mode refusal can name the URL price.
+    assert.match(cost.note ?? '', /\$0\.20.*\$0\.015/, text);
+  }
 });
 
 test('COST-4: the result note states the $0.20 URL price distinctly from the base', async () => {

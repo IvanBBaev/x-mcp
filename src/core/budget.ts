@@ -179,12 +179,13 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
       if (mode === 'hard' && limit !== undefined && next > limit + EPSILON) {
         // COST-1/COST-5: refuse BEFORE mutating the counter, so a blocked reservation
         // spends nothing and the boundary stays exact under interleaving (CONC-2).
+        const why = typeof cost === 'object' && cost.note !== undefined ? ` ${cost.note}` : '';
         throw budgetError(
           `This call (${formatUsd(price)}) would bring session spend to ${formatUsd(
             next,
           )}, over the credit budget of ${formatUsd(
             limit,
-          )}. This is an operator-set limit; cannot be changed from within this session.`,
+          )}.${why} This is an operator-set limit; cannot be changed from within this session.`,
         );
       }
       spent = next; // atomic increment — same synchronous tick as the check above (CONC-2)

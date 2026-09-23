@@ -207,6 +207,11 @@ export interface CostEstimate {
    * never multiplied.
    */
   readonly units?: number;
+  /**
+   * Why this call is priced off the table (COST-4), in our own prose. A hard-mode refusal
+   * appends it, so the agent sees why a call near the cap costs more than the base price.
+   */
+  readonly note?: string;
 }
 
 /** A tool's cost: a static class, or an input-dependent resolver (for the URL-post case). */

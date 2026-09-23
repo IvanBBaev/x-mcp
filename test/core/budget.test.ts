@@ -100,6 +100,22 @@ test('COST-5: hard mode passes exactly at 100% and blocks only past it', () => {
   assert.equal(budget.total(), 1);
 });
 
+test('COST-4: a hard-mode refusal carries the estimate note naming why the call costs more', () => {
+  const budget = createSessionBudget({ limit: 0.1, mode: 'hard' });
+  const note = 'The text contains a URL, so X prices this post at $0.20 instead of $0.015.';
+  assert.throws(
+    () => budget.reserve({ class: 'w:post', usd: 0.2, note }),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'budget');
+      assert.ok(err.message.includes(note));
+      assert.match(err.message, /operator-set limit/);
+      return true;
+    },
+  );
+  assert.equal(budget.total(), 0);
+});
+
 test('COST-1: hard-mode block is a typed budget error the model cannot override', () => {
   const budget = createSessionBudget({ limit: 0.01, mode: 'hard' });
   assert.throws(

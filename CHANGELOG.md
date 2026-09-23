@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- When `X_MCP_CREDIT_BUDGET_MODE=hard` refuses an `x_post_create` whose text contains a
+  URL, the refusal now says the post is priced at $0.20 instead of the $0.015 base. URL
+  detection also covers internationalized and punycode domains (for example `xn--p1ai`)
+  and a domain glued to a word by `_`, so those posts are no longer under-quoted.
+
 - In a batch lookup's `missing[]`, a suspended account is now reported as `suspended`
   rather than `not-found`, and a "Not Authorized" item as `protected` rather than
   `unavailable`. X sends a suspended user with a generic not-found type, and only the

@@ -110,6 +110,10 @@ export const xPostGet = defineTool({
 const BASE_POST_USD = 0.015;
 /** COST-4: the raised per-post price X charges when the text carries a URL. */
 const URL_POST_USD = 0.2;
+/** COST-4: why a URL post costs more, shared by the budget refusal and the result note. */
+const URL_PRICE_NOTE =
+  `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
+  `instead of the $${BASE_POST_USD} base price (COST-4).`;
 
 /** POST-2: the platform's fixed weighted width of any URL, and the weighted limit. */
 const URL_WEIGHT = 23;
@@ -117,15 +121,18 @@ const WEIGHTED_LIMIT = 280;
 
 // COST-4: URL detection ERRS TOWARD WARNING — an explicit http(s):// URL, or anything
 // shaped like a bare domain the platform's auto-linker could pick up (dotted labels with
-// a 2+-letter TLD, optional path). A false positive (e.g. "node.js") merely over-warns;
+// a 2+-letter TLD, optional path). Labels and TLDs may be non-Latin (IDN, e.g. a Cyrillic
+// domain under .rf) or punycode (xn--p1ai); the lookbehind stands in for `\b`, which only knows
+// ASCII word characters. A false positive (e.g. "node.js") merely over-warns;
 // a miss would silently underquote the $0.20 price. Kept as a SOURCE string so call
 // sites build fresh RegExp objects — no shared lastIndex state between `g` users.
 const URL_PATTERN =
-  'https?:\\/\\/\\S+|\\b[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*\\.[a-z]{2,}(?:\\/\\S*)?';
+  'https?:\\/\\/\\S+|(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]*' +
+  '(?:\\.[\\p{L}\\p{N}][\\p{L}\\p{N}-]*)*\\.(?:xn--[a-z0-9-]+|\\p{L}{2,})(?:\\/\\S*)?';
 
 /** COST-4: does the text contain something X would price as a URL post? */
 function containsUrl(text: string): boolean {
-  return new RegExp(URL_PATTERN, 'i').test(text);
+  return new RegExp(URL_PATTERN, 'iu').test(text);
 }
 
 /**
@@ -134,7 +141,7 @@ function containsUrl(text: string): boolean {
  * count. The X API stays authoritative; this number only decorates the mapped 400.
  */
 function weightedLength(text: string): number {
-  const collapsed = text.replace(new RegExp(URL_PATTERN, 'gi'), 'x'.repeat(URL_WEIGHT));
+  const collapsed = text.replace(new RegExp(URL_PATTERN, 'giu'), 'x'.repeat(URL_WEIGHT));
   return [...collapsed].length;
 }
 
@@ -331,7 +338,9 @@ export const xPostCreate = defineTool({
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
   cost: (input) =>
-    containsUrl(input.text) ? { class: 'w:post', usd: URL_POST_USD } : { class: 'w:post' },
+    containsUrl(input.text)
+      ? { class: 'w:post', usd: URL_POST_USD, note: URL_PRICE_NOTE }
+      : { class: 'w:post' },
   annotations: {
     title: CREATE_TITLE,
     readOnlyHint: false,
@@ -393,13 +402,7 @@ export const xPostCreate = defineTool({
     const data = {
       id,
       url,
-      ...(containsUrl(input.text)
-        ? {
-            note:
-              `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
-              `instead of the $${BASE_POST_USD} base price (COST-4).`,
-          }
-        : {}),
+      ...(containsUrl(input.text) ? { note: URL_PRICE_NOTE } : {}),
     };
     return { data, summary: `Post created: ${url}` };
   },
