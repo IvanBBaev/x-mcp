@@ -145,6 +145,35 @@ review requires ([reviews/04-qa-review.md](reviews/04-qa-review.md) F8):
 - **`src/index.ts` is excluded** from unit coverage and covered by the §1
   spawn-smoke instead of chasing entrypoint lines.
 
+### 4.1 Residual branches (read the c8 table with this in hand)
+
+Every remaining `< 100 %` branch row is one of the four kinds below. None is worth a
+contrived test; a new gap that is NOT on this list is a real one.
+
+- **Platform arms the running leg cannot take.** win32 `%APPDATA%` in
+  `core/config` `resolveTokenFile`; `constants.O_NOFOLLOW ?? 0` / `O_NONBLOCK ?? 0`
+  in `tools/media` (both are defined on POSIX). The Windows CI leg takes them.
+- **Arms an earlier guard makes unreachable.** `credentialEgressIssue`'s `new URL`
+  catch (the schema's `baseUrlIssue` already rejected the value); `buildIncludes`'
+  `tweet(undefined)` / `media(undefined)` (every caller checks the id first);
+  `CATEGORY_BY_TYPE[sniffed] ?? 'tweet_image'` (the sniffer only returns mapped
+  types); doctor's `(none)` token store (oauth2 without keychain always resolves a
+  file path), app-only `bearer token not set` (config validation refuses it) and the
+  plural `problems` on the CFG-5 exit (that path reports exactly one failure);
+  the tools' `page.note ? … : note` fallbacks (`pageFrom` always marks a page
+  untrusted, so a rendered page always carries a note).
+- **`noUncheckedIndexedAccess` / Node guarantees.** `rest[i] ?? ''` inside a bounded
+  loop; `req.url ?? '/'` and the `server.address()` object check in
+  `createNodeLoopbackListen`; the placeholder `resolveOutcome` a Promise executor
+  replaces synchronously.
+- **Fail-at-construction guards and fetch internals.** `mcp/compose`'s INT-3
+  "no bucket for tool" throw and its `undefined` provider for app-only-without-token
+  (config refuses that shape); the `api/http` arms only a live socket reaches —
+  empty stream chunks, `cancel()` rejecting inside a body drain, a `TimeoutError`
+  wrapped as `cause`, cancellation landing inside a backoff — which a `MockAgent`
+  cannot stage. `mcp/compose`'s production clock/random/store ports are exercised
+  by the spawn smoke (§1) and the live suite, not by unit coverage.
+
 ## 5. Fixture provenance & refresh discipline
 
 Fixtures are sanitized recordings (ids scrambled, handles fictional) or, where the
