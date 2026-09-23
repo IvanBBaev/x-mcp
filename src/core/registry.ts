@@ -73,12 +73,19 @@ export interface BudgetReservation {
 /**
  * Session credit budget (real impl: core/budget, T-112). `check` is the pre-flight gate
  * (pipeline step 3): in `hard` mode it throws the typed `budget` XError when reserving
- * `estimate` would cross the cap; in `warn` mode it never throws. `reserve` is the atomic
- * post-response accounting (step 6, COST-5 / CONC-2) that yields the per-call + session cost.
+ * `estimate` would cross the cap; in `warn` mode it never throws. `reserve` is the
+ * post-response accounting (step 6, COST-5 / CONC-2) that yields the per-call + session
+ * cost, given the number of billable resources the response actually carried.
+ *
+ * The seam does not say WHICH of the two steps moves the counter, and the shipped gate
+ * chooses `check` (INT-2, `mcp/gates`) so that a call which reaches the API and then fails
+ * stays charged; `reserve` then settles that reservation to `units`. An implementation that
+ * charges at `reserve` instead is still a valid gate — the registry only requires that one
+ * tool call produce exactly one charge.
  */
 export interface BudgetGate {
   check(estimate: CostEstimate): void;
-  reserve(estimate: CostEstimate): BudgetReservation;
+  reserve(estimate: CostEstimate, units?: number): BudgetReservation;
 }
 
 /**
@@ -256,13 +263,16 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
     const output = await invokeHandler(tool, input, buildToolContext(ctx), ctx.signal);
 
-    // (6) reserve the credit cost (atomic in the gate — COST-5 / CONC-2). Only successful
-    //     calls are charged; a handler throw above short-circuits before this point.
-    //     The unit is ONE TOOL CALL, not one HTTP request: a handler that sends several
-    //     (media's chunked INIT/APPEND×N/FINALIZE) is charged one estimate, and a call that
-    //     fails part-way is charged nothing despite the requests it already sent. Advisory
-    //     accounting by design — the gap is documented in docs/02 §7 (T-320 F9).
-    const reservation = deps.budget.reserve(estimate);
+    // (6) settle the credit cost against what the response actually carried (COST-3).
+    //     WHO CHARGES, AND WHEN: the shipped gate takes the money at step 3's `check`
+    //     (INT-2, `mcp/gates`), NOT here — so a call that reaches the API and then fails
+    //     stays charged, which is the honest accounting for a request the platform already
+    //     served. This step hands that reservation the real resource count, so a read of
+    //     100 posts is priced as 100 unit prices instead of one (docs/01 §3.1); a handler
+    //     that reports no count settles at one and nothing changes.
+    //     Still ONE TOOL CALL, not one HTTP request: `x_media_upload`'s chunked
+    //     INIT/APPEND×N/FINALIZE is a single `w:action` estimate (docs/02 §7, T-320 F9).
+    const reservation = deps.budget.reserve(estimate, output.units);
 
     // (7) attach ResultMeta (COST-3). Compaction/sanitization already happened inside the
     //     handler (core/render + sanitize, T-117); the registry only envelopes payload + cost.
