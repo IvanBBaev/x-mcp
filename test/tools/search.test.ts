@@ -95,6 +95,9 @@ test('x_search_recent: happy path renders a compact page with @handles and next_
 
   assert.equal(page.items.length, 3);
   assert.equal(page.result_count, 3);
+  // COST-3: the page is billed per post it returned, so the handler reports three units
+  // for the registry to settle the reservation with — not one for the call.
+  assert.equal(out.units, 3);
   assert.equal(page.next_token, 'abc');
   assert.equal(page.items[0]?.author, '@alice_dev');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
@@ -183,21 +186,23 @@ test('x_search_recent: raw:true returns the exact envelope and caps the wire at 
   assert.deepEqual(out.data, fixture);
   // …but the REND-6 warning still rides the summary (T-320 F4).
   assert.equal(out.summary, `3 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  // A raw read pays for the same three posts: the price follows the response, not the shape.
+  assert.equal(out.units, 3);
 
   http.assertDone();
   await http.close();
 });
 
-test('x_search_recent: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('x_search_recent: raw without max_results sends the raw default (REND-10); a data-less 200 counts as 0', async () => {
   const http = mockHttp();
-  // No max_results on the wire at all — the raw cap only applies when the caller asked
-  // for a size. A degraded envelope with no `data` must not crash the summary (DRIFT-1).
+  // With no size asked for, the raw read sends the raw default (10) (REND-10). A degraded
+  // envelope with no `data` must not crash the summary (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   http.pool
     .intercept({
       path: '/2/tweets/search/recent',
       method: 'GET',
-      query: { query: 'x', ...SEARCH_FIELD_PARAMS },
+      query: { query: 'x', ...SEARCH_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, envelope);
 
@@ -205,6 +210,7 @@ test('x_search_recent: raw without max_results sends no cap; a data-less 200 cou
 
   assert.deepEqual(out.data, envelope);
   assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  assert.equal(out.units, 0); // no resource returned, nothing to charge for (REND-1)
 
   http.assertDone();
   await http.close();
@@ -224,6 +230,7 @@ test('x_search_recent: empty results carry the zero-results note', async () => {
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 0);
+  assert.equal(out.units, 0); // an empty page is free (COST-3/REND-1)
   assert.equal(page.next_token, undefined);
   assert.equal(page.note, 'No results matched this query.');
 

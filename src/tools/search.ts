@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { defineTool } from '../core/tooldef.js';
 import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
 
@@ -86,12 +86,7 @@ export const xSearchRecent = defineTool({
 
     // REND-10: a raw read caps the outgoing max_results at the raw ceiling (25) and returns
     // the exact API JSON; a compact read uses the endpoint-clamped value (10-100).
-    const maxResults =
-      input.raw === true
-        ? input.max_results !== undefined
-          ? capRawMaxResults(input.max_results)
-          : undefined
-        : clamp?.value;
+    const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
 
     const params: SearchRecentParams = {
       query: input.query,
@@ -104,8 +99,16 @@ export const xSearchRecent = defineTool({
 
     const res = await searchRecent(ctx.http, params);
 
+    // Billed per post returned, not per search (COST-3): a full page of 100 costs 100
+    // post reads. The count comes from the raw envelope, before any local capping.
+    const units = billableUnits(res);
+
     if (input.raw === true) {
-      return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+      return {
+        data: res,
+        summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+        units,
+      };
     }
 
     let page = renderPostPage(res);
@@ -117,6 +120,7 @@ export const xSearchRecent = defineTool({
     return {
       data: page,
       summary: `${page.result_count} result(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+      units,
     };
   },
 });

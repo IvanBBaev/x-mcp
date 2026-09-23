@@ -13,12 +13,14 @@ import { join } from 'node:path';
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { tokenFileStartupWarnings } from './api/oauth2/filestore.js';
 import { createConfiguredTokenStore } from './api/oauth2/store.js';
 import {
   createAuthorizeCli,
   createFetchTokenExchangeHttp,
   createNodeLoopbackListen,
   createStdinReadLine,
+  createSystemBrowserOpener,
 } from './cli/authorize.js';
 import { createDoctorCli } from './cli/doctor.js';
 import type { DoctorStat } from './cli/doctor.js';
@@ -29,10 +31,18 @@ import { XError } from './core/errors.js';
 import type { Clock, Random, Sleep } from './core/ports.js';
 import { composeServer } from './mcp/compose.js';
 
-/** The CFG-5 startup contract: one legible stderr line, non-zero exit, silent stdout. */
+/**
+ * The CFG-5 startup contract: one legible stderr line, non-zero exit, silent stdout. A
+ * reason can carry line breaks of its own (an operator path, a multi-line error message),
+ * so they are folded into single spaces rather than trusted to be absent.
+ */
 function fatal(reason: string): never {
-  process.stderr.write(`x-mcp-ai: fatal: ${reason}\n`);
+  process.stderr.write(`x-mcp-ai: fatal: ${oneLine(reason)}\n`);
   process.exit(1);
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s*[\r\n]+\s*/g, ' ').trim();
 }
 
 function errorMessage(error: unknown): string {
@@ -118,14 +128,25 @@ function loadConfig(): ConfigLoad {
   }
 }
 
+/**
+ * AUTH-12 — the token file's permission warning at startup, only when the file backend is
+ * the one `createConfiguredTokenStore` will actually build (OAuth2, no keychain).
+ */
+function tokenFileWarnings(config: Config): string[] {
+  if (config.authMode !== 'oauth2' || config.tokenKeychain || config.tokenFile === undefined) {
+    return [];
+  }
+  return tokenFileStartupWarnings(config.tokenFile);
+}
+
 async function serve(): Promise<void> {
   const { config, warnings } = loadConfig();
 
-  // Non-fatal startup notices (CFG-6/CFG-7/CFG-8) go to stderr ONLY, so stdout stays
-  // protocol-pure (MCP-1) at every log level. The pre-validation findings come first:
-  // "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
+  // Non-fatal startup notices (CFG-6/CFG-7/CFG-8, AUTH-12) go to stderr ONLY, so stdout
+  // stays protocol-pure (MCP-1) at every log level. The file-permission findings come
+  // first: "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
   if (config.logLevel !== 'silent') {
-    for (const warning of [...warnings, ...config.warnings]) {
+    for (const warning of [...warnings, ...tokenFileWarnings(config), ...config.warnings]) {
       process.stderr.write(`x-mcp-ai: warning: ${warning}\n`);
     }
   }
@@ -176,8 +197,7 @@ async function serve(): Promise<void> {
   // a write-crash-write loop.
   process.stdout.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EPIPE') process.exit(0);
-    process.stderr.write(`x-mcp-ai: fatal: stdout error — ${errorMessage(error)}\n`);
-    process.exit(1);
+    fatal(`stdout error — ${errorMessage(error)}`);
   });
 
   await server.connect(new StdioServerTransport());
@@ -230,6 +250,7 @@ async function runAuthorize(rest: readonly string[]): Promise<number> {
     readLine: createStdinReadLine(),
     stdout: writeLine(process.stdout),
     stderr: writeLine(process.stderr),
+    openBrowser: createSystemBrowserOpener(),
   });
   return run(rest);
 }
