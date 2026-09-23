@@ -357,8 +357,8 @@ lives in a single choke point, never re-implemented per tool (ARCH-F2):
 tool call
   → zod input validation                    (mcp/schema)
   → policy check: classify × resolve        (core/registry → core/policy)  — deny → typed `policy` error
+  → rate-limit preflight                    (api/ratelimit) — known-exhausted → typed `rate-limit` error, nothing charged
   → budget check (reads + writes)           (core/budget)   — over session credit budget in `hard` mode → typed `budget` error
-  → rate-limit preflight                    (api/ratelimit) — known-exhausted → typed `rate-limit` error
   → endpoint wrapper builds request         (api/endpoints)
   → host-scoped auth injection + send       (api/http, api/oauth2)
   → 401 once? refresh (state machine §4A)   (api/oauth2)
@@ -455,9 +455,11 @@ X-F4; cases COST-1…7):
   the counter; the shipped gate (`mcp/gates`, INT-2) charges at the **check**, because
   `SessionBudget.reserve` is a single synchronous check-and-reserve and splitting it would
   reopen the interleaving window CONC-2 closes. The consequence is deliberate: a call that
-  reaches the API and then fails — rate-limit refusal, handler error, mid-page transport
+  reaches the API and then fails — a 429 from X, handler error, mid-page transport
   failure — **stays charged**, which is the honest accounting for requests the platform
-  already served. The post-handler step is then a *settlement*: it moves the ledger by the
+  already served. A call the local rate-limit preflight refuses (RATE-2) never reaches the
+  API and is **never charged**: the preflight runs before the budget check, in the same
+  synchronous stretch, so CONC-2's no-await window is unchanged. The post-handler step is then a *settlement*: it moves the ledger by the
   difference between the one resource held at check time and what the response actually
   carried. Settlement never throws, in either mode — the resources have been delivered and
   cannot be un-returned, so a `hard`-mode settle past the cap attaches a warning saying so

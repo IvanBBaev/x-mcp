@@ -281,7 +281,7 @@ test('POL-7 / POL-1: a denied tool is visible but its call is rejected with a po
 
 // --- The pipeline gauntlet -----------------------------------------------------------
 
-test('the pipeline runs the gauntlet in order (validate → policy → budget → rate-limit → handler → reserve) and attaches ResultMeta', async () => {
+test('the pipeline runs the gauntlet in order (validate → policy → rate-limit → budget → handler → reserve) and attaches ResultMeta', async () => {
   const order: string[] = [];
   let seenCtx: ToolContext | undefined;
   let checkEstimate: CostEstimate | undefined;
@@ -332,7 +332,7 @@ test('the pipeline runs the gauntlet in order (validate → policy → budget �
   const ctrl = new AbortController();
   const result = await reg.call('x_post_create', {}, callCtx({ signal: ctrl.signal }));
 
-  assert.deepEqual(order, ['validate', 'policy', 'budget-check', 'rate', 'handler', 'reserve']);
+  assert.deepEqual(order, ['validate', 'policy', 'rate', 'budget-check', 'handler', 'reserve']);
   assert.deepEqual(result.data, { id: '1' });
   assert.equal(result.summary, 'created');
   assert.deepEqual(result.meta, { cost_usd: 0.02, session_total_usd: 0.5 });
@@ -447,6 +447,29 @@ test('rate-limit preflight refuses a known-exhausted window before the handler r
   assert.equal(err.kind, 'rate-limit');
   assert.equal(err.retryable, true);
   assert.equal(handlerRan, false);
+});
+
+test('RATE-2/INT-2: a call the rate-limit preflight refuses never reaches the budget check', async () => {
+  // The shipped budget gate charges at `check` (INT-2). A local refusal sends nothing to X,
+  // so the preflight must run first: otherwise an agent retrying inside an exhausted window
+  // drains a hard-mode budget with calls the platform never saw.
+  let checks = 0;
+  const budget: BudgetGate = {
+    check: () => {
+      checks += 1;
+    },
+    reserve: () => ({ cost_usd: 0.005, session_total_usd: 0.005 }),
+  };
+  const reg = createRegistry(
+    [makeTool({ name: 'x_post_get', policy: 'read:content' })],
+    deps({ budget, rateLimit: fakeRateLimit(rateLimitError('Rate limited.')) }),
+  );
+
+  for (let i = 0; i < 3; i += 1) {
+    const err = await rejected(reg.call('x_post_get', {}, callCtx()));
+    assert.equal(err.kind, 'rate-limit');
+  }
+  assert.equal(checks, 0);
 });
 
 test('handler errors: an XError propagates unchanged; a non-XError is wrapped as api without leaking its message (REND-7)', async () => {

@@ -72,7 +72,7 @@ export interface BudgetReservation {
 
 /**
  * Session credit budget (real impl: core/budget, T-112). `check` is the pre-flight gate
- * (pipeline step 3): in `hard` mode it throws the typed `budget` XError when reserving
+ * (pipeline step 4): in `hard` mode it throws the typed `budget` XError when reserving
  * `estimate` would cross the cap; in `warn` mode it never throws. `reserve` is the
  * post-response accounting (step 6, COST-5 / CONC-2) that yields the per-call + session
  * cost, given the number of billable resources the response actually carried.
@@ -89,7 +89,8 @@ export interface BudgetGate {
 }
 
 /**
- * Rate-limit preflight (real impl: api/ratelimit, T-115). Pipeline step 4: throws the typed
+ * Rate-limit preflight (real impl: api/ratelimit, T-115). Pipeline step 3 — ahead of the
+ * budget, so a local refusal is never charged: throws the typed
  * `rate-limit` XError when the tracked window for this tool's endpoint class is known to be
  * exhausted (RATE-2); a no-op otherwise. Header-driven table updates happen inside the
  * EndpointInvoker, out of the registry's sight.
@@ -253,18 +254,21 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
       throw deps.policy.denyError(tool);
     }
 
-    // (3) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
+    // (3) rate-limit preflight — a known-exhausted window -> typed `rate-limit` error. It runs
+    //     BEFORE the budget because a call refused here never reaches X (RATE-2), so it must
+    //     not be charged; the shipped budget gate charges at `check` (INT-2).
+    deps.rateLimit.preflight(tool);
+
+    // (4) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
+    //     Synchronous with step 3, so no await separates the two (CONC-2 still holds).
     const estimate = resolveCost(tool, input);
     deps.budget.check(estimate);
-
-    // (4) rate-limit preflight — a known-exhausted window -> typed `rate-limit` error.
-    deps.rateLimit.preflight(tool);
 
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
     const output = await invokeHandler(tool, input, buildToolContext(ctx), ctx.signal);
 
     // (6) settle the credit cost against what the response actually carried (COST-3).
-    //     WHO CHARGES, AND WHEN: the shipped gate takes the money at step 3's `check`
+    //     WHO CHARGES, AND WHEN: the shipped gate takes the money at step 4's `check`
     //     (INT-2, `mcp/gates`), NOT here — so a call that reaches the API and then fails
     //     stays charged, which is the honest accounting for a request the platform already
     //     served. This step hands that reservation the real resource count, so a read of

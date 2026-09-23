@@ -33,9 +33,10 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  * SAME object to both `check` and `reserve`, so a WeakMap keyed by it is race-free under
  * parallel `tools/call` (MCP-8) with zero edits to the frozen pipeline.
  *
- * Consequence (mandated by INT-2): a call that fails AFTER the check (rate-limit gate,
- * handler error) stays charged — the API attempt was paid for, so charge-at-check is the
- * honest accounting. The registry's post-handler `reserve` becomes a read-back here.
+ * Consequence (mandated by INT-2): a call that fails AFTER the check (handler error, a 429
+ * from X) stays charged — the API attempt was paid for, so charge-at-check is the honest
+ * accounting. A local rate-limit refusal (RATE-2) is NOT charged: the registry runs that
+ * preflight before `check`, and no request leaves the process. The registry's post-handler `reserve` becomes a read-back here.
  *
  * SETTLEMENT (COST-3): the check-time reservation prices ONE resource, because how many
  * the response will carry is unknowable before it arrives. When the handler reports a real

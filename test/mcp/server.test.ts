@@ -306,7 +306,7 @@ test('MCP-2: tools/call round-trips a read tool through the full composed pipeli
   await mock.close();
 });
 
-test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and blocks the retry', async () => {
+test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and blocks the retry uncharged', async () => {
   const mock = mockHttp();
   mock.pool
     .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
@@ -331,11 +331,12 @@ test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and b
 
   // Call 2: NO interceptor is queued — the recorded headers must make the preflight gate
   // refuse locally (RATE-2) before any network attempt (a network attempt would surface as
-  // a loud MockAgent failure, not a typed rate-limit error).
+  // a loud MockAgent failure, not a typed rate-limit error). Nothing reached X, so nothing
+  // is charged: the preflight runs before the budget check.
   const second = await call(client, 'x_post_get', { ids: ['111'] });
   assert.equal(second.isError, true);
   assert.equal(textPayload<RenderedError>(second).error.kind, 'rate-limit');
-  assert.equal(composition.budget.total(), chargedOnce * 2);
+  assert.equal(composition.budget.total(), chargedOnce);
 
   // The recording client filed the headers under the composed bucket key (INT-3).
   const status = await call(client, 'x_rate_limit_status', {});

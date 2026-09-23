@@ -196,7 +196,8 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 - **RATE-2 — Preemptive refusal** `P1` `[QA-16]`
   When the tracked window shows `remaining === 0` and reset is in the future, the
   call is refused locally with a typed `rate-limit` error carrying the reset as ISO
-  8601 **and** `retry_after_seconds` — no HTTP request is made.
+  8601 **and** `retry_after_seconds` — no HTTP request is made, and the session credit
+  budget is not charged (the preflight runs before the budget check).
 
 - **RATE-3 — Past-reset proceeds** `P1` `[QA-17, ARCH-F15]`
   If the recorded reset time has passed, the request proceeds (window presumed

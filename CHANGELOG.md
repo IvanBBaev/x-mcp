@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A call refused locally because the rate-limit window is known to be exhausted no longer
+  counts against `X_MCP_CREDIT_BUDGET`. Nothing is sent to X for such a call, but it was
+  charged, so retries inside an exhausted window could use up a `hard`-mode budget.
+
 - A paginated `raw: true` read called without `max_results` now sends `max_results=10`
   instead of none. X's own default is 100 on the follower/following, liker, bookmark and
   list endpoints, so the raw payload could exceed its documented 25-item cap (REND-10).
