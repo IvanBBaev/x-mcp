@@ -10,6 +10,9 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A `page_token` that X rejects as stale or invalid now returns a `validation` error
+  ("pagination token invalid or expired — restart from the first page") instead of an
+  opaque `api` error, so the agent knows to drop the cursor and page again from the start.
 - A read that hits a rate limit whose window renews within 5 seconds now waits for the
   reset and retries once instead of failing: the 429 is absorbed and the call returns
   normally, a few seconds later. A reset further away still returns the `rate-limit`

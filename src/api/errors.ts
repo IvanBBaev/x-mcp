@@ -1,6 +1,6 @@
 // HTTP → XError mapper (docs/02 §5.5 taxonomy, §6 pipeline; docs/07 DX-F13/REND-2/REND-7,
-// DRIFT-2, RATE-2/4/7, COST-6/7, AUTH-8). Owned by T-116. This module is the single place
-// that turns an X API v2 error response into a typed `XError`, and a 200-with-`errors[]`
+// DRIFT-2, RATE-2/4/7, COST-6/7, AUTH-8, PAGE-2). Owned by T-116. This module is the single
+// place that turns an X API v2 error response into a typed `XError`, and a 200-with-`errors[]`
 // batch response into the partial-failure `missing[]` contract. It is PURE: it performs no
 // I/O and reads nothing but its arguments (the optional `nowMs` makes the one time-relative
 // output — `retry_after_seconds` — deterministic for tests).
@@ -39,6 +39,7 @@ import {
   type XError,
   type XErrorData,
 } from '../core/errors.js';
+import { pageTokenError } from '../core/paginate.js';
 import type { Missing, MissingReason } from '../core/render-shapes.js';
 import { sanitizePlatformText } from '../core/sanitize.js';
 
@@ -188,6 +189,31 @@ function extractScope(problem: ParsedProblem): string | undefined {
   return match?.[1];
 }
 
+/** The request-cursor parameter names the v2 endpoints take (`pagination_token`, `next_token`). */
+const CURSOR_PARAM = /\b(?:pagination_token|next_token)\b/;
+
+/**
+ * A 400 that rejects the pagination cursor (PAGE-2). X's invalid-request body names the
+ * offending parameter per entry in `errors[]` — as a `parameters` key and in the `message`
+ * ("The `pagination_token` query parameter value [...] is not valid"). Every entry is
+ * checked, not only the first, because a request can fail on several parameters at once and
+ * the cursor is the one the agent can fix by restarting. The raw entry text is only matched
+ * against our own parameter names here; it never reaches the error message.
+ */
+function rejectsPageToken(body: unknown): boolean {
+  const errors = asRecord(body)?.['errors'];
+  if (!Array.isArray(errors)) return false;
+  return errors.some((raw) => {
+    const entry = asRecord(raw);
+    if (entry === undefined) return false;
+    const params = asRecord(entry['parameters']);
+    if (params !== undefined && Object.keys(params).some((key) => CURSOR_PARAM.test(key))) {
+      return true;
+    }
+    return CURSOR_PARAM.test(asString(entry['message']) ?? '');
+  });
+}
+
 function looksLikeHtml(body: unknown, headers: HeaderSource): boolean {
   if (typeof body !== 'string') return false;
   const contentType = (readHeader(headers, 'content-type') ?? '').toLowerCase();
@@ -263,6 +289,12 @@ export function mapHttpError(
         'becomes available.',
       { data },
     );
+  }
+
+  // PAGE-2: a stale or bad cursor is agent-fixable (restart from the first page), so it is a
+  // `validation` error — the one API-returned 400 that is not left to degrade to `api`.
+  if (status === 400 && rejectsPageToken(body)) {
+    return pageTokenError({ data });
   }
 
   // Everything else (5xx, and any unmapped 4xx) → `api` (DRIFT-2). A 5xx is often transient,

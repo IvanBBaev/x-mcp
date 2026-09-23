@@ -3,7 +3,7 @@
 // the provenance-checked shape record (DRIFT-4). Corner cases referenced: DX-F13 (every error
 // carries actionable remediation), REND-2 (partial failures → missing[], not a thrown error),
 // REND-7 (no third-party content / raw HTML in any error), plus AUTH-8, RATE-2/5/7, DRIFT-2,
-// COST-6/7, NET-1, RATE-4.
+// COST-6/7, NET-1, RATE-4, PAGE-2.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { XError } from '../../src/core/errors.js';
 import { mapHttpError, collectMissing } from '../../src/api/errors.js';
 import type { Missing } from '../../src/api/errors.js';
+import { PAGE_TOKEN_INVALID_MESSAGE } from '../../src/core/paginate.js';
 import { FIELD_CAPS, TRUNCATION_MARKER } from '../../src/core/sanitize.js';
 import { loadFixture } from '../helpers/index.js';
 
@@ -36,6 +37,7 @@ const ERROR_FIXTURES = [
   '502-html.json',
   '500-json.json',
   '400-unmapped.json',
+  '400-invalid-pagination-token.json',
 ] as const;
 
 function load(name: string): ErrorScenario {
@@ -169,6 +171,56 @@ test('unmapped 4xx (400) degrades to api and is NOT retryable — DRIFT-2', () =
   assert.equal(err.retryable, false);
   // A legacy `errors[].message` body still yields a passed-through detail/title.
   assert.equal(err.data.platform_title, 'Invalid Request');
+});
+
+test('a 400 rejecting the pagination cursor maps to validation (agent), not api — PAGE-2', () => {
+  const err = map('400-invalid-pagination-token.json');
+  assert.equal(err.kind, 'validation');
+  assert.equal(err.fix, 'agent');
+  assert.equal(err.retryable, false);
+  assert.equal(err.message, PAGE_TOKEN_INVALID_MESSAGE);
+  // The platform prose still passes through (DRIFT-2); the echoed cursor stays out of the message.
+  assert.equal(err.data.http_status, 400);
+  assert.equal(err.data.platform_title, 'Invalid Request');
+  assert.equal(err.message.includes('cursor==stale'), false);
+});
+
+test('the cursor is recognised by parameter key or message, under either wire name, in any entry — PAGE-2', () => {
+  const byKey = mapHttpError(400, {}, { errors: [{ parameters: { next_token: ['x'] } }] });
+  assert.equal(byKey.kind, 'validation');
+
+  const byMessage = mapHttpError(
+    400,
+    {},
+    {
+      errors: [{ message: 'The `next_token` query parameter value [x] is not valid' }],
+    },
+  );
+  assert.equal(byMessage.kind, 'validation');
+
+  // A multi-parameter rejection still names the cursor, even when it is not the first entry.
+  const second = mapHttpError(
+    400,
+    {},
+    {
+      errors: [
+        'not an object',
+        { parameters: { max_results: ['500'] }, message: 'The `max_results` value is not valid' },
+        { parameters: { pagination_token: ['x'] } },
+      ],
+    },
+  );
+  assert.equal(second.kind, 'validation');
+});
+
+test('a cursor mention outside a 400, or a 400 without one, keeps its normal class — PAGE-2, DRIFT-2', () => {
+  const body = { errors: [{ parameters: { pagination_token: ['x'] } }] };
+  assert.equal(mapHttpError(404, {}, body).kind, 'not-found');
+  assert.equal(mapHttpError(500, {}, body).kind, 'api');
+  // Only whole parameter names count — a look-alike name is not the cursor.
+  const lookAlike = { errors: [{ parameters: { pagination_tokens: ['x'] }, message: 'bad' }] };
+  assert.equal(mapHttpError(400, {}, lookAlike).kind, 'api');
+  assert.equal(mapHttpError(400, {}, { errors: 'nope' }).kind, 'api');
 });
 
 test('a legacy errors[].message body with no top-level problem fields still yields title/detail — DRIFT-2', () => {

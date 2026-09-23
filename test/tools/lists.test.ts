@@ -575,11 +575,9 @@ test('members: a fractional max_results is a validation error before any request
 // --- x_list_timeline -------------------------------------------------------------
 
 test('PAGE-1: timeline sends page_token verbatim as pagination_token; posts carry canonical urls (REND-4)', async () => {
-  // PAGE-2: the same `toCursor` bridge maps the tool's `page_token` to the v2
-  // `pagination_token` request cursor and back to the response's `next_token`; a stale or
-  // rejected cursor is surfaced as a typed `validation` error via core/paginate's
-  // pageTokenError (covered in test/core/paginate.test.ts — api/errors has no
-  // pagination-specific wire mapping to exercise here).
+  // The `toCursor` bridge maps the tool's `page_token` to the v2 `pagination_token` request
+  // cursor and back to the response's `next_token`; X's rejection of a stale cursor is the
+  // PAGE-2 test right after this one.
   const mock = mockHttp();
   mock.pool
     .intercept({
@@ -603,6 +601,35 @@ test('PAGE-1: timeline sends page_token verbatim as pagination_token; posts carr
   }
   assert.ok(page.note);
   assert.match(page.note, /third-party text/); // REND-6
+  mock.assertDone();
+  await mock.close();
+});
+
+test('PAGE-2: X rejecting a stale page_token surfaces as validation (restart), never api', async () => {
+  const scenario = loadFixture<{ status: number; headers: Record<string, string>; body: object }>(
+    'errors/400-invalid-pagination-token.json',
+  );
+  const mock = mockHttp();
+  mock.pool
+    .intercept({
+      path: `/2/lists/${LIST_ID}/tweets`,
+      method: 'GET',
+      query: { ...TIMELINE_FIELD_PARAMS, pagination_token: 'cursor==stale' },
+    })
+    .reply(scenario.status, scenario.body, { headers: scenario.headers });
+
+  await assert.rejects(
+    () =>
+      xListTimeline.handler({ list_id: LIST_ID, page_token: 'cursor==stale' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'validation');
+      assert.equal(err.fix, 'agent');
+      assert.match(err.message, /restart from the first page/);
+      assert.equal(err.data.http_status, 400);
+      return true;
+    },
+  );
   mock.assertDone();
   await mock.close();
 });
