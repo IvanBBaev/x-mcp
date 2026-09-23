@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
-import { createHttpClient } from '../../src/api/http.js';
+import { WRITE_AMBIGUITY, createHttpClient } from '../../src/api/http.js';
 import { XError } from '../../src/core/errors.js';
 import {
   POLICY_PRESETS,
@@ -441,6 +441,28 @@ test('DM-4: sending to a non-follower / DMs-closed target is a typed forbidden w
       assert.equal(err.kind, 'forbidden');
       // The platform reason passes through in data (DRIFT-2), never as the message itself.
       assert.match(String(err.data.platform_detail), /not authorized to send a Direct Message/);
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('NET-4: a 5xx on x_dm_send is non-retryable and says the DM may have been sent', async () => {
+  const mock = mockHttp();
+  // A single interceptor + assertDone proves exactly one attempt: a write never auto-retries.
+  mock.pool
+    .intercept({ path: '/2/dm_conversations/with/777/messages', method: 'POST' })
+    .reply(503, { title: 'Service Unavailable' });
+
+  await assert.rejects(
+    () => xDmSend.handler({ participant: '777', text: 'hello?' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'api');
+      assert.equal(err.data.http_status, 503);
+      assert.equal(err.retryable, false);
+      assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
       return true;
     },
   );

@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A write that fails with a 5xx or a network error — sending a DM, liking, following,
+  managing a list, and so on, not only post tools — now returns a non-retryable error
+  that says X may have applied the write anyway and that the effect should be verified
+  before re-issuing it. Previously these errors were marked retryable, inviting a blind
+  retry that could duplicate the write.
 - A `page_token` that X rejects as stale or invalid now returns a `validation` error
   ("pagination token invalid or expired — restart from the first page") instead of an
   opaque `api` error, so the agent knows to drop the cursor and page again from the start.

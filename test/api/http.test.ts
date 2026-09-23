@@ -6,6 +6,7 @@
 //   NET-1   — body tolerance: empty / non-JSON / oversized, no raw body text in errors
 //   NET-2   — transport failures mapped to `network` (connect AND mid-body), timeouts distinguished
 //   NET-3   — GET retries exactly once on 5xx/network; writes never auto-retry
+//   NET-4   — a write that fails without a definite answer (5xx, transport) is POST-4-ambiguous
 //   MCP-7   — host cancellation before AND during the response; a cancelled write is POST-4-ambiguous
 //   RATE-1/2/4 — the onResponse seam (T-320 F6): every response, once per attempt, before any decision
 //   RATE-5  — a GET 429 whose reset is ≤ 5 s away waits it out and retries once; writes never
@@ -19,6 +20,7 @@ import {
   shouldAttachAuth,
   DEFAULT_API_BASE_URL,
   RATE_LIMIT_RETRY_MAX_MS,
+  WRITE_AMBIGUITY,
 } from '../../src/api/http.js';
 import type { HttpClientConfig } from '../../src/api/http.js';
 import type { Dispatcher } from '../../src/core/ports.js';
@@ -337,7 +339,9 @@ test('NET-2: a connection failure surfaces as `network`, raw cause never inlined
   );
 
   assert.equal(err.kind, 'network');
-  assert.equal(err.retryable, true); // network default
+  // NET-2: a failed WRITE may have landed — ambiguous and non-retryable, not the network default.
+  assert.equal(err.retryable, false);
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
   assert.doesNotMatch(err.message, /ECONNRESET|socket hang up/);
   http.assertDone();
   await http.close();
@@ -355,6 +359,8 @@ test('NET-2: a per-attempt timeout maps to `network` with a distinct message', a
 
   assert.equal(err.kind, 'network');
   assert.match(err.message, /timed out/i);
+  assert.equal(err.retryable, false); // a timed-out write is POST-4-ambiguous
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
   await http.close();
 });
 
@@ -434,6 +440,82 @@ test('NET-3: a write (POST) NEVER auto-retries on a 5xx', async () => {
   assert.equal(err.kind, 'api');
   assert.equal(err.data.http_status, 500);
   assert.deepEqual(sleep.calls, []); // no backoff, no retry
+  http.assertDone();
+  await http.close();
+});
+
+// --- NET-4: a write that failed without a definite answer is ambiguous -------------
+
+test('NET-4: a 5xx on a write keeps its class and data but drops the retry advice for the ambiguity note', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/dm_conversations/with/7/messages', method: 'POST' })
+    .reply(503, {});
+
+  const mapped = new XError('api', 'A 5xx is often transient, so a single retry may succeed.', {
+    retryable: true,
+    data: { http_status: 503, platform_title: 'Service Unavailable' },
+  });
+  const { client } = makeClient(http, { mapError: () => mapped });
+  const err = await rejects(
+    client.send({
+      method: 'POST',
+      path: '/2/dm_conversations/with/7/messages',
+      body: { text: 'hi' },
+    }),
+  );
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.retryable, false);
+  assert.equal(err.fix, mapped.fix);
+  assert.deepEqual(err.data, mapped.data);
+  assert.equal(err.cause, mapped);
+  assert.doesNotMatch(err.message, /single retry may succeed/);
+  assert.match(err.message, /HTTP 503/);
+  assert.match(err.message, /platform_title/); // X's own words are still pointed at
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-4: without platform prose the write message does not point at absent fields', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/users/1/likes', method: 'DELETE' }).reply(502, 'bad gateway');
+
+  const { client } = makeClient(http); // minimal fallback mapper
+  const err = await rejects(client.send({ method: 'DELETE', path: '/2/users/1/likes' }));
+
+  assert.equal(err.kind, 'api');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 502);
+  assert.doesNotMatch(err.message, /platform_title/);
+  assert.ok(err.message.endsWith(WRITE_AMBIGUITY));
+  http.assertDone();
+  await http.close();
+});
+
+test('NET-4: a GET 5xx and a write 4xx are not write-ambiguous', async () => {
+  const http = mockHttp();
+  http.pool.intercept({ path: '/2/tweets/1', method: 'GET' }).reply(500, {}).times(2);
+  http.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(400, {});
+
+  // A mapper that marks 5xx retryable, like the real one: the read must keep that verdict.
+  const { client } = makeClient(http, {
+    mapError: (status) =>
+      new XError('api', `HTTP ${status}.`, {
+        retryable: status >= 500,
+        data: { http_status: status },
+      }),
+  });
+  const read = await rejects(client.send({ method: 'GET', path: '/2/tweets/1' }));
+  assert.equal(read.retryable, true); // the mapper's own verdict stands for a read
+  assert.equal(read.message.includes(WRITE_AMBIGUITY), false);
+
+  // A 4xx is a definite answer: X refused the write, nothing was applied.
+  const refused = await rejects(
+    client.send({ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }),
+  );
+  assert.equal(refused.message.includes(WRITE_AMBIGUITY), false);
   http.assertDone();
   await http.close();
 });

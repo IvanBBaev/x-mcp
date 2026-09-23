@@ -370,7 +370,10 @@ Retry policy: GETs retry once on 5xx/network with jittered 250–750 ms backoff,
 never auto-retry (a timed-out `POST /2/tweets` may have landed — the error says so, and
 the safe probe is re-issuing the **identical** text: a duplicate-`403` (`forbidden`)
 proves the original landed, a success proves it did not; POST-4). This recovery never
-depends on a paid timeline read.
+depends on a paid timeline read. Every write — DM, like, follow, list, not only posts —
+that fails with a 5xx or a network error after the request was sent is marked
+non-retryable and ends with the same "outcome unknown, verify before re-issuing" note
+(NET-4); a post tool replaces that note with its own tool-specific probe advice.
 
 ## 7. Rate-limit & cap handling
 

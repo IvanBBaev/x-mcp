@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createHttpClient } from '../../src/api/http.js';
+import { WRITE_AMBIGUITY, createHttpClient } from '../../src/api/http.js';
 import { mapHttpError } from '../../src/api/errors.js';
 import {
   xPostGet,
@@ -715,6 +715,8 @@ test('NET-4: a 5xx on delete carries the delete-specific ambiguity note', async 
       const xerr = err as XError;
       // Re-issuing a delete is SAFE (POST-5 makes it idempotent) — the note says so.
       assert.match(xerr.message, /Re-issuing this delete is safe/);
+      // The generic "do NOT re-issue" note is replaced, never stacked against the safe advice.
+      assert.equal(xerr.message.includes(WRITE_AMBIGUITY), false);
       assert.equal(xerr.retryable, false);
       return true;
     },

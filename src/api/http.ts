@@ -1,5 +1,5 @@
 // The host-scoped HTTP client — the production `EndpointInvoker` (docs/02 §6; docs/07
-// AUTH-14, CFG-7, NET-1/2/3). Owned by T-114.
+// AUTH-14, CFG-7, NET-1/2/3/4). Owned by T-114.
 //
 // It sends every `XApiRequest` over Node's global `fetch` with an INJECTABLE dispatcher.
 // Production leaves the dispatcher undefined, so `fetch` uses its default dispatcher —
@@ -8,7 +8,9 @@
 // DEV-only dependency; nothing here imports it.
 //
 // Responsibilities kept deliberately minimal — this layer owns transport, host-scoped
-// auth, redirect refusal, timeouts, GET retry-once (5xx, transport, near-reset 429), and body tolerance. The rich
+// auth, redirect refusal, timeouts, GET retry-once (5xx, transport, near-reset 429), body
+// tolerance, and marking a write that failed without a definite answer as ambiguous and
+// non-retryable (POST-4/NET-4). The rich
 // (status, headers, body) → XError mapping is api/errors (T-116), plugged in through the
 // `mapError` seam; the 401→refresh→retry loop is oauth2 (T-201/203), layered on top of the
 // `authorization` provider. When those are absent we fall back to a safe, minimal `api`
@@ -46,11 +48,14 @@ const RETRY_BACKOFF_SPAN_MS = 500;
 export const RATE_LIMIT_RETRY_MAX_MS = 5_000;
 
 /**
- * MCP-7 → POST-4: cancelling a write is as ambiguous as a write timing out — the request
- * was already on the wire, so X may have applied it. Appended to the cancellation message
- * of every non-GET so the agent never treats "cancelled" as "did not happen".
+ * POST-4 / NET-2 / NET-4 / MCP-7: a write that fails without a definite answer — a
+ * transport failure, a 5xx, a cancellation — may still have been applied by X. This note
+ * is the SUFFIX of every such non-GET error, and those errors are non-retryable, so the
+ * agent never treats "failed" as "did not happen" and nothing re-issues the write blindly.
+ * A tool with a sharper answer (a delete that is safe to repeat, a create with a probe)
+ * swaps this suffix for its own guidance.
  */
-export const CANCELLED_WRITE_AMBIGUITY =
+export const WRITE_AMBIGUITY =
   ' The request had already been sent, so X may have applied the write anyway — the outcome ' +
   'is unknown (POST-4). Do NOT blindly re-issue it; verify the effect first.';
 
@@ -264,14 +269,39 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
     return Buffer.concat(chunks).toString('utf8');
   }
 
-  function toError(response: Response, bodyText: string): XError {
+  function toError(method: XApiRequest['method'], response: Response, bodyText: string): XError {
     const parsed = tryParseJson(bodyText);
-    if (config.mapError) return config.mapError(response.status, response.headers, parsed);
     // Minimal fallback — the full status/headers/body → XError mapping is api/errors (T-116).
     // We surface ONLY the status, never third-party body text (NET-1 / no raw HTML in prose).
-    return apiError(`X API request failed with HTTP ${response.status}.`, {
-      data: { http_status: response.status },
-    });
+    const mapped = config.mapError
+      ? config.mapError(response.status, response.headers, parsed)
+      : apiError(`X API request failed with HTTP ${response.status}.`, {
+          data: { http_status: response.status },
+        });
+    return method !== 'GET' && response.status >= 500 ? toAmbiguousWrite(mapped) : mapped;
+  }
+
+  /**
+   * NET-4: a 5xx on a write keeps its class and data, but the mapper's read-side advice ("a
+   * single retry may succeed") is wrong for it — X may have applied the write before
+   * failing. The message is rebuilt around that, and the error is non-retryable.
+   */
+  function toAmbiguousWrite(mapped: XError): XError {
+    const status = mapped.data.http_status ?? 0;
+    const reported =
+      mapped.data.platform_title !== undefined || mapped.data.platform_detail !== undefined
+        ? ' See `platform_title`/`platform_detail` for what X reported.'
+        : '';
+    return new XError(
+      mapped.kind,
+      `X failed this write with HTTP ${status}.${reported}${WRITE_AMBIGUITY}`,
+      {
+        retryable: false,
+        fix: mapped.fix,
+        data: mapped.data,
+        cause: mapped,
+      },
+    );
   }
 
   /**
@@ -290,18 +320,17 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
     const where = phase === 'request' ? 'before a response arrived' : 'while reading the response';
     const message = `The X API request was cancelled ${where}.`;
     if (method === 'GET') return networkError(message, { cause: err });
-    return networkError(`${message}${CANCELLED_WRITE_AMBIGUITY}`, { cause: err, retryable: false });
+    return networkError(`${message}${WRITE_AMBIGUITY}`, { cause: err, retryable: false });
   }
 
-  function toNetworkError(err: unknown): XError {
-    if (isTimeout(err)) {
-      return networkError(`The X API request timed out after ${timeoutMs}ms.`, { cause: err });
-    }
-    // NET-2: a distinct message for connect/DNS/TLS/reset failures, kept generic — the raw
-    // transport error is preserved as `cause` (never rendered to the agent), not inlined.
-    return networkError('The connection to the X API failed before a response was received.', {
-      cause: err,
-    });
+  function toNetworkError(method: XApiRequest['method'], err: unknown): XError {
+    // NET-2: a distinct message for timeouts vs connect/DNS/TLS/reset failures, kept generic —
+    // the raw transport error is preserved as `cause` (never rendered to the agent), not inlined.
+    const message = isTimeout(err)
+      ? `The X API request timed out after ${timeoutMs}ms.`
+      : 'The connection to the X API failed before a response was received.';
+    if (method === 'GET') return networkError(message, { cause: err });
+    return networkError(`${message}${WRITE_AMBIGUITY}`, { cause: err, retryable: false });
   }
 
   async function send<T>(req: XApiRequest): Promise<T> {
@@ -330,7 +359,7 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
           await backoff();
           continue;
         }
-        throw toNetworkError(err);
+        throw toNetworkError(req.method, err);
       }
 
       // T-320 F6: the observer sees the response BEFORE any of the decisions below — a 3xx
@@ -386,11 +415,11 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
           await backoff();
           continue;
         }
-        throw toNetworkError(err);
+        throw toNetworkError(req.method, err);
       }
 
       if (response.status < 200 || response.status >= 300) {
-        throw toError(response, bodyText2);
+        throw toError(req.method, response, bodyText2);
       }
       return parseSuccess<T>(response.status, bodyText2);
     }
