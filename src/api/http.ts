@@ -8,11 +8,15 @@
 // DEV-only dependency; nothing here imports it.
 //
 // Responsibilities kept deliberately minimal — this layer owns transport, host-scoped
-// auth, redirect refusal, timeouts, GET retry-once, and body tolerance. The rich
+// auth, redirect refusal, timeouts, GET retry-once (5xx, transport, near-reset 429), and body tolerance. The rich
 // (status, headers, body) → XError mapping is api/errors (T-116), plugged in through the
 // `mapError` seam; the 401→refresh→retry loop is oauth2 (T-201/203), layered on top of the
 // `authorization` provider. When those are absent we fall back to a safe, minimal `api`
-// error that never leaks third-party body text.
+// error that never leaks third-party body text. The `onResponse` observer is the third
+// seam: it hands every response's status and headers to whoever tracks them (the
+// rate-limit table, T-320 F6) without this layer knowing what a rate limit is. The
+// `rateLimitRetryDelay` query is its counterpart: after a 429 it asks that same table how
+// far away the reset is, so a GET can wait out a window about to renew (RATE-5).
 
 import type { Dispatcher, Random, Sleep } from '../core/ports.js';
 import type { EndpointInvoker, XApiRequest } from '../core/tooldef.js';
@@ -31,6 +35,15 @@ export const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 // Jittered backoff for the single GET retry: 250–750 ms (NET-3).
 const RETRY_BACKOFF_MIN_MS = 250;
 const RETRY_BACKOFF_SPAN_MS = 500;
+
+/**
+ * RATE-5: the longest reset a 429'd GET will wait out in-call. Beyond it the typed
+ * `rate-limit` error goes back to the agent, which is better placed to decide whether a
+ * longer wait is worth it than a request holding its `tools/call` open. It is the same 5 s
+ * as the tracker's reset skew, so a window this close to renewing is one the preflight
+ * would already let through (RATE-3).
+ */
+export const RATE_LIMIT_RETRY_MAX_MS = 5_000;
 
 /**
  * MCP-7 → POST-4: cancelling a write is as ambiguous as a write timing out — the request
@@ -56,6 +69,28 @@ export type AuthorizationProvider = () => Promise<string | undefined>;
  * string when the body was not JSON, or `undefined` when empty.
  */
 export type ErrorMapper = (status: number, headers: Headers, body: unknown) => XError;
+
+/**
+ * The response observer seam (T-320 F6). Called SYNCHRONOUSLY for every HTTP response the
+ * origin returned — success and error alike, once per attempt, in arrival order, before the
+ * body is read and before this client decides to retry, refuse or map it. It exists so the
+ * rate-limit tracker (`api/ratelimit`, wired by `mcp/compose`) learns a window's state from
+ * the headers of a 200, not only from the 429 that follows — which is what makes the
+ * preflight refusal a look-ahead rather than a repeat suppressor (RATE-2). A transport
+ * failure (timeout, reset, cancellation) yields no response and so never reaches it. The
+ * observer must not throw: it is wiring, not policy, and nothing here catches for it.
+ */
+export type ResponseObserver = (status: number, headers: Headers) => void;
+
+/**
+ * The rate-limit delay query (RATE-5). Consulted only after a GET came back 429 — and
+ * therefore only AFTER the observer has recorded that 429 — it returns the milliseconds
+ * until the bucket's window resets, or `null` when nothing is tracked. `mcp/compose` wires
+ * it to `RateLimitTracker.retryDelayMs` under the same bucket key as the observer, so the
+ * answer already reflects the 429's own headers, `retry-after` and `x-rate-limit-reset`
+ * reconciled the tracker's way (RATE-7). Without it a 429 is never retried.
+ */
+export type RateLimitRetryDelay = () => number | null;
 
 /** Configuration for {@link createHttpClient}. The composition root (T-130) wires it. */
 export interface HttpClientConfig {
@@ -83,6 +118,10 @@ export interface HttpClientConfig {
   readonly signal?: AbortSignal;
   /** Rich response→XError mapper (T-116). Omit to use the minimal `api` fallback. */
   readonly mapError?: ErrorMapper;
+  /** Sees every response's status and headers (T-320 F6). Omit when nothing tracks them. */
+  readonly onResponse?: ResponseObserver;
+  /** Reset delay after a 429, for the single GET retry (RATE-5). Omit to never retry a 429. */
+  readonly rateLimitRetryDelay?: RateLimitRetryDelay;
   /** Max buffered response bytes. Defaults to {@link DEFAULT_MAX_RESPONSE_BYTES}. */
   readonly maxResponseBytes?: number;
 }
@@ -179,8 +218,24 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
   }
 
   async function backoff(): Promise<void> {
-    const ms = RETRY_BACKOFF_MIN_MS + config.random.float() * RETRY_BACKOFF_SPAN_MS;
-    await config.sleep(ms);
+    await config.sleep(jitterMs());
+  }
+
+  function jitterMs(): number {
+    return RETRY_BACKOFF_MIN_MS + config.random.float() * RETRY_BACKOFF_SPAN_MS;
+  }
+
+  /**
+   * RATE-5: how long a 429'd request should wait before its one retry, or `null` when it
+   * must not retry — no tracker wired, nothing tracked, or a reset further out than
+   * {@link RATE_LIMIT_RETRY_MAX_MS}. The jitter is added on top of the reset delay because X
+   * reports resets in whole epoch seconds: arriving exactly on the boundary risks a second
+   * 429 from a window that has not quite rolled over.
+   */
+  function rateLimitWaitMs(): number | null {
+    const delay = config.rateLimitRetryDelay?.() ?? null;
+    if (delay === null || delay > RATE_LIMIT_RETRY_MAX_MS) return null;
+    return Math.max(0, delay) + jitterMs();
   }
 
   // Buffer the body defensively (NET-1): bounded size, tolerant of empty/non-JSON. Throws
@@ -278,6 +333,12 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
         throw toNetworkError(err);
       }
 
+      // T-320 F6: the observer sees the response BEFORE any of the decisions below — a 3xx
+      // this client refuses, a 5xx it is about to retry and a 2xx alike all carry whatever
+      // rate-limit headers the origin attached, and every one of them is a fact about the
+      // window that the tracker should not miss.
+      config.onResponse?.(response.status, response.headers);
+
       // AUTH-14: redirects are refused. With redirect: 'manual', a real fetch yields an
       // opaque redirect (status 0); undici's MockAgent yields the raw 3xx. Both are refused.
       if (isRedirect(response)) {
@@ -295,6 +356,21 @@ export function createHttpClient(config: HttpClientConfig): EndpointInvoker {
         if (isCancelled(signals)) throw toCancelledError(req.method, 'request', undefined);
         await backoff();
         continue;
+      }
+
+      // RATE-5: a GET that hit a 429 on a window about to renew waits it out and retries
+      // once; one that would wait longer, and every write, surfaces the typed error. It
+      // shares the single retry with NET-3 — a GET that already retried a 5xx does not get
+      // a second one here. A cancellation during the wait is caught by the next attempt's
+      // fetch, which rejects on the aborted signal before anything is sent.
+      if (response.status === 429 && isRetryable && attempt < maxAttempts) {
+        const waitMs = rateLimitWaitMs();
+        if (waitMs !== null) {
+          await discardBody(response);
+          if (isCancelled(signals)) throw toCancelledError(req.method, 'request', undefined);
+          await config.sleep(waitMs);
+          continue;
+        }
       }
 
       let bodyText2: string;

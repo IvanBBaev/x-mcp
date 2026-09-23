@@ -28,7 +28,13 @@ import {
 import type { BookmarkPageParams } from '../api/endpoints/engagement.js';
 import { apiError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, postUrl, rawSummary, renderPostPage } from '../core/render.js';
+import {
+  billableUnits,
+  capRawMaxResults,
+  postUrl,
+  rawSummary,
+  renderPostPage,
+} from '../core/render.js';
 import type { RawListResponse } from '../core/render.js';
 import type { Page } from '../core/render-shapes.js';
 import { parsePostId } from '../core/resolve.js';
@@ -269,13 +275,24 @@ function preparePage(input: z.infer<typeof bookmarksListInput>): PreparedPage {
   };
 }
 
-/** `raw: true` output: the exact API JSON, size-capped upstream (REND-10). */
+/**
+ * `raw: true` output: the exact API JSON, size-capped upstream (REND-10). Billed per
+ * resource the page returned, not per call (COST-3).
+ */
 function rawOutput<T>(res: RawListResponse<T>): ToolOutput {
-  return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+  return {
+    data: res,
+    summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+    units: billableUnits(res),
+  };
 }
 
-/** Compact-page output with the normalization notes prefixed onto the page note. */
-function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
+/**
+ * Compact-page output with the normalization notes prefixed onto the page note. `units` is
+ * the billable count, which the caller takes from the RAW envelope rather than from the
+ * rendered page: what X charges for is what it sent, whatever rendering then drops (COST-3).
+ */
+function pageOutput<T>(page: Page<T>, notes: readonly string[], units: number): ToolOutput {
   let shaped = page;
   if (notes.length > 0) {
     const prefix = notes.join(' ');
@@ -284,6 +301,7 @@ function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
   return {
     data: shaped,
     summary: `${shaped.result_count} result(s)${shaped.next_token !== undefined ? ', more available' : ''}.`,
+    units,
   };
 }
 
@@ -310,7 +328,7 @@ export const xBookmarksList = defineTool({
     );
     const res = await listBookmarks(ctx.http, userId, prepared.params);
     if (input.raw === true) return rawOutput(res);
-    return pageOutput(renderPostPage(res), prepared.notes);
+    return pageOutput(renderPostPage(res), prepared.notes, billableUnits(res));
   },
 });
 

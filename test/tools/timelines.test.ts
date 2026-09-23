@@ -113,6 +113,7 @@ test('x_timeline_home: resolves me then renders a compact page (REND-8/REND-6)',
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per post the timeline returned
   assert.equal(page.next_token, 'abc');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
   assert.ok(page.note);

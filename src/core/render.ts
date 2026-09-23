@@ -209,6 +209,22 @@ export function rawSummary(summary: string): string {
   return `${summary} ${UNTRUSTED_CONTENT_NOTE}`;
 }
 
+/**
+ * How many billable resources an API list response carried — the value a handler reports as
+ * {@link ToolOutput.units} so the budget prices the call per resource rather than per call
+ * (docs/01 §3.1, COST-3).
+ *
+ * The count is taken from the RAW response, not from the rendered page: what the platform
+ * billed is what it returned, so a locally capped `raw` read (REND-10) or a render that
+ * drops an unusable record is still charged for every resource that came down the wire.
+ * `includes` expansions are deliberately not counted — an author object attached to a post
+ * is part of the post read, not a second user read. An absent `data` is zero, which is the
+ * honest price of an empty page.
+ */
+export function billableUnits(res: { readonly data?: readonly unknown[] | undefined }): number {
+  return res.data?.length ?? 0;
+}
+
 // ---------------------------------------------------------------------------------------
 // Mutable builder types. Optional shape fields are only assigned when defined, so the
 // emitted objects satisfy exactOptionalPropertyTypes (absent, never `undefined`).

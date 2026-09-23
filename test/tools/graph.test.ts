@@ -400,6 +400,7 @@ test('x_followers_list: ONE GET renders a compact user page (PAGE-5/REND-6)', as
   const out = await xFollowersList.handler({ user: '12' }, contextFor(mock));
   const page = out.data as CompactPageResult;
   assert.equal(page.result_count, 2);
+  assert.equal(out.units, 2); // COST-3: billed per follower the page returned
   assert.deepEqual(
     page.items.map((u) => u.id),
     ['12', '34'],

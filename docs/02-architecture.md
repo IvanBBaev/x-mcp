@@ -360,12 +360,13 @@ tool call
   → endpoint wrapper builds request         (api/endpoints)
   → host-scoped auth injection + send       (api/http, api/oauth2)
   → 401 once? refresh (state machine §4A)   (api/oauth2)
-  → response: update rate-limit table, reserve credit cost (atomic — CONC-2)
+  → response: update rate-limit table, settle credit cost by resources returned (CONC-2)
   → render + sanitize compact shape         (core/render, core/sanitize)
   → MCP result
 ```
 
-Retry policy: GETs retry once on 5xx/network with jittered 250–750 ms backoff; writes
+Retry policy: GETs retry once on 5xx/network with jittered 250–750 ms backoff, or on a
+429 whose reset is ≤ 5 s away (RATE-5, §7) — one retry per request whatever the cause; writes
 never auto-retry (a timed-out `POST /2/tweets` may have landed — the error says so, and
 the safe probe is re-issuing the **identical** text: a duplicate-`403` (`forbidden`)
 proves the original landed, a success proves it did not; POST-4). This recovery never
@@ -381,15 +382,32 @@ depends on a paid timeline read.
 - Preemptive refusal when `remaining === 0` and reset is in the future (skew-tolerant,
   `reset − 5 s`); on 429, idempotent GETs may retry once if reset ≤ 5 s away, writes
   never (RATE-2/3/5).
-- **As shipped, only non-2xx responses train the table** (T-320 F6, 2026-08-07). The
-  tracker is wired into the http client's *error mapper* (`mcp/compose`), and `api/http`
-  exposes no success-path header hook — so a bucket stays unknown until a call in it
-  fails. Consequence: the preemptive refusal is a **429-repeat suppressor**, not a
-  look-ahead. The first exhausted call in a fresh process always goes out and comes back
-  429; every subsequent call in that bucket is then refused locally until reset. Both
-  `x_rate_limit_status` and this bullet describe the same table, so the tool reports
-  nothing for a bucket that has only ever succeeded — that is the design as built, not a
-  gap in the tracker (`api/ratelimit` records whatever it is handed).
+- **The 429 retry reads the table back** (RATE-5). A fourth `api/http` seam,
+  `rateLimitRetryDelay`, is consulted only after a GET came back 429 — after the observer
+  below has already recorded it — and returns the milliseconds to the bucket's reset, or
+  `null`. `mcp/compose` wires it to `tracker.retryDelayMs` under the same bucket key as
+  the observer, so the delay already reflects the 429's own `retry-after` and
+  `x-rate-limit-reset`, reconciled later-wins (RATE-7). Within `RATE_LIMIT_RETRY_MAX_MS`
+  (5 s, the same bound as the preflight skew) the client sleeps the delay plus the
+  250–750 ms jitter — X reports resets in whole seconds, so landing exactly on the
+  boundary would risk a second 429 — and retries once; beyond it, or with nothing
+  tracked, the typed `rate-limit` error returns at once. The retry shares the NET-3
+  budget: a GET that already retried a 5xx does not retry a following 429. Only the
+  standard 15-minute window is consulted; the 24-hour app window rides on write
+  endpoints, which never retry.
+- **Every response trains the table** (T-320 F6, closed 2026-09-19). `api/http` exposes
+  a third seam beside `mapError` and `authorization`: an `onResponse` observer called
+  synchronously with each response's status and headers, once per attempt, before the
+  body is read and before the client decides to retry, refuse or map it. `mcp/compose`
+  wires `tracker.record` through that seam on every per-bucket client, and the error
+  mapper is pure mapping again. Consequence: the preemptive refusal is a genuine
+  **look-ahead** — a 200 whose headers say `remaining: 0` exhausts the bucket, and the
+  next call in it is refused locally before the origin ever answers 429 — and
+  `x_rate_limit_status` shows a bucket after its first successful call, not only after
+  its first failure. Through 0.8.0 the tracker was fed by the error mapper alone, so only
+  non-2xx responses trained it and the refusal merely suppressed *repeat* 429s; that
+  shape is gone. A transport failure yields no response and so trains nothing; a
+  response without `x-rate-limit-*` headers leaves the table untouched (RATE-4).
 
 **Session credit budget** (replaces the old monthly read-budget model — ARCH-F3/F4,
 X-F4; cases COST-1…7):
@@ -402,22 +420,43 @@ X-F4; cases COST-1…7):
   a URL-bearing post is $0.20 — COST-3/4). The authoritative cost table is the appendix in
   [01](01-api-landscape.md) (WP-0.1). Restart resets the counter — the docs state plainly
   that this is per-process, advisory accounting, not a hard ledger (OPS-F10).
+- **Reads are priced per resource returned, writes per request** ([01 §3.1](01-api-landscape.md)).
+  A handler reports how many billable resources its response carried (`ToolOutput.units`);
+  the registry hands that count to the budget's settle step, and the price is
+  `unit price × units`. A search that returns 100 posts costs $0.50, not $0.005; a page
+  that came back empty costs nothing; a lookup of one post is unchanged. A `usd` override
+  is an absolute per-call price (the URL post) and is never multiplied. Secondary
+  `includes` expansions are not counted a second time — the platform prices what the
+  endpoint is a read *of*. Two read shapes deliberately stay at one unit: a single-object
+  lookup (one list, one usage report, the auth snapshot), and the counts endpoints, whose
+  `data` holds time buckets rather than posts — how X prices a histogram is not something
+  the response tells us, so it is left at the call price rather than guessed at per bucket.
+  Through 0.8.0 every read was charged a single unit however many resources came back, so
+  the running total under-reported multi-resource reads by up to two orders of magnitude.
 - Every result carries `cost_usd` (this call) and the session running total (COST-3). At
   90 % a `budget_warning` is attached; at 100 % `warn` mode still returns results (with the
   warning) while `hard` mode fails **reads and writes** with the typed `budget` error
   ("operator-set limit; cannot be changed from within this session"). check-and-reserve is
   **atomic**, so two interleaved calls near the cap cannot both pass in `hard` mode
   (COST-5, CONC-2).
-- **The unit charged is one tool call, not one HTTP request** (T-320 F9, 2026-08-07), and
-  the charge lands **after** the handler returns (`core/registry` — check before, reserve
-  after). Two consequences, both deliberate and both worth knowing before trusting the
-  running total: a handler that sends several requests is charged **once** (media's
-  chunked INIT/APPEND×N/FINALIZE is one estimate, not one per segment), and a call that
-  fails part-way is charged **nothing** even though the requests it already sent were
-  billed by X. So the counter under-reports against the operator's real invoice; it is a
-  ceiling on *tool calls* priced by the static table, not a meter on wire traffic. This
-  is consistent with the "advisory accounting, not a hard ledger" framing above — stated
+- **The unit charged is one tool call, not one HTTP request** (T-320 F9, 2026-08-07). A
+  handler that sends several requests is charged **once**: media's chunked
+  INIT/APPEND×N/FINALIZE is one `w:action` estimate, not one per segment. So the counter
+  is a ceiling on *tool calls* priced by the static table, not a meter on wire traffic —
+  consistent with the "advisory accounting, not a hard ledger" framing above, and stated
   here explicitly so the gap is not mistaken for drift.
+- **When the charge lands: at the check, not after the handler.** The registry's seam is
+  two-step (check before the call, settle after), and it does not mandate which step moves
+  the counter; the shipped gate (`mcp/gates`, INT-2) charges at the **check**, because
+  `SessionBudget.reserve` is a single synchronous check-and-reserve and splitting it would
+  reopen the interleaving window CONC-2 closes. The consequence is deliberate: a call that
+  reaches the API and then fails — rate-limit refusal, handler error, mid-page transport
+  failure — **stays charged**, which is the honest accounting for requests the platform
+  already served. The post-handler step is then a *settlement*: it moves the ledger by the
+  difference between the one resource held at check time and what the response actually
+  carried. Settlement never throws, in either mode — the resources have been delivered and
+  cannot be un-returned, so a `hard`-mode settle past the cap attaches a warning saying so
+  and the **next** call is the one refused.
 - Platform-side exhaustion is separate: X's own "out of credits" rejection maps to the
   `billing` error class (real body captured and locked by a Phase 1 live test — COST-6),
   and the 2M-posts/month platform hard cap is surfaced verbatim as `billing` when hit but

@@ -426,6 +426,7 @@ test('owned: user defaults to "me", renders a compact list page (REND-8/REND-6)'
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 2);
+  assert.equal(out.units, 2); // COST-3: billed per list the page returned
   assert.equal(page.next_token, 'owned-cursor-2');
   assert.equal(page.items[0]?.['owner'], '@alice_dev');
   assert.equal(page.items[1]?.['private'], true);
