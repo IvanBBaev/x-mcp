@@ -1736,6 +1736,9 @@
                 },
                 "next_token": {
                   "type": "string"
+                },
+                "note": {
+                  "type": "string"
                 }
               },
               "required": ["counts", "total"]
@@ -1797,6 +1800,9 @@
                   "type": "number"
                 },
                 "next_token": {
+                  "type": "string"
+                },
+                "note": {
                   "type": "string"
                 }
               },

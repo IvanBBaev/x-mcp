@@ -16,10 +16,16 @@ import {
   renderDmPage,
   renderListPage,
   capRawMaxResults,
+  rawMaxResults,
   toIso,
+  RAW_DEFAULT_MAX_RESULTS,
   RAW_MAX_RESULTS,
+  UNTRUSTED_CONTENT_NOTE,
 } from '../../src/core/render.js';
-import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
+import type { RawListResponse, RawTweet } from '../../src/core/render.js';
+import { ALL_MISSING_NOTE, ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
+
+import { loadFixture } from '../helpers/index.js';
 
 test('REND-1: empty result set renders result_count 0 with the zero-results note', () => {
   const page = renderPostPage({ meta: { result_count: 0 } });
@@ -68,6 +74,88 @@ test('REND-7: third-party error detail text never leaks into the mapped result',
   });
   assert.equal(JSON.stringify(out).includes('hunter2'), false);
   assert.equal(JSON.stringify(out).includes('secret content'), false);
+});
+
+// --- REND-2 on paginated reads: errors[] is never dropped from a Page<T> ----------------
+
+/** A 200 page body that carries ONLY `errors[]` — e.g. a timeline of a protected account. */
+const ERRORS_ONLY = {
+  errors: [
+    {
+      title: 'Authorization Error',
+      type: 'https://api.twitter.com/2/problems/not-authorized-for-resource',
+      resource_id: '42',
+      detail: 'Sorry, you are not authorized to see the user with id: [42]. PAGE_SENTINEL',
+    },
+  ],
+} as const;
+
+test('REND-2: an errors-only page surfaces missing[] and is not reported as zero results', () => {
+  const page = renderPostPage(ERRORS_ONLY);
+  assert.deepEqual(page, {
+    items: [],
+    result_count: 0,
+    note: ALL_MISSING_NOTE,
+    missing: [{ id: '42', reason: 'protected' }],
+  });
+  // The REND-1 note would claim nothing matched; the page must say WHY nothing came back.
+  assert.equal(page.note?.includes(ZERO_RESULTS_NOTE), false);
+});
+
+test('REND-2: every paged renderer carries missing[] from an errors-only page', () => {
+  const pages = [
+    renderPostPage(ERRORS_ONLY),
+    renderUserPage(ERRORS_ONLY),
+    renderDmPage(ERRORS_ONLY),
+    renderListPage(ERRORS_ONLY),
+  ];
+  for (const page of pages) {
+    assert.equal(page.result_count, 0);
+    assert.equal(page.note, ALL_MISSING_NOTE);
+    assert.deepEqual(page.missing, [{ id: '42', reason: 'protected' }]);
+  }
+});
+
+test('REND-2: extra notes and next_token survive on an errors-only page', () => {
+  const page = renderDmPage({ ...ERRORS_ONLY, meta: { result_count: 0, next_token: 'n2' } }, [
+    'DMs are private correspondence.',
+  ]);
+  assert.equal(page.next_token, 'n2');
+  assert.equal(page.note, `${ALL_MISSING_NOTE} DMs are private correspondence.`);
+  assert.equal(page.missing?.length, 1);
+});
+
+test('REND-2: a page with both data and errors keeps the items and adds missing[]', () => {
+  const page = renderPostPage(
+    loadFixture<{ body: RawListResponse<RawTweet> }>('errors/200-partial-missing.json').body,
+  );
+  assert.equal(page.result_count, 1);
+  assert.equal(page.items[0]?.id, '1460323737035677698');
+  // Non-empty page: the REND-6 untrusted note, not the zero-results/all-missing note.
+  assert.equal(page.note, UNTRUSTED_CONTENT_NOTE);
+  assert.deepEqual(
+    page.missing?.map((m) => m.id),
+    ['20', '111111', '999999'],
+  );
+});
+
+test('REND-7: platform detail prose on a paged errors[] never reaches the rendered page', () => {
+  const fromFixture = renderPostPage(
+    loadFixture<{ body: RawListResponse<RawTweet> }>('errors/200-partial-missing.json').body,
+  );
+  const fromInline = renderUserPage(ERRORS_ONLY);
+  for (const page of [fromFixture, fromInline]) {
+    const json = JSON.stringify(page);
+    assert.equal(json.includes('SENTINEL'), false);
+    assert.equal(json.includes('Could not find'), false);
+    assert.equal(json.includes('not authorized to see'), false);
+  }
+});
+
+test('REND-1: an empty errors[] array is not a partial failure', () => {
+  const page = renderPostPage({ errors: [], meta: { result_count: 0 } });
+  assert.deepEqual(page, { items: [], result_count: 0, note: ZERO_RESULTS_NOTE });
+  assert.equal(Object.hasOwn(page, 'missing'), false);
 });
 
 test('REND-3: long-form posts expose the full body via note_tweet and set truncated', () => {
@@ -152,6 +240,23 @@ test('REND-5: missing author expansion degrades to the numeric id, never crashes
   assert.equal(post.url, 'https://x.com/i/status/1');
 });
 
+test('REND-5: a reply whose parent is absent from includes keeps the id and omits the author', () => {
+  // The parent is neither in `includes.tweets` nor resolvable to a user: the reference must
+  // still carry the id (the caller can fetch it), with no author rather than a crash or a
+  // fabricated handle. The post's own author id is also absent here — the compactor must
+  // degrade to an empty handle, not throw.
+  const post = renderPost(
+    {
+      id: '31',
+      text: 'a reply',
+      referenced_tweets: [{ type: 'replied_to', id: '77' }],
+    },
+    { users: [{ id: 'u1', username: 'bob' }] },
+  );
+  assert.deepEqual(post.reply_to, { id: '77' });
+  assert.equal(post.author, '');
+});
+
 test('REND-5: an unknown media type is dropped without dropping the whole post', () => {
   const post = renderPost(
     { id: '1', author_id: 'u1', attachments: { media_keys: ['k1', 'k2'] } },
@@ -198,6 +303,15 @@ test('REND-10: raw:true max_results is capped at 25', () => {
   assert.equal(capRawMaxResults(10), 10);
   assert.equal(capRawMaxResults(0), 1);
   assert.equal(RAW_MAX_RESULTS, 25);
+});
+
+test('REND-10: a raw read with no requested size sends the raw default, never the API default', () => {
+  assert.equal(rawMaxResults(undefined), RAW_DEFAULT_MAX_RESULTS);
+  assert.equal(RAW_DEFAULT_MAX_RESULTS, 10);
+  // An endpoint-clamped request (PAGE-3) is still capped at the raw ceiling.
+  assert.equal(rawMaxResults(100), 25);
+  assert.equal(rawMaxResults(10), 10);
+  assert.equal(rawMaxResults(5), 5);
 });
 
 test('DRIFT-1: unknown fields on a raw post are tolerated and never reach the output', () => {

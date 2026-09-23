@@ -260,8 +260,8 @@ export async function openNoFollow(
           process.stderr.write(message + '\n');
         });
       warn(
-        'x-mcp: O_NOFOLLOW is unavailable on this platform (win32); the final media path ' +
-          'component is checked with a non-atomic lstat instead (PLAT-2).',
+        'x-mcp-ai: warning: O_NOFOLLOW is unavailable on this platform (win32); the final ' +
+          'media path component is checked with a non-atomic lstat instead (PLAT-2).',
       );
     }
     const link = await lstat(target).catch(() => undefined);

@@ -1,0 +1,14 @@
+{
+  "_provenance": "X API v2 HTTP-200 single list lookup (GET /2/lists/:id) for an id that does not resolve: no `data`, only an `errors[]` entry. Modelled on the documented partial-response shape (docs.x.com/x-api/fundamentals/errors) and the users/handle-lookup-miss.json capture, not captured from a live list call. `detail` carries a fake secret sentinel to prove it never reaches the error message (REND-7). Exercises: REND-2 single lookup that must not render as an empty list.",
+  "errors": [
+    {
+      "value": "1900000000000000001",
+      "detail": "Could not find list with id: [1900000000000000001]. SENTINEL_SECRET_sk-live-DEADBEEF",
+      "title": "Not Found Error",
+      "resource_type": "list",
+      "parameter": "id",
+      "resource_id": "1900000000000000001",
+      "type": "https://api.twitter.com/2/problems/resource-not-found"
+    }
+  ]
+}
