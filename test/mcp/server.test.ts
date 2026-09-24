@@ -19,12 +19,13 @@ import type { Composition } from '../../src/mcp/compose.js';
 import { buildMcpServer } from '../../src/mcp/server.js';
 import { defineTool } from '../../src/core/tooldef.js';
 import type { EndpointInvoker } from '../../src/core/tooldef.js';
-import type { Ports } from '../../src/core/ports.js';
+import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
+import type { Dispatcher, Ports } from '../../src/core/ports.js';
 import type { Registry } from '../../src/core/registry.js';
 import type { RateLimitStatus } from '../../src/api/ratelimit.js';
 
-import { mockHttp, loadFixture } from '../helpers/index.js';
-import type { MockHttp } from '../helpers/index.js';
+import { fakeClock, fakeRandom, fakeSleep, mockHttp, loadFixture } from '../helpers/index.js';
+import type { FakeClock, FakeSleep, MockHttp } from '../helpers/index.js';
 
 // The exact field/expansion query x_post_get sends (pinned in test/tools/posts.test.ts):
 // undici matches the full query string, so the interceptor doubles as a wire-contract pin.
@@ -295,7 +296,8 @@ test('MCP-2: tools/call round-trips a read tool through the full composed pipeli
   const payload = textPayload<Rendered>(result);
   const batch = payload.data as { items: unknown[] };
   assert.equal(batch.items.length, 2);
-  assert.equal(payload.summary, '2 post(s)');
+  // REND-6: the untrusted-content note rides on `summary` for BatchResult shapes.
+  assert.equal(payload.summary, `2 post(s) ${UNTRUSTED_CONTENT_NOTE}`);
   // ResultMeta (COST-3) flows from the real budget through the registry envelope.
   assert.ok(payload.meta.cost_usd > 0);
   assert.equal(payload.meta.session_total_usd, payload.meta.cost_usd);
@@ -306,7 +308,7 @@ test('MCP-2: tools/call round-trips a read tool through the full composed pipeli
   await mock.close();
 });
 
-test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and blocks the retry', async () => {
+test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and blocks the retry uncharged', async () => {
   const mock = mockHttp();
   mock.pool
     .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
@@ -331,11 +333,12 @@ test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and b
 
   // Call 2: NO interceptor is queued — the recorded headers must make the preflight gate
   // refuse locally (RATE-2) before any network attempt (a network attempt would surface as
-  // a loud MockAgent failure, not a typed rate-limit error).
+  // a loud MockAgent failure, not a typed rate-limit error). Nothing reached X, so nothing
+  // is charged: the preflight runs before the budget check.
   const second = await call(client, 'x_post_get', { ids: ['111'] });
   assert.equal(second.isError, true);
   assert.equal(textPayload<RenderedError>(second).error.kind, 'rate-limit');
-  assert.equal(composition.budget.total(), chargedOnce * 2);
+  assert.equal(composition.budget.total(), chargedOnce);
 
   // The recording client filed the headers under the composed bucket key (INT-3).
   const status = await call(client, 'x_rate_limit_status', {});
@@ -416,26 +419,45 @@ test('MCP-8/CONC-2: parallel tools/call requests interleave safely with no cross
       assert.equal(post.text, `post ${post.id}`);
       assert.equal(post.author, `@author_${post.id}`);
     }
-    assert.equal(payload.summary, `${expected.length} post(s)`);
+    // REND-6: every one of these calls returns at least one post, so each carries the note.
+    assert.equal(payload.summary, `${expected.length} post(s) ${UNTRUSTED_CONTENT_NOTE}`);
   });
 
-  // (2) Atomic check-and-reserve (CONC-2): identical cost class, and the three session totals
-  //     are 1x/2x/3x — every call saw a DIFFERENT snapshot, so no update was lost.
+  // (2) Atomic check-and-reserve (CONC-2): the price is per RESOURCE returned (COST-3), so
+  //     the two-id call costs twice what the one-id calls cost. What pins "no update was
+  //     lost" is that the final ledger is EXACTLY the sum of the three charges: every
+  //     reserve and every settle moved the shared counter by its own amount and none
+  //     overwrote another's — which is why the settle moves by the difference rather than
+  //     writing an absolute total. Each call's own snapshot is somewhere between its own
+  //     charge and that final sum, depending on where the interleaving put it.
   const unit = payloads[0]?.meta.cost_usd ?? 0;
   assert.ok(unit > 0);
-  for (const payload of payloads) assert.equal(payload.meta.cost_usd, unit);
-  const totals = payloads.map((p) => p.meta.session_total_usd).sort((x, y) => x - y);
-  assert.deepEqual(totals, [unit, unit * 2, unit * 3]);
-  assert.equal(composition.budget.total(), unit * 3);
+  payloads.forEach((payload, i) => {
+    assert.equal(payload.meta.cost_usd, unit * (calls[i]?.ids.length ?? 0));
+  });
+  const charged = payloads.reduce((sum, p) => sum + p.meta.cost_usd, 0);
+  assert.equal(charged, unit * 4); // 1 + 1 + 2 posts
+  assert.equal(composition.budget.total(), charged);
+  for (const payload of payloads) {
+    assert.ok(payload.meta.session_total_usd >= payload.meta.cost_usd);
+    assert.ok(payload.meta.session_total_usd <= charged);
+  }
 
-  // (3) The rate-limit table is unchanged by three concurrent SUCCESSES. This is not an
-  //     oversight in the test: api/http exposes its header hook only through `mapError`, so
-  //     the per-bucket recording clients (INT-3) train the tracker on non-2xx responses only
-  //     (see the integrator note in mcp/compose). Pinning the empty table here keeps that
-  //     limitation visible — if a success-path hook is ever added, this assertion fails and
-  //     forces the concurrency claim below to be revisited deliberately.
+  // (3) Three concurrent SUCCESSES train the table too (T-320 F6, closed): every reply
+  //     passes through the shared bucket's response observer (INT-3), so three interleaved
+  //     writes to one key must settle into ONE bucket holding ONE window whose remaining is
+  //     the headers' 10 — never three entries, never a torn read (CONC-3). The 429 variant
+  //     of this claim is the next test; this one pins the success path it used to exclude.
   const status = await call(client, 'x_rate_limit_status', {});
-  assert.deepEqual((textPayload<Rendered>(status).data as RateLimitStatus).buckets, []);
+  const table = textPayload<Rendered>(status).data as RateLimitStatus;
+  assert.deepEqual(
+    table.buckets.map((b) => b.key),
+    ['tweets#app'],
+  );
+  assert.deepEqual(
+    table.buckets[0]?.windows.map((w) => w.remaining),
+    [10],
+  );
 
   mock.assertDone();
   await client.close();
@@ -484,6 +506,173 @@ test('MCP-8/CONC-3: concurrent limited responses on one bucket settle into a sin
     table.buckets[0]?.windows.map((w) => w.remaining),
     [0],
   );
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+// --- RATE-5: the 429 retry, wired through the composed tracker --------------------
+//
+// These pin the compose-level wiring of the http client's `rateLimitRetryDelay` seam: the
+// REAL tracker (recording the 429 through the bucket's observer), a fake clock it reads
+// the reset against, and a fake sleep that advances that clock. The retry happens inside
+// api/http, below the registry — so the tool-layer preflight runs once per tool call and
+// never sees the retry.
+
+/** Fixed start instant, a whole epoch second so `x-rate-limit-reset` deltas are exact. */
+const RATE5_NOW_MS = 1_900_000_000_000;
+
+/** The 429 problem body (the fixture's `body`; its headers are set per test below). */
+const RATE_LIMIT_BODY = loadFixture<{ body: object }>('errors/429-rate-limit.json').body;
+
+/** A 429's standard-window headers with the reset `resetInSeconds` after `now`. */
+function exhaustedHeaders(clock: FakeClock, resetInSeconds: number): Record<string, string> {
+  return {
+    'x-rate-limit-limit': '15',
+    'x-rate-limit-remaining': '0',
+    'x-rate-limit-reset': String(clock.now() / 1000 + resetInSeconds),
+  };
+}
+
+interface TimedComposition {
+  readonly composition: Composition;
+  readonly clock: FakeClock;
+  readonly sleep: FakeSleep;
+  /** Requests that actually reached the dispatcher (retries included). */
+  readonly requests: () => number;
+}
+
+/**
+ * Compose over the mock with injected time: sleep advances the clock, and a constant
+ * random stream (0.5) makes the retry jitter exactly 250 + 0.5 × 500 = 500 ms whichever
+ * consumer draws first. The dispatcher is wrapped to count every request sent.
+ */
+function composeTimed(mock: MockHttp, extraEnv: Record<string, string> = {}): TimedComposition {
+  const clock = fakeClock(RATE5_NOW_MS);
+  const sleep = fakeSleep(clock);
+  let sent = 0;
+  const inner = mock.dispatcher as unknown as { dispatch(...args: unknown[]): boolean };
+  const counting = new Proxy(inner, {
+    get(target, prop, receiver) {
+      if (prop !== 'dispatch') return Reflect.get(target, prop, receiver) as unknown;
+      return (...args: unknown[]) => {
+        sent += 1;
+        return target.dispatch(...args);
+      };
+    },
+  }) as unknown as Dispatcher;
+  const composition = composeServer(parseConfig(appOnlyEnv(extraEnv)), {
+    dispatcher: counting,
+    clock,
+    sleep: sleep.fn,
+    random: fakeRandom([0.5]),
+  });
+  return { composition, clock, sleep, requests: () => sent };
+}
+
+test('RATE-5: a GET 429 whose reset is 3 s away waits it out and retries once through the composed tracker', async () => {
+  const mock = mockHttp();
+  const { composition, clock, sleep, requests } = composeTimed(mock);
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
+    .reply(429, RATE_LIMIT_BODY, { headers: exhaustedHeaders(clock, 3) });
+  // The retry's reply opens a fresh window, as X's would once the old one rolled over.
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
+    .reply(200, postsEnvelope(['111']), {
+      headers: {
+        'x-rate-limit-limit': '15',
+        'x-rate-limit-remaining': '14',
+        'x-rate-limit-reset': String(clock.now() / 1000 + 900),
+      },
+    });
+  const client = await connect(composition);
+
+  const result = await call(client, 'x_post_get', { ids: ['111'] });
+  assert.notEqual(result.isError, true);
+  const payload = textPayload<Rendered>(result);
+  assert.deepEqual(
+    (payload.data as { items: Array<{ id: string }> }).items.map((p) => p.id),
+    ['111'],
+  );
+  assert.equal(requests(), 2);
+  // One wait: the tracker's 3000 ms to the recorded reset (the 429 was filed BEFORE the
+  // client asked) plus the fixed 500 ms jitter. Nothing else in the call slept.
+  assert.deepEqual(sleep.calls, [3_500]);
+  assert.equal(clock.now(), RATE5_NOW_MS + 3_500);
+
+  // The retry's 200 trained the bucket too: the spent window was replaced by the new one,
+  // so the table reads 14 remaining rather than the 429's 0.
+  const status = await call(client, 'x_rate_limit_status', {});
+  const table = textPayload<Rendered>(status).data as RateLimitStatus;
+  assert.deepEqual(
+    table.buckets.map((b) => [b.key, b.windows.map((w) => w.remaining)]),
+    [['tweets#app', [14]]],
+  );
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('RATE-5: a GET 429 whose reset is 60 s away surfaces the typed rate-limit error without waiting', async () => {
+  const mock = mockHttp();
+  const { composition, clock, sleep, requests } = composeTimed(mock);
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
+    .reply(429, RATE_LIMIT_BODY, { headers: exhaustedHeaders(clock, 60) });
+  const client = await connect(composition);
+
+  const result = await call(client, 'x_post_get', { ids: ['111'] });
+  assert.equal(result.isError, true);
+  assert.equal(textPayload<RenderedError>(result).error.kind, 'rate-limit');
+  assert.equal(requests(), 1);
+  assert.deepEqual(sleep.calls, []);
+  assert.equal(clock.now(), RATE5_NOW_MS);
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('RATE-5/RATE-7: a later retry-after pushes a near reset past 5 s, so the GET does not retry', async () => {
+  const mock = mockHttp();
+  const { composition, clock, sleep, requests } = composeTimed(mock);
+  // `x-rate-limit-reset` alone (2 s) would qualify for the retry; the tracker reconciles it
+  // with `retry-after: 30` to the LATER instant, and that is what the client is told.
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('111') })
+    .reply(429, RATE_LIMIT_BODY, {
+      headers: { ...exhaustedHeaders(clock, 2), 'retry-after': '30' },
+    });
+  const client = await connect(composition);
+
+  const result = await call(client, 'x_post_get', { ids: ['111'] });
+  assert.equal(result.isError, true);
+  assert.equal(textPayload<RenderedError>(result).error.kind, 'rate-limit');
+  assert.equal(requests(), 1);
+  assert.deepEqual(sleep.calls, []);
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('RATE-5: a write 429 never auto-retries, even with the reset 1 s away', async () => {
+  const mock = mockHttp();
+  const { composition, clock, sleep, requests } = composeTimed(mock, { X_MCP_POLICY: 'publish' });
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST' })
+    .reply(429, RATE_LIMIT_BODY, { headers: exhaustedHeaders(clock, 1) });
+  const client = await connect(composition);
+
+  const result = await call(client, 'x_post_create', { text: 'hello' });
+  assert.equal(result.isError, true);
+  assert.equal(textPayload<RenderedError>(result).error.kind, 'rate-limit');
+  assert.equal(requests(), 1);
+  assert.deepEqual(sleep.calls, []);
+  assert.equal(clock.now(), RATE5_NOW_MS);
 
   mock.assertDone();
   await client.close();

@@ -259,6 +259,18 @@ test('REND-11/REND-5: real search pages (full and zero-result) conform to x_sear
   assertConforms('x_search_recent', empty);
 });
 
+test('REND-11/REND-2: a paged render carrying missing[] still conforms to the page schemas', () => {
+  const errorsOnly = {
+    errors: [{ title: 'Not Found Error', resource_id: '7', detail: 'gone' }],
+  };
+  const posts = renderPostPage(errorsOnly);
+  assert.equal(posts.missing?.length, 1, 'fixture must exercise missing[] on a page');
+  assertConforms('x_timeline_user', posts, '0 result(s).');
+  assertConforms('x_followers_list', renderUserPage(errorsOnly));
+  assertConforms('x_lists_owned', renderListPage(errorsOnly));
+  assertConforms('x_dm_events_list', renderDmPage(errorsOnly));
+});
+
 test('REND-11: the same page shape conforms to all three timeline schemas', () => {
   const page = renderPostPage(loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
   for (const name of ['x_timeline_home', 'x_timeline_mentions', 'x_timeline_user']) {

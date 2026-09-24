@@ -354,7 +354,9 @@ test('get: GET /2/lists/:id renders the compact list with the owner handle', asy
     follower_count: 7,
     owner: '@alice_dev',
   });
-  assert.equal(out.summary, `List "AI builders" (id ${LIST_ID}).`);
+  // REND-6: a resolved list carries third-party name/description text, so the untrusted-
+  // content note rides on `summary` (CompactList has no `note` field of its own).
+  assert.equal(out.summary, `List "AI builders" (id ${LIST_ID}). ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });
@@ -402,7 +404,46 @@ test('DRIFT-1: get with a data-less 200 renders an empty compact list, no crash'
 
   // Every optional field is omitted; the required id/name degrade to empty strings.
   assert.deepEqual(out.data, { id: '', name: '' });
+  // REND-6: nothing third-party actually came back (no `data` in the envelope), so no note —
+  // matches the batch tools' items.length > 0 gate.
   assert.equal(out.summary, `List "" (id ${LIST_ID}).`);
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-2, REND-7: get with a 200 carrying only errors[] is a typed not-found, no detail leak', async () => {
+  const fixture = loadFixture<object>('lists/not-found.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}`, method: 'GET', query: LIST_PROJECTION })
+    .reply(200, fixture);
+
+  // Rendering `{}` here would report a real, empty list named "" — the missing list must
+  // fail typed instead, with only the controlled reason from the fixed vocabulary.
+  await assert.rejects(
+    () => xListGet.handler({ list_id: LIST_ID }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(err instanceof XError);
+      assert.equal(err.kind, 'not-found');
+      assert.equal(err.message, `List ${LIST_ID} could not be read (not-found).`);
+      assert.doesNotMatch(err.message, /SENTINEL_SECRET|Could not find/);
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-10: get raw:true passes an errors-only 200 through untouched', async () => {
+  const fixture = loadFixture<object>('lists/not-found.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: `/2/lists/${LIST_ID}`, method: 'GET', query: LIST_PROJECTION })
+    .reply(200, fixture);
+
+  const out = await xListGet.handler({ list_id: LIST_ID, raw: true }, contextFor(mock));
+
+  assert.deepEqual(out.data, fixture); // raw is the exact API JSON, errors[] included
   mock.assertDone();
   await mock.close();
 });
@@ -426,6 +467,7 @@ test('owned: user defaults to "me", renders a compact list page (REND-8/REND-6)'
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 2);
+  assert.equal(out.units, 2); // COST-3: billed per list the page returned
   assert.equal(page.next_token, 'owned-cursor-2');
   assert.equal(page.items[0]?.['owner'], '@alice_dev');
   assert.equal(page.items[1]?.['private'], true);
@@ -475,19 +517,19 @@ test('REND-8: an unknown handle is not-found and the owned-lists read is never s
   await mock.close();
 });
 
-test('REND-10: owned raw:true without max_results sends no cap and returns the exact page', async () => {
+test('REND-10: owned raw:true without max_results sends the raw default and returns the exact page', async () => {
   const fixture = loadFixture<RawListResponse<RawList>>('lists/owned-page.json');
   const mock = mockHttp();
   mock.pool
     .intercept({ path: '/2/users/me', method: 'GET', query: USERS_PROJECTION })
     .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/me.json'));
-  // The intercept carries the projection ONLY — the raw cap applies just when the caller
-  // asked for a size, so no max_results param goes out.
+  // With no size asked for, the raw read sends the raw default (10) — X's own default for
+  // owned lists is 100, which would breach the 25-item raw cap.
   mock.pool
     .intercept({
       path: `/2/users/${USERS_ME_ID}/owned_lists`,
       method: 'GET',
-      query: LIST_PROJECTION,
+      query: { ...LIST_PROJECTION, max_results: '10' },
     })
     .reply(200, fixture);
 
@@ -551,9 +593,14 @@ test('PAGE-3: members clamps max_results above the 1-100 window down to 100 and 
 test('REND-10: members raw:true returns the envelope; a data-less 200 counts as 0', async () => {
   const mock = mockHttp();
   // DRIFT-1: a degraded envelope with no `data` array still summarizes rather than crash.
+  // REND-10: with no size asked for, the raw read sends the raw default (10), not X's 100.
   const envelope = { meta: { result_count: 0 } };
   mock.pool
-    .intercept({ path: `/2/lists/${LIST_ID}/members`, method: 'GET', query: MEMBERS_PROJECTION })
+    .intercept({
+      path: `/2/lists/${LIST_ID}/members`,
+      method: 'GET',
+      query: { ...MEMBERS_PROJECTION, max_results: '10' },
+    })
     .reply(200, envelope);
 
   const out = await xListMembers.handler({ list_id: LIST_ID, raw: true }, contextFor(mock));
@@ -574,11 +621,9 @@ test('members: a fractional max_results is a validation error before any request
 // --- x_list_timeline -------------------------------------------------------------
 
 test('PAGE-1: timeline sends page_token verbatim as pagination_token; posts carry canonical urls (REND-4)', async () => {
-  // PAGE-2: the same `toCursor` bridge maps the tool's `page_token` to the v2
-  // `pagination_token` request cursor and back to the response's `next_token`; a stale or
-  // rejected cursor is surfaced as a typed `validation` error via core/paginate's
-  // pageTokenError (covered in test/core/paginate.test.ts — api/errors has no
-  // pagination-specific wire mapping to exercise here).
+  // The `toCursor` bridge maps the tool's `page_token` to the v2 `pagination_token` request
+  // cursor and back to the response's `next_token`; X's rejection of a stale cursor is the
+  // PAGE-2 test right after this one.
   const mock = mockHttp();
   mock.pool
     .intercept({
@@ -602,6 +647,35 @@ test('PAGE-1: timeline sends page_token verbatim as pagination_token; posts carr
   }
   assert.ok(page.note);
   assert.match(page.note, /third-party text/); // REND-6
+  mock.assertDone();
+  await mock.close();
+});
+
+test('PAGE-2: X rejecting a stale page_token surfaces as validation (restart), never api', async () => {
+  const scenario = loadFixture<{ status: number; headers: Record<string, string>; body: object }>(
+    'errors/400-invalid-pagination-token.json',
+  );
+  const mock = mockHttp();
+  mock.pool
+    .intercept({
+      path: `/2/lists/${LIST_ID}/tweets`,
+      method: 'GET',
+      query: { ...TIMELINE_FIELD_PARAMS, pagination_token: 'cursor==stale' },
+    })
+    .reply(scenario.status, scenario.body, { headers: scenario.headers });
+
+  await assert.rejects(
+    () =>
+      xListTimeline.handler({ list_id: LIST_ID, page_token: 'cursor==stale' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'validation');
+      assert.equal(err.fix, 'agent');
+      assert.match(err.message, /restart from the first page/);
+      assert.equal(err.data.http_status, 400);
+      return true;
+    },
+  );
   mock.assertDone();
   await mock.close();
 });

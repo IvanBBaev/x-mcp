@@ -209,6 +209,43 @@ test('CFG-5: an invalid environment yields one fatal stderr line, empty stdout, 
   assert.match(errLines[0] ?? '', /no-such-preset/);
 });
 
+test('CFG-5: an unreadable profiles file whose path holds a newline still yields one fatal line', async () => {
+  // The operator path is echoed in the reason, and ENOENT's own message echoes it again;
+  // a line break inside it must not split the fatal contract across lines.
+  const file = join(tmpdir(), 'x-mcp-no-such\nprofiles.json');
+  const child = spawnServer(['serve'], { X_MCP_PROFILES_FILE: file, X_MCP_PROFILE: 'work' });
+  const stdout = collect(child.stdout);
+  const stderr = collect(child.stderr);
+
+  const [code] = (await once(child, 'exit')) as [number | null];
+  assert.equal(code, 1);
+  assert.equal(stdout(), '');
+  const errLines = stderr().trim().split('\n');
+  assert.equal(errLines.length, 1, `expected a single fatal line, got: ${stderr()}`);
+  assert.match(
+    errLines[0] ?? '',
+    /^x-mcp-ai: fatal: cannot read profiles file ".*x-mcp-no-such profiles\.json"/,
+  );
+});
+
+test('CFG-5: a profiles file that is not JSON yields one fatal line, empty stdout, exit 1', async (t) => {
+  const dir = await fsp.mkdtemp(join(tmpdir(), 'x-mcp-profiles-'));
+  const file = join(dir, 'profiles.json');
+  await fsp.writeFile(file, '{ "work": \n', { mode: 0o600 });
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+
+  const child = spawnServer(['serve'], { X_MCP_PROFILES_FILE: file, X_MCP_PROFILE: 'work' });
+  const stdout = collect(child.stdout);
+  const stderr = collect(child.stderr);
+
+  const [code] = (await once(child, 'exit')) as [number | null];
+  assert.equal(code, 1);
+  assert.equal(stdout(), '');
+  const errLines = stderr().trim().split('\n');
+  assert.equal(errLines.length, 1, `expected a single fatal line, got: ${stderr()}`);
+  assert.match(errLines[0] ?? '', /^x-mcp-ai: fatal: profiles file ".*" is not valid JSON — /);
+});
+
 test('CFG-5/INT-7: authorize without a token store fails closed with one fatal line', async () => {
   // app-only mode resolves NEITHER backend — no token file and no keychain entry — so the
   // composition root must refuse to start the OAuth flow instead of composing an authorize
@@ -248,7 +285,11 @@ test('CFG-6: a group/other-readable profiles file warns on stderr and still star
   child.stdin.end();
   await once(child, 'exit');
 
-  assert.match(stderr(), /^x-mcp-ai: warning: .*profiles\.json is readable by group or other/m);
+  // Non-fatal notices are single-line JSON (CFG-5): {"ts","level","msg"}, in that key order.
+  assert.match(
+    stderr(),
+    /^\{"ts":"[^"]+","level":"warn","msg":"[^"]*profiles\.json is readable by group or other/m,
+  );
   assert.match(stderr(), /mode 644.*chmod 600/);
 });
 

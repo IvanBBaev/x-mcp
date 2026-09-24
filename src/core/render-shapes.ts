@@ -122,17 +122,29 @@ export interface CompactList {
  * A paginated envelope for any list-returning tool (docs/02 §5.2, REND-10). `next_token`
  * is present only when more results exist; `result_count` is always the number of items
  * in THIS page. `note` carries the explicit zero-results message (REND-5) or other
- * agent-facing hints (e.g. "results truncated to endpoint max").
+ * agent-facing hints (e.g. "results truncated to endpoint max"). `missing` appears only
+ * when the HTTP-200 page carried `errors[]` (REND-2) — same shape as on `BatchResult`.
  */
 export interface Page<T> {
   readonly items: readonly T[];
   readonly result_count: number;
   readonly next_token?: string;
   readonly note?: string;
+  readonly missing?: readonly Missing[];
 }
 
 /** Standard zero-results note text (REND-5) — single source so every tool reads alike. */
 export const ZERO_RESULTS_NOTE = 'No results matched this query.';
+
+/**
+ * Note for an empty page whose HTTP-200 response carried ONLY `errors[]` (REND-2). It
+ * replaces {@link ZERO_RESULTS_NOTE}: nothing "matched zero" — X refused or could not
+ * resolve the requested resource, and `missing[]` says which id and why (REND-7: the
+ * reasons are a controlled vocabulary, never platform prose).
+ */
+export const ALL_MISSING_NOTE =
+  'No items were returned: X reported the requested resource as unavailable. ' +
+  'See missing[] for each id and reason.';
 
 /**
  * Why a requested item is absent from a partial batch result (REND-7). Drawn from a fixed,
@@ -161,8 +173,7 @@ export interface Missing {
 
 /**
  * Result of a batch lookup (post_get / user_get with N ids): the items that resolved, plus
- * any that did not. `Page<T>` has no `missing` field, so batch endpoints return this instead
- * (REND-2).
+ * any that did not (REND-2). Paginated reads carry the same optional `missing` on `Page<T>`.
  */
 export interface BatchResult<T> {
   readonly items: readonly T[];

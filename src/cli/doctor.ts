@@ -27,7 +27,7 @@
 import path from 'node:path';
 
 import { parseConfig } from '../core/config.js';
-import type { Config } from '../core/config.js';
+import type { Config, ConfigRuntime } from '../core/config.js';
 import { XError } from '../core/errors.js';
 import { resolvePolicy } from '../core/policy.js';
 import type { Clock } from '../core/ports.js';
@@ -70,6 +70,8 @@ export interface DoctorDeps {
   readonly clock: Clock;
   /** Platform semantics for the permission checks; defaults to `process.platform`. */
   readonly platform?: NodeJS.Platform;
+  /** Node's CLI flags (the integrator passes `process.execArgv`) — for the proxy check. */
+  readonly execArgv?: readonly string[];
 }
 
 // --- Internals ---------------------------------------------------------------------------
@@ -201,7 +203,7 @@ async function loadConfig(
 ): Promise<Config | null> {
   let config: Config;
   try {
-    config = parseConfig(deps.env);
+    config = parseConfig(deps.env, undefined, runtimeOf(deps));
   } catch (err) {
     report('fail', 'config', messageOf(err));
     return null;
@@ -227,7 +229,7 @@ async function loadConfig(
     // error that quotes an entry, and that line must already be maskable.
     harvestProfileSecrets(json, redact);
     try {
-      config = parseConfig(deps.env, json); // CFG-6 — profile content re-validation
+      config = parseConfig(deps.env, json, runtimeOf(deps)); // CFG-6 — profile content re-validation
     } catch (err) {
       report('fail', 'config', messageOf(err));
       return null;
@@ -237,6 +239,25 @@ async function loadConfig(
   report('ok', 'config', 'environment configuration is valid');
   for (const warning of config.warnings) report('warn', 'config', warning); // CFG-7/8
   return config;
+}
+
+function runtimeOf(deps: DoctorDeps): ConfigRuntime {
+  return deps.execArgv === undefined ? {} : { execArgv: deps.execArgv };
+}
+
+/**
+ * CFG-7/AUTH-14 — where API traffic will actually go. An un-opted-in env proxy is already a
+ * `[warn] config` line (it is one of `Config.warnings`); this states the opted-in case, so
+ * a trusted proxy is visible rather than silent.
+ */
+function checkProxy(config: Config, report: Report): void {
+  if (config.envProxy?.allowed === true) {
+    report(
+      'note',
+      'proxy',
+      `Node env proxying is enabled and ${config.envProxy.variable} is set — API requests, including their Authorization header, go through that proxy (X_MCP_ALLOW_PROXY=1)`,
+    );
+  }
 }
 
 /** One CFG-9 advisory for any secret-bearing path that lies under a synced root. */
@@ -260,10 +281,16 @@ async function checkPaths(deps: DoctorDeps, config: Config, report: Report): Pro
   const dirnameOf = (p: string): string => (posix ? path.posix.dirname(p) : path.win32.dirname(p));
 
   if (!posix) {
+    // AUTH-12 — mode bits are not enforced on Windows; name the exact ACL command to run.
+    const aclHint =
+      config.tokenFile !== undefined && !config.tokenKeychain
+        ? `: icacls "${config.tokenFile}"`
+        : '';
     report(
       'note',
       'permissions',
-      'PLAT-2: POSIX permission checks do not apply on Windows — inspect the token file ACLs manually',
+      'PLAT-2: POSIX permission checks do not apply on Windows — securing the token file is ' +
+        `the operator's responsibility; inspect its ACLs manually${aclHint}`,
     );
   }
 
@@ -444,7 +471,9 @@ async function checkConnectivity(deps: DoctorDeps, config: Config, report: Repor
       'fail',
       'connectivity',
       `GET ${url} failed — ${messageOf(err)}; check DNS/TLS and network access ` +
-        '(the server ignores proxy environment variables, CFG-7)',
+        (config.envProxy === undefined
+          ? '(the server ignores proxy environment variables, CFG-7)'
+          : `(Node env proxying is on, so requests go through ${config.envProxy.variable} — check that proxy too, CFG-7)`),
     );
   }
 }
@@ -498,6 +527,7 @@ export function createDoctorCli(deps: DoctorDeps): (rest: readonly string[]) => 
     }
 
     await checkPaths(deps, config, report);
+    checkProxy(config, report);
 
     if (connect) {
       await checkConnectivity(deps, config, report);
