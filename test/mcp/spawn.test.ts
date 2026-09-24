@@ -1,7 +1,9 @@
 // Process-level smoke tests for the composition root (T-130): the BUILT `src/index.js` is
 // spawned as a child, exactly as an MCP host launches it. Asserted contracts: stdout
 // carries ONLY JSON-RPC frames (MCP-1), stdin EOF and SIGTERM exit cleanly (MCP-3), and a
-// bad environment produces the single `x-mcp-ai: fatal:` stderr line (CFG-5).
+// bad environment produces the single `x-mcp-ai: fatal:` stderr line (CFG-5). One test near
+// the bottom goes through the actual `bin/x-mcp-ai.cjs` shim rather than the plain compiled
+// entry, at the most verbose log level, per MCP-1's own wording.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +18,9 @@ import { fileURLToPath } from 'node:url';
 
 // Resolves inside the same compiled tree this test runs from (works for any outDir).
 const ENTRY = fileURLToPath(new URL('../../src/index.js', import.meta.url));
+// The real launcher shim, not a build artifact: from the compiled test
+// (<outDir>/test/mcp/) three levels up is the repo root.
+const BIN = fileURLToPath(new URL('../../../bin/x-mcp-ai.cjs', import.meta.url));
 
 /** The inherited env with every X_MCP_* variable stripped, plus the test's own settings. */
 function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
@@ -31,8 +36,9 @@ const VALID_ENV = { X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'AAAA' };
 function spawnServer(
   args: readonly string[],
   extraEnv: Record<string, string>,
+  entry: string = ENTRY,
 ): ChildProcessWithoutNullStreams {
-  const child = spawn(process.execPath, [ENTRY, ...args], { env: cleanEnv(extraEnv) });
+  const child = spawn(process.execPath, [entry, ...args], { env: cleanEnv(extraEnv) });
   // Watchdog: a hung child must fail the test, not hang the runner forever.
   const watchdog = setTimeout(() => child.kill('SIGKILL'), 15_000);
   watchdog.unref();
@@ -135,6 +141,34 @@ test('MCP-1/MCP-3: stdout carries only JSON-RPC frames and stdin EOF exits clean
     assert.equal(message.jsonrpc, '2.0', `non-protocol bytes on stdout: ${line}`);
   }
   assert.ok(!stderr().includes('fatal'), `unexpected fatal on stderr: ${stderr()}`);
+});
+
+test('MCP-1: a round trip through the real CJS bin at the most verbose log level stays stdout-pure', async () => {
+  // The test above spawns the compiled entry point directly. MCP-1 specifically names the
+  // CJS bin (the shim an MCP host actually launches via `npx x-mcp-ai`) at the most verbose
+  // log level — so this one goes through `bin/x-mcp-ai.cjs` with X_MCP_LOG_LEVEL=debug,
+  // which a plain-entry spawn can never exercise.
+  const child = spawnServer(['serve'], { ...VALID_ENV, X_MCP_LOG_LEVEL: 'debug' }, BIN);
+  const stderr = collect(child.stderr);
+  const reader = lineReader(child.stdout);
+
+  child.stdin.write(frame(INITIALIZE));
+  await responseWithId(reader, 1);
+  child.stdin.write(frame({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+  child.stdin.write(frame({ jsonrpc: '2.0', id: 2, method: 'tools/list' }));
+  await responseWithId(reader, 2);
+
+  child.stdin.end();
+  const [code, signal] = (await once(child, 'exit')) as [number | null, string | null];
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+
+  assert.ok(reader.lines.length >= 2);
+  for (const line of reader.lines) {
+    const message = JSON.parse(line) as { jsonrpc?: string };
+    assert.equal(message.jsonrpc, '2.0', `non-protocol bytes on stdout: ${line}`);
+  }
+  assert.equal(stderr(), '', `unexpected stderr at debug log level: ${stderr()}`);
 });
 
 test('MCP-3: stdin EOF flushes a large buffered response instead of truncating it', async () => {

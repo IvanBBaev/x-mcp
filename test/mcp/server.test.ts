@@ -353,6 +353,57 @@ test('INT-2/INT-3/RATE-2: a 429 charges at check time, trains the tracker, and b
   await mock.close();
 });
 
+test('DM-4/RATE-6: the ~1,440/24-h send cap is tracked as an app-24h window that blocks the next send', async () => {
+  // DM-4's cap is declared on the tool description (test/tools/dm.test.ts), but the cap
+  // itself is enforced by the SAME generic app-24h mechanism RATE-6 proves for other write
+  // buckets — this exercises it end to end for `dm-send` specifically: a response reporting
+  // the window exhausted must make the recording client's NEXT send refuse locally.
+  const mock = mockHttp();
+  const appResetSec = Math.floor(Date.now() / 1000) + 3_600;
+  mock.pool
+    .intercept({
+      path: '/2/dm_conversations/with/777/messages',
+      method: 'POST',
+      body: '{"text":"hi"}',
+    })
+    .reply(201, loadFixture<object>('dm/send-created.json'), {
+      headers: {
+        'x-app-limit-24hour-limit': '1440',
+        'x-app-limit-24hour-remaining': '0',
+        'x-app-limit-24hour-reset': String(appResetSec),
+      },
+    });
+
+  // write:dm is reachable only via an explicit ALLOW override (POL-3/POL-4) — never a preset.
+  const composition = composeFor(mock, { X_MCP_POLICY_ALLOW: 'write:dm' });
+  const client = await connect(composition);
+
+  // Call 1: reaches the API and succeeds, but the response headers report the 24-h app cap
+  // as already exhausted — the recording client files that under the `dm-send` bucket.
+  const first = await call(client, 'x_dm_send', { participant: '777', text: 'hi' });
+  assert.notEqual(first.isError, true);
+
+  // Call 2: NO interceptor is queued — the recorded headers must make the preflight gate
+  // refuse locally (RATE-6) before any network attempt.
+  const second = await call(client, 'x_dm_send', { participant: '777', text: 'hi' });
+  assert.equal(second.isError, true);
+  const err = textPayload<RenderedError>(second).error;
+  assert.equal(err.kind, 'rate-limit');
+  assert.match(err.message, /24-hour app window/);
+
+  // The recording client filed the headers under the composed bucket key (INT-3).
+  const status = await call(client, 'x_rate_limit_status', {});
+  const table = textPayload<Rendered>(status).data as RateLimitStatus;
+  assert.deepEqual(
+    table.buckets.map((b) => b.key),
+    ['dm-send#app'],
+  );
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
 /** A minimal `GET /2/tweets` envelope whose contents are derivable from the requested ids. */
 function postsEnvelope(ids: readonly string[]): object {
   return {
