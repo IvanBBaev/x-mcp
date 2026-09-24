@@ -1,4 +1,5 @@
 {
+  "_provenance": "Synthetic: hand-written to the documented X API v2 envelope for GET /2/users/by/username/:username (docs.x.com/x-api/users); profile values approximate a public account, not a live capture. Authored 2026-07-23. Exercises: REND-8 handle resolution on input.",
   "data": {
     "id": "50393960",
     "name": "Bill Gates",

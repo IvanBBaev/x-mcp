@@ -1,7 +1,9 @@
 // Process-level smoke tests for the composition root (T-130): the BUILT `src/index.js` is
 // spawned as a child, exactly as an MCP host launches it. Asserted contracts: stdout
 // carries ONLY JSON-RPC frames (MCP-1), stdin EOF and SIGTERM exit cleanly (MCP-3), and a
-// bad environment produces the single `x-mcp-ai: fatal:` stderr line (CFG-5).
+// bad environment produces the single `x-mcp-ai: fatal:` stderr line (CFG-5). One test near
+// the bottom goes through the actual `bin/x-mcp-ai.cjs` shim rather than the plain compiled
+// entry, at the most verbose log level, per MCP-1's own wording.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +18,9 @@ import { fileURLToPath } from 'node:url';
 
 // Resolves inside the same compiled tree this test runs from (works for any outDir).
 const ENTRY = fileURLToPath(new URL('../../src/index.js', import.meta.url));
+// The real launcher shim, not a build artifact: from the compiled test
+// (<outDir>/test/mcp/) three levels up is the repo root.
+const BIN = fileURLToPath(new URL('../../../bin/x-mcp-ai.cjs', import.meta.url));
 
 /** The inherited env with every X_MCP_* variable stripped, plus the test's own settings. */
 function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
@@ -31,8 +36,9 @@ const VALID_ENV = { X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'AAAA' };
 function spawnServer(
   args: readonly string[],
   extraEnv: Record<string, string>,
+  entry: string = ENTRY,
 ): ChildProcessWithoutNullStreams {
-  const child = spawn(process.execPath, [ENTRY, ...args], { env: cleanEnv(extraEnv) });
+  const child = spawn(process.execPath, [entry, ...args], { env: cleanEnv(extraEnv) });
   // Watchdog: a hung child must fail the test, not hang the runner forever.
   const watchdog = setTimeout(() => child.kill('SIGKILL'), 15_000);
   watchdog.unref();
@@ -137,6 +143,34 @@ test('MCP-1/MCP-3: stdout carries only JSON-RPC frames and stdin EOF exits clean
   assert.ok(!stderr().includes('fatal'), `unexpected fatal on stderr: ${stderr()}`);
 });
 
+test('MCP-1: a round trip through the real CJS bin at the most verbose log level stays stdout-pure', async () => {
+  // The test above spawns the compiled entry point directly. MCP-1 specifically names the
+  // CJS bin (the shim an MCP host actually launches via `npx x-mcp-ai`) at the most verbose
+  // log level — so this one goes through `bin/x-mcp-ai.cjs` with X_MCP_LOG_LEVEL=debug,
+  // which a plain-entry spawn can never exercise.
+  const child = spawnServer(['serve'], { ...VALID_ENV, X_MCP_LOG_LEVEL: 'debug' }, BIN);
+  const stderr = collect(child.stderr);
+  const reader = lineReader(child.stdout);
+
+  child.stdin.write(frame(INITIALIZE));
+  await responseWithId(reader, 1);
+  child.stdin.write(frame({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+  child.stdin.write(frame({ jsonrpc: '2.0', id: 2, method: 'tools/list' }));
+  await responseWithId(reader, 2);
+
+  child.stdin.end();
+  const [code, signal] = (await once(child, 'exit')) as [number | null, string | null];
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+
+  assert.ok(reader.lines.length >= 2);
+  for (const line of reader.lines) {
+    const message = JSON.parse(line) as { jsonrpc?: string };
+    assert.equal(message.jsonrpc, '2.0', `non-protocol bytes on stdout: ${line}`);
+  }
+  assert.equal(stderr(), '', `unexpected stderr at debug log level: ${stderr()}`);
+});
+
 test('MCP-3: stdin EOF flushes a large buffered response instead of truncating it', async () => {
   // Regression (found by the T-316 compatibility probe). The test above reads each frame as
   // it arrives, which keeps stdout drained and so can never see this: the failure needs a
@@ -209,6 +243,43 @@ test('CFG-5: an invalid environment yields one fatal stderr line, empty stdout, 
   assert.match(errLines[0] ?? '', /no-such-preset/);
 });
 
+test('CFG-5: an unreadable profiles file whose path holds a newline still yields one fatal line', async () => {
+  // The operator path is echoed in the reason, and ENOENT's own message echoes it again;
+  // a line break inside it must not split the fatal contract across lines.
+  const file = join(tmpdir(), 'x-mcp-no-such\nprofiles.json');
+  const child = spawnServer(['serve'], { X_MCP_PROFILES_FILE: file, X_MCP_PROFILE: 'work' });
+  const stdout = collect(child.stdout);
+  const stderr = collect(child.stderr);
+
+  const [code] = (await once(child, 'exit')) as [number | null];
+  assert.equal(code, 1);
+  assert.equal(stdout(), '');
+  const errLines = stderr().trim().split('\n');
+  assert.equal(errLines.length, 1, `expected a single fatal line, got: ${stderr()}`);
+  assert.match(
+    errLines[0] ?? '',
+    /^x-mcp-ai: fatal: cannot read profiles file ".*x-mcp-no-such profiles\.json"/,
+  );
+});
+
+test('CFG-5: a profiles file that is not JSON yields one fatal line, empty stdout, exit 1', async (t) => {
+  const dir = await fsp.mkdtemp(join(tmpdir(), 'x-mcp-profiles-'));
+  const file = join(dir, 'profiles.json');
+  await fsp.writeFile(file, '{ "work": \n', { mode: 0o600 });
+  t.after(() => fsp.rm(dir, { recursive: true, force: true }));
+
+  const child = spawnServer(['serve'], { X_MCP_PROFILES_FILE: file, X_MCP_PROFILE: 'work' });
+  const stdout = collect(child.stdout);
+  const stderr = collect(child.stderr);
+
+  const [code] = (await once(child, 'exit')) as [number | null];
+  assert.equal(code, 1);
+  assert.equal(stdout(), '');
+  const errLines = stderr().trim().split('\n');
+  assert.equal(errLines.length, 1, `expected a single fatal line, got: ${stderr()}`);
+  assert.match(errLines[0] ?? '', /^x-mcp-ai: fatal: profiles file ".*" is not valid JSON — /);
+});
+
 test('CFG-5/INT-7: authorize without a token store fails closed with one fatal line', async () => {
   // app-only mode resolves NEITHER backend — no token file and no keychain entry — so the
   // composition root must refuse to start the OAuth flow instead of composing an authorize
@@ -248,7 +319,11 @@ test('CFG-6: a group/other-readable profiles file warns on stderr and still star
   child.stdin.end();
   await once(child, 'exit');
 
-  assert.match(stderr(), /^x-mcp-ai: warning: .*profiles\.json is readable by group or other/m);
+  // Non-fatal notices are single-line JSON (CFG-5): {"ts","level","msg"}, in that key order.
+  assert.match(
+    stderr(),
+    /^\{"ts":"[^"]+","level":"warn","msg":"[^"]*profiles\.json is readable by group or other/m,
+  );
   assert.match(stderr(), /mode 644.*chmod 600/);
 });
 
