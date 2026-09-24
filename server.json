@@ -126,6 +126,12 @@
           "description": "Budget enforcement: warn (default) or hard.",
           "isRequired": false,
           "format": "string"
+        },
+        {
+          "name": "X_MCP_ALLOW_PROXY",
+          "description": "Set to 1 to mark a Node env-proxying HTTP(S) proxy as trusted and silence the startup warning.",
+          "isRequired": false,
+          "format": "string"
         }
       ]
     }

@@ -47,6 +47,7 @@ import {
 } from '../api/endpoints/media.js';
 import type { MediaCategory } from '../api/endpoints/media.js';
 import { XError, apiError, networkError, validationError } from '../core/errors.js';
+import { formatLogLine } from '../core/log.js';
 import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 
@@ -257,11 +258,11 @@ export async function openNoFollow(
       const warn =
         deps.warn ??
         ((message: string): void => {
-          process.stderr.write(message + '\n');
+          process.stderr.write(`${formatLogLine('warn', message, new Date().toISOString())}\n`);
         });
       warn(
-        'x-mcp: O_NOFOLLOW is unavailable on this platform (win32); the final media path ' +
-          'component is checked with a non-atomic lstat instead (PLAT-2).',
+        'O_NOFOLLOW is unavailable on this platform (win32); the final media path component ' +
+          'is checked with a non-atomic lstat instead (PLAT-2).',
       );
     }
     const link = await lstat(target).catch(() => undefined);

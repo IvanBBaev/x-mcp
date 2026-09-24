@@ -79,7 +79,9 @@ node build/src/index.js authorize
 
 - Opens `https://x.com/i/oauth2/authorize` in your browser, listens once on
   `127.0.0.1:<port>/callback` (nominal port `8371`), verifies the CSRF `state`, exchanges
-  the code with PKCE (S256), and writes the token file.
+  the code with PKCE (S256), and writes the token file. The URL is always printed too; if
+  no browser can be launched (no opener installed, no `DISPLAY`/`WAYLAND_DISPLAY`, or an
+  SSH session) you get a message pointing at the printed URL and at `--manual`.
 - `--manual` — no local listener: print the URL, then paste the **full redirect URL** back.
   A bare authorization code is rejected, because the `state` must be verifiable.
 - The callback wait times out after 5 minutes; nothing is written on timeout.
@@ -95,8 +97,13 @@ expanded):
 | Windows | `%APPDATA%\x-mcp\tokens.json` |
 | Everything else | `$XDG_CONFIG_HOME/x-mcp/tokens.json`, else `~/.config/x-mcp/tokens.json` |
 
-The file is created `0600` (owner read/write only) with `O_NOFOLLOW`/`O_EXCL`. Keep it
-out of cloud-synced folders — `doctor` warns if it is inside one.
+The file is created `0600` (owner read/write only) with `O_NOFOLLOW`/`O_EXCL`. If it is
+later widened, the server prints a one-line `chmod 600` warning to stderr at startup
+(printed once, not once per check). On Windows mode bits are not enforced, so restricting
+the file is up to you: startup instead prints a single warning at start that securing the
+file is your responsibility, and points at `icacls "<tokenFile>"` to inspect it (`doctor`
+prints the same command with the real path). Keep it out of cloud-synced folders —
+`doctor` warns if it is inside one.
 
 Authorize with the **same env** you will serve with. If the client config points at a
 different `X_MCP_TOKEN_FILE`, the server will not find the tokens you just minted.
@@ -270,7 +277,8 @@ distinctly when the text carries a URL. A loop that posts links is the most expe
 this server can do.
 
 **The platform read cap.** X caps post reads at **2,000,000 per month**, independent of
-credit balance.
+credit balance. Hitting it returns a `billing` error with `platform_title:
+"UsageCapExceeded"` — not a rate limit, so no retry helps until the month renews.
 
 **The guardrail** is the session credit budget:
 
@@ -426,7 +434,13 @@ and are rejected by the config contract.
 - **Startup is fail-closed.** A configuration problem prints one
   `x-mcp-ai: fatal: <reason>` line and exits non-zero rather than starting degraded.
 - **Proxy variables are ignored.** `HTTP_PROXY`/`HTTPS_PROXY` have no effect; the client
-  dials the API origin directly.
+  dials the API origin directly. The one exception is Node's own env proxying
+  (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy` in `NODE_OPTIONS`): then every request,
+  including its `Authorization` header, goes through the proxy, and startup and `doctor`
+  warn about it. If the proxy is yours and trusted, set `X_MCP_ALLOW_PROXY=1` to silence
+  the warning (`doctor` then shows it as a note). The warning is also silenced, and
+  `doctor` notes it instead, when `NO_PROXY`/`no_proxy` already exempts both
+  `api.x.com` and `upload.x.com` — the proxy then never carries X traffic.
 - **The base URL is pinned** to `https://api.x.com`. Any other host needs
   `X_MCP_ALLOW_INSECURE_BASE_URL=1` and is warned about loudly — testing only.
 - **Tell the agent to call `x_auth_status` first** in any session that will write or needs
