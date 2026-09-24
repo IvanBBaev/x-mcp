@@ -334,6 +334,25 @@ const POST_DELETE_DATA: SchemaNode = {
   required: ['id', 'deleted'],
 };
 
+/**
+ * `x_thread_create` result: `posts` lists what published, in order. A mid-thread failure
+ * reports `ok: false` with `failed_at` (0-based index) instead of throwing; the mapped
+ * `error` also rides on the object but is left undeclared here, same T-313 byte-budget
+ * tradeoff as `missing[]` on a page (the object stays open, so it still conforms).
+ */
+const THREAD_CREATE_DATA: SchemaNode = {
+  type: 'object',
+  properties: {
+    ok: BOOL,
+    posts: {
+      type: 'array',
+      items: { type: 'object', properties: { id: STR, url: STR }, required: ['id', 'url'] },
+    },
+    failed_at: NUM,
+  },
+  required: ['ok', 'posts'],
+};
+
 /** One reversible engagement result (`x_like_set` / `x_repost_set` / `x_bookmark_set`). */
 function engagementData(actions: readonly string[], state: string): SchemaNode {
   return {
@@ -588,6 +607,9 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   // moderation, which reports the same shape as the engagement toggles.
   x_bookmarks_list: envelope(POST_PAGE_OR_RAW, POST_DEFS),
   x_post_hide_reply: envelope(engagementData(['hide', 'unhide'], 'hidden')),
+  // Phase 3 roadmap convenience (docs/06): a thread posted as one x_post_create call per
+  // post; a mid-thread failure reports what published so far instead of throwing (POST-9).
+  x_thread_create: envelope(THREAD_CREATE_DATA),
 });
 
 /** The static `outputSchema` for one tool, or `undefined` for an unknown name. */

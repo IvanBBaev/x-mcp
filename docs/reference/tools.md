@@ -4,7 +4,7 @@
 
 # Tool reference (generated)
 
-**41 tools in 12 packages.** Every field on this page is read out of the registered
+**42 tools in 12 packages.** Every field on this page is read out of the registered
 `ToolDef` values, so this is the surface the server actually exposes — not the surface it
 was designed to have. The designed catalog, including tools that are not implemented yet,
 is [`../03-tool-catalog.md`](../03-tool-catalog.md).
@@ -14,7 +14,7 @@ is [`../03-tool-catalog.md`](../03-tool-catalog.md).
 | Package | Tools | Registered tools |
 |---|--:|---|
 | `auth` | 2 | `x_auth_status`, `x_rate_limit_status` |
-| `posts` | 4 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply` |
+| `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
 | `users` | 1 | `x_user_get` |
 | `search` | 2 | `x_search_recent`, `x_post_counts_recent` |
 | `engagement` | 4 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list` |
@@ -33,12 +33,12 @@ annotated; they refuse the call (POL-7). DM cells are in no preset, not even `fu
 
 | Preset | Callable | Denied |
 |---|--:|--:|
-| `read-only` *(default)* | 21 | 20 |
-| `engage` | 26 | 15 |
-| `publish` | 32 | 9 |
-| `manage` | 34 | 7 |
-| `full` | 37 | 4 |
-| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 41 | 0 |
+| `read-only` *(default)* | 21 | 21 |
+| `engage` | 26 | 16 |
+| `publish` | 33 | 9 |
+| `manage` | 35 | 7 |
+| `full` | 38 | 4 |
+| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 42 | 0 |
 
 ## Reading the tables
 
@@ -132,6 +132,18 @@ Takes no input fields.
 |---|---|:--:|---|
 | `reply_id` | string (non-empty) | ✅ | The reply to hide or unhide: the REPLY's own numeric post id or status URL, inside a conversation started by the authenticated account. |
 | `action` | `hide` \| `unhide` | ✅ | Whether to hide or unhide the reply. |
+
+### `x_thread_create`
+
+**Create thread** — Post a thread — posts: string[] (2-25), each replying to the previous.
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `posts` | `write:content` | `user-only` | `w:post` | 3 | — | `tweet.read`, `tweet.write`, `users.read` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `posts` | string[] (2–25 items) | ✅ | Thread texts, in order (2-25); each replies to the previous. |
 
 ## `users`
 

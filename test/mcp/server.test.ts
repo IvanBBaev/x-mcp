@@ -134,6 +134,7 @@ const WRITE_TOOLS = [
   'x_post_delete',
   'x_post_hide_reply',
   'x_repost_set',
+  'x_thread_create',
 ];
 
 // The destructive:* cells → destructiveHint (MCP-4).

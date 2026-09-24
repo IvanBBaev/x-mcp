@@ -112,6 +112,9 @@ const TOOL_BUCKETS: Readonly<Record<string, string | null>> = {
   // writing them, and reply moderation is its own family separate from post delete.
   x_bookmarks_list: 'bookmarks-list',
   x_post_hide_reply: 'tweets-hidden',
+  // Phase 3 roadmap convenience: internally N calls to POST /2/tweets, the same family as
+  // x_post_create, so its preflight and every per-post call share that bucket.
+  x_thread_create: 'tweets-create',
 };
 
 /** Test seams: override any port; production passes nothing and gets the real adapters. */

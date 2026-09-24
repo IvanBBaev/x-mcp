@@ -13,6 +13,7 @@ import {
   xPostCreate,
   xPostDelete,
   xPostHideReply,
+  xThreadCreate,
   postsTools,
 } from '../../src/tools/posts.js';
 import { XError, apiError } from '../../src/core/errors.js';
@@ -54,7 +55,7 @@ function contextFor(mock: MockHttp): ToolContext {
 }
 
 test('registry array exposes the post tools', () => {
-  assert.deepEqual(postsTools, [xPostGet, xPostCreate, xPostDelete, xPostHideReply]);
+  assert.deepEqual(postsTools, [xPostGet, xPostCreate, xPostDelete, xPostHideReply, xThreadCreate]);
   assert.equal(xPostGet.name, 'x_post_get');
   assert.equal(xPostGet.policy, 'read:content');
   assert.equal(xPostGet.availability, 'app+user');
@@ -1058,4 +1059,160 @@ test('x_post_hide_reply: the input schema is strict and the action enum is close
     xPostHideReply.input.safeParse({ reply_id: '1', action: 'hide', force: true }).success,
     false,
   );
+});
+
+// --- x_thread_create (roadmap Phase 3) ---------------------------------------------
+
+/** Resolve x_thread_create's per-call cost — the tool declares a resolver, not a class. */
+function threadCostFor(posts: string[]): { class: string; usd?: number; note?: string } {
+  const spec = xThreadCreate.cost;
+  assert.ok(typeof spec === 'function', 'x_thread_create cost must be an input-dependent resolver');
+  return spec({ posts });
+}
+
+test('x_thread_create declares the docs/03 axes', () => {
+  assert.equal(xThreadCreate.name, 'x_thread_create');
+  assert.equal(xThreadCreate.policy, 'write:content');
+  assert.equal(xThreadCreate.availability, 'user-only');
+  assert.equal(xThreadCreate.phase, 3);
+  assert.deepEqual([...xThreadCreate.scopes], ['tweet.read', 'tweet.write', 'users.read']);
+  assert.match(xThreadCreate.description, /^X \(Twitter\): /);
+  assert.equal(xThreadCreate.annotations.readOnlyHint, false);
+  assert.equal(xThreadCreate.annotations.destructiveHint, false);
+  assert.equal(xThreadCreate.annotations.openWorldHint, true);
+});
+
+test('x_thread_create: happy path chains reply_to_id across all posts', async () => {
+  const mock = mockHttp();
+  const body1 = captureBody();
+  const body2 = captureBody();
+  const body3 = captureBody();
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST', body: body1.matcher })
+    .reply(201, { data: { id: '100', text: 'one' } });
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST', body: body2.matcher })
+    .reply(201, { data: { id: '101', text: 'two' } });
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST', body: body3.matcher })
+    .reply(201, { data: { id: '102', text: 'three' } });
+
+  const out = await xThreadCreate.handler({ posts: ['one', 'two', 'three'] }, contextFor(mock));
+
+  // Post 1 stands alone; each following post replies to the id the previous one returned.
+  assert.deepEqual(JSON.parse(body1.get()), { text: 'one' });
+  assert.deepEqual(JSON.parse(body2.get()), {
+    text: 'two',
+    reply: { in_reply_to_tweet_id: '100' },
+  });
+  assert.deepEqual(JSON.parse(body3.get()), {
+    text: 'three',
+    reply: { in_reply_to_tweet_id: '101' },
+  });
+
+  assert.deepEqual(out.data, {
+    ok: true,
+    posts: [
+      { id: '100', url: 'https://x.com/i/status/100' },
+      { id: '101', url: 'https://x.com/i/status/101' },
+      { id: '102', url: 'https://x.com/i/status/102' },
+    ],
+  });
+  assert.equal(out.summary, 'Thread created: 3 posts, starting at https://x.com/i/status/100');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_thread_create: posts bounds are validated by the schema (2-25, strict)', () => {
+  assert.equal(xThreadCreate.input.safeParse({ posts: ['only one'] }).success, false);
+  assert.equal(xThreadCreate.input.safeParse({ posts: ['a', 'b'] }).success, true);
+  assert.equal(
+    xThreadCreate.input.safeParse({ posts: Array.from({ length: 25 }, (_, i) => `p${i}`) }).success,
+    true,
+  );
+  assert.equal(
+    xThreadCreate.input.safeParse({ posts: Array.from({ length: 26 }, (_, i) => `p${i}`) }).success,
+    false,
+  );
+  // An empty-string element is rejected by the per-element min(1), before the whitespace
+  // check even runs.
+  assert.equal(xThreadCreate.input.safeParse({ posts: ['a', ''] }).success, false);
+  // Unknown keys are refused (strict schema) — no x_post_create option rides along.
+  assert.equal(
+    xThreadCreate.input.safeParse({ posts: ['a', 'b'], reply_settings: 'following' }).success,
+    false,
+  );
+});
+
+test('POST-1: any whitespace-only post in the thread rejects before any HTTP is sent', async () => {
+  // The bad post is THIRD, not first — proving every post is validated up front, not just
+  // the one about to be sent.
+  await assert.rejects(
+    () => xThreadCreate.handler({ posts: ['fine', 'also fine', '  \n\t '] }, noHttpCtx()),
+    xErrorOf('validation', /Post 3 of 3 is whitespace-only/),
+  );
+});
+
+test('x_thread_create: a mid-thread failure reports published posts, failed_at, and POST-9 resume guidance without throwing', async () => {
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST' })
+    .reply(201, { data: { id: '200', text: 'one' } });
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(500, {
+    title: 'Internal Server Error',
+  });
+
+  // The handler must resolve normally (REND-2 precedent) — a partial failure is reported
+  // data, never a thrown error.
+  const out = await xThreadCreate.handler({ posts: ['one', 'two', 'three'] }, contextFor(mock));
+
+  const data = out.data as {
+    ok: boolean;
+    posts: { id: string; url: string }[];
+    failed_at: number;
+    error: { kind: string; message: string; retryable: boolean };
+  };
+  assert.equal(data.ok, false);
+  assert.deepEqual(data.posts, [{ id: '200', url: 'https://x.com/i/status/200' }]);
+  assert.equal(data.failed_at, 1);
+  assert.equal(data.error.kind, 'api');
+  // POST-9: the second post carried a reply_to_id, so the thread-resume guidance rides on
+  // the mapped failure exactly as it would for a standalone x_post_create reply failure.
+  assert.match(data.error.message, /posts already created in this sequence remain live/);
+  assert.match(data.error.message, /resume by replying to the last successful id/);
+  assert.equal(out.summary, `Thread stopped at post 2/3: ${data.error.message}`);
+
+  // Only 2 interceptors were queued (for posts 1 and 2): the loop stopped at the failure
+  // and never attempted post 3 — assertDone proves that, not just the returned shape.
+  mock.assertDone();
+  await mock.close();
+});
+
+test('COST-4: the cost resolver prices the thread as the sum of each post’s own price', () => {
+  const plain = threadCostFor(['plain one', 'plain two']);
+  assert.equal(plain.class, 'w:post');
+  assert.equal(plain.usd, 0.03); // 2 * $0.015
+  // The note discloses the aggregate/no-refund tradeoff, not a per-post dollar figure.
+  assert.match(plain.note ?? '', /aggregate/i);
+  assert.match(plain.note ?? '', /not.*refunded/i);
+
+  // A URL in even one post raises that post's price; the rest stay at base.
+  const mixed = threadCostFor(['plain', 'see https://example.com', 'plain again']);
+  assert.equal(mixed.usd, 0.015 + 0.2 + 0.015);
+
+  // All-URL thread: every post prices at the URL rate.
+  const allUrls = threadCostFor(['see https://a.example', 'see https://b.example']);
+  assert.equal(allUrls.usd, 0.4);
+});
+
+test('COST-4: the cost resolver never throws on an empty/partial input (docs-gen costClass probe)', () => {
+  // scripts/docs-gen.mjs's costClass() calls tool.cost({}) at doc-check time; the resolver
+  // must degrade to a zero-cost estimate instead of throwing on a missing `posts` field.
+  const spec = xThreadCreate.cost;
+  assert.ok(typeof spec === 'function', 'x_thread_create cost must be an input-dependent resolver');
+  const result = spec({} as unknown as { posts: string[] });
+  assert.equal(result.class, 'w:post');
+  assert.equal(result.usd, 0);
+  assert.match(result.note ?? '', /aggregate/i);
 });

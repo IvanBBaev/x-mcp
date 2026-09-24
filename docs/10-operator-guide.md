@@ -346,13 +346,13 @@ Run `authorize` once with the same values, then:
 
 Presets are the main safety dial. Each one is a superset of the one above it:
 
-| `X_MCP_POLICY` | Adds | Callable tools (of 41) |
+| `X_MCP_POLICY` | Adds | Callable tools (of 42) |
 |---|---|--:|
 | `read-only` *(default)* | reads except DM reads | 21 |
 | `engage` | `write:engagement` — like / repost / bookmark / list follow & pin | 26 |
-| `publish` | `write:content`, `write:moderation` — post create, media upload, list create/update/members, hide reply | 32 |
-| `manage` | `destructive:content` — post delete, list delete | 34 |
-| `full` | `write:social-graph`, `destructive:social-graph` — follow, mute, block | 37 |
+| `publish` | `write:content`, `write:moderation` — post create, media upload, list create/update/members, hide reply, thread create | 33 |
+| `manage` | `destructive:content` — post delete, list delete | 35 |
+| `full` | `write:social-graph`, `destructive:social-graph` — follow, mute, block | 38 |
 
 Prefer a low preset plus a targeted allow over jumping a level:
 
@@ -390,7 +390,7 @@ name them:
 ```
 
 Adds the three DM event-lookup tools. `"read:dm,write:dm"` also enables `x_dm_send`
-(4 tools, total 41 callable when combined with `full`). DM tools are `user-only` — they
+(4 tools, total 42 callable when combined with `full`). DM tools are `user-only` — they
 need OAuth 2.0 user context, not a bearer token. DM content is private third-party data;
 read [12-privacy.md](12-privacy.md) before enabling this.
 

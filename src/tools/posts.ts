@@ -564,5 +564,102 @@ export const xPostHideReply = defineTool({
   },
 });
 
+// --- x_thread_create ----------------------------------------------------------------
+
+const THREAD_TITLE = 'Create thread';
+
+const threadInput = z
+  .object({
+    posts: z
+      .array(z.string().min(1))
+      .min(2)
+      .max(25)
+      .describe('Thread texts, in order (2-25); each replies to the previous.'),
+  })
+  .strict();
+
+/** COST-4 applies per post; the whole thread is priced and charged as one aggregate. */
+const THREAD_COST_NOTE =
+  "Aggregate of each post's own price (COST-4 applies per post); charged upfront and not " +
+  'refunded if the thread stops early.';
+
+/**
+ * `x_thread_create` — roadmap Phase 3 convenience (docs/03, docs/06): post a thread as one
+ * call instead of N manual `x_post_create` calls. Built on `x_post_create`'s own internals
+ * unchanged — post 1 standalone, each following post replies to the previous id, and EVERY
+ * post goes through the same per-post rate/cost/policy checks (no bypass). A mid-thread
+ * failure is reported, not thrown (REND-2 precedent): the result lists what already
+ * published and where it stopped, so the agent resumes with `x_post_create`'s
+ * `reply_to_id` (POST-9); nothing already posted is auto-deleted. Gated at `write:content`,
+ * the same cell as `x_post_create` — callable only from the `publish` preset and above.
+ */
+export const xThreadCreate = defineTool({
+  name: 'x_thread_create',
+  title: THREAD_TITLE,
+  description:
+    'X (Twitter): post a thread — posts: string[] (2-25), each replying to the previous. ' +
+    'Same per-post checks as x_post_create. On failure: returns posts published so far ' +
+    "plus the failed index, to resume via x_post_create's reply_to_id. Never auto-deletes.",
+  policy: 'write:content',
+  availability: 'user-only',
+  scopes: ['tweet.read', 'tweet.write', 'users.read'],
+  cost: (input) => {
+    const posts = input.posts ?? [];
+    const usd = posts.reduce(
+      (sum, text) => sum + (containsUrl(text) ? URL_POST_USD : BASE_POST_USD),
+      0,
+    );
+    return { class: 'w:post', usd, note: THREAD_COST_NOTE };
+  },
+  annotations: {
+    title: THREAD_TITLE,
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: true,
+  },
+  phase: 3,
+  input: threadInput,
+  handler: async (input, ctx) => {
+    // POST-1 applies per post; validate ALL of them before any HTTP call is sent.
+    for (const [index, text] of input.posts.entries()) {
+      if (text.trim() === '') {
+        throw validationError(
+          `Post ${index + 1} of ${input.posts.length} is whitespace-only. Provide ` +
+            'non-whitespace text for every post (POST-1); nothing was sent.',
+        );
+      }
+    }
+
+    const posts: { id: string; url: string }[] = [];
+    let replyToId: string | undefined;
+    for (const [index, text] of input.posts.entries()) {
+      let res: RawSingleResponse<RawCreatedPost>;
+      try {
+        res = await createPost(ctx.http, {
+          text,
+          ...(replyToId !== undefined ? { replyToId } : {}),
+        });
+      } catch (err) {
+        if (!XError.is(err)) throw err;
+        // Reuses x_post_create's own failure mapping (POST-2/3/4/7/9, NET-4) unchanged:
+        // `hasReplyTo` is true from the second post on, so POST-9 thread-resume guidance
+        // rides on the mapped error exactly as it would for a standalone reply failure.
+        const mapped = mapCreateFailure(err, replyToId !== undefined, text);
+        return {
+          data: { ok: false, posts, failed_at: index, error: mapped.toPayload().error },
+          summary: `Thread stopped at post ${index + 1}/${input.posts.length}: ${mapped.message}`,
+        };
+      }
+      const id = res.data?.id ?? '';
+      posts.push({ id, url: postUrl(id) });
+      replyToId = id;
+    }
+    return {
+      data: { ok: true, posts },
+      summary: `Thread created: ${posts.length} posts, starting at ${posts[0]?.url ?? ''}`,
+    };
+  },
+});
+
 /** Every tool this module contributes to the registry. */
-export const postsTools = [xPostGet, xPostCreate, xPostDelete, xPostHideReply];
+export const postsTools = [xPostGet, xPostCreate, xPostDelete, xPostHideReply, xThreadCreate];

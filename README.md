@@ -4,7 +4,7 @@
 
 | | | | | | |
 |:--:|:--:|:--:|:--:|:--:|:--:|
-| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-41-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
+| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-42-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
 
 </div>
 
@@ -16,7 +16,7 @@ pay-per-use pricing so an agent can never quietly overspend.
 > **Status: pre-1.0, under active development, published on npm as
 > [`x-mcp-ai`](https://www.npmjs.com/package/x-mcp-ai)** (currently `0.8.0`, published from
 > CI with npm provenance). Pin an exact version while the project is on `0.x`
-> ([Setup](#setup)). **41 tools across 12 packages** are registered today; the full designed
+> ([Setup](#setup)). **42 tools across 12 packages** are registered today; the full designed
 > surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and has landed
 > in full. The public API is unstable until `1.0.0`.
 
@@ -62,7 +62,7 @@ model picks the tool. Three representative asks:
 
 ## Features
 
-- **41 tools across 12 packages** over the X API v2 — read posts, users and timelines,
+- **42 tools across 12 packages** over the X API v2 — read posts, users and timelines,
   search (recent and full-archive), engage, publish, manage lists, upload media, walk the
   social graph, and read/send DMs behind an explicit opt-in.
 - **Two-axis policy model** (`operation:domain`) with five presets — `read-only` (default),
@@ -208,12 +208,12 @@ Every tool maps to one **policy cell** — an `operation:domain` pair. Operation
 |---|---|--:|
 | `read-only` *(default)* | all `read:*` cells **except** `read:dm` | 21 |
 | `engage` | read-only **+** `write:engagement` | 26 |
-| `publish` | engage **+** `write:content`, `write:moderation` | 32 |
-| `manage` | publish **+** `destructive:content` | 34 |
-| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 37 |
+| `publish` | engage **+** `write:content`, `write:moderation` | 33 |
+| `manage` | publish **+** `destructive:content` | 35 |
+| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 38 |
 
 > **DM cells are never in a preset — not even `full`.** `read:dm` and `write:dm` must be
-> granted explicitly via `X_MCP_POLICY_ALLOW` (all 41 tools callable). Their unlock hint is
+> granted explicitly via `X_MCP_POLICY_ALLOW` (all 42 tools callable). Their unlock hint is
 > deliberately withheld from policy errors, as it is for every other sensitive cell.
 > Denied tools stay registered but annotated `(disabled by policy <preset>)` unless
 > `X_MCP_HIDE_DENIED=1`.
@@ -275,7 +275,7 @@ gate.
 
 ## Tools
 
-The 41 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
+The 42 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
 callable under the default preset (DM reads excepted: they need an explicit allow).
 "User" marks `user-only` tools, which require OAuth 2.0 user context and are unreachable
 with an app-only bearer token. The designed surface is
@@ -297,6 +297,7 @@ schemas, scopes, cost class, availability — is
 | posts | `x_post_create` | write:content |  | ✅ | Create a post — text, optional reply_to_id, quote_id, media_ids[], poll {options[], duration_minutes}, reply_settings. |
 | posts | `x_post_delete` | destructive:content |  | ✅ | Delete own post by id. |
 | posts | `x_post_hide_reply` | write:moderation |  | ✅ | Hide or unhide a reply to one of your own posts. |
+| posts | `x_thread_create` | write:content |  | ✅ | Post a thread — posts: string[] (2-25), each replying to the previous. |
 | users | `x_user_get` | read:user | ✅ |  | Batch fetch of X (Twitter) user profiles by numeric id, @handle, bare handle, or the sentinel `me` (the authenticated user). |
 | search | `x_search_recent` | read:content | ✅ |  | Search X (Twitter) posts from the last 7 days using the full v2 query syntax (from:, to:, conversation_id:, boolean operators). |
 | search | `x_post_counts_recent` | read:content | ✅ |  | Return a volume histogram (post counts per time bucket) for an X (Twitter) v2 query over the last 7 days, at minute/hour/day granularity. |

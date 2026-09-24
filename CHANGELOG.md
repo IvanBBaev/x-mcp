@@ -8,6 +8,18 @@ development chronology lives in `WORKLOG.md`.
 
 ## [Unreleased]
 
+### Added
+
+- `x_thread_create` (roadmap Phase 3): post a thread — `posts: string[]` (2-25) — in one
+  call instead of chaining `x_post_create` by hand. Post 1 is standalone and every
+  following post replies to the previous id; each post is sent and rate-limit tracked
+  exactly like an `x_post_create` call. The whole thread is priced as the sum of its posts
+  and charged to the budget upfront — not refunded if the thread stops early. Gated behind
+  the same `write:content` cell, so it is callable only from the `publish` preset and
+  above. A mid-thread failure is reported, not thrown: the result lists the posts already
+  published and where it stopped, so you can resume with `x_post_create`'s `reply_to_id`
+  — nothing already posted is auto-deleted.
+
 ### Changed
 
 - Fixed two follow-ups to warnings introduced earlier in this release. A too-wide

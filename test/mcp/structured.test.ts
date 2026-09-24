@@ -176,7 +176,7 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
   const names = composeServer(config)
     .registry.listForMcp()
     .map((tool) => tool.name);
-  assert.equal(names.length, 41, 'the Phase-1/2/3 catalog registers 41 tools');
+  assert.equal(names.length, 42, 'the Phase-1/2/3 catalog registers 42 tools');
   assertOutputSchemaCoverage(names); // must not throw
   for (const name of names) {
     const schema = toolOutputSchema(name);
