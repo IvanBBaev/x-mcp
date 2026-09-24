@@ -176,6 +176,12 @@ export interface EnvProxy {
   readonly variable: string;
   /** `X_MCP_ALLOW_PROXY=1` — the operator opted in, so no startup warning is raised. */
   readonly allowed: boolean;
+  /**
+   * `NO_PROXY`/`no_proxy` already exempts every host the Authorization header would ever
+   * go to (see {@link noProxyExemptsCredentialHosts}), so the proxy never actually carries
+   * X traffic. Present (and `true`) only when that holds; omitted otherwise (AUTH-14).
+   */
+  readonly noProxyExempt?: boolean;
 }
 
 /** Process facts `parseConfig` cannot read from the env snapshot alone. */
@@ -302,6 +308,51 @@ export function envProxyInUse(
   }
   if (!enabled) return null;
   return PROXY_VARS.find((name) => norm(env[name]) !== undefined) ?? null;
+}
+
+/** The only hosts AUTH-14 ever attaches the Authorization header to (docs/04 §"Auth header is host-scoped"). */
+const CREDENTIAL_HOSTS = ['api.x.com', 'upload.x.com'] as const;
+
+/**
+ * A single `NO_PROXY`/`no_proxy` entry against one host: `*` matches everything, an exact
+ * hostname matches itself, and a leading-dot or bare domain (`.x.com` or `x.com`, treated
+ * the same) matches that domain and any subdomain — the two conventional forms every major
+ * HTTP client accepts. Comparison is case-insensitive; a port suffix on the entry is not
+ * supported (the credential hosts are always plain hostnames).
+ */
+function noProxyEntryExempts(entry: string, host: string): boolean {
+  const e = entry.trim().toLowerCase();
+  if (e === '') return false;
+  if (e === '*') return true;
+  const domain = e.startsWith('.') ? e.slice(1) : e;
+  if (domain === '') return false;
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+/**
+ * CFG-7/AUTH-14 — does `NO_PROXY`/`no_proxy` already exempt EVERY host the Authorization
+ * header ever goes to? When it does, Node's env proxying never actually routes X traffic
+ * through the proxy, so the startup warning (and `doctor`'s report of it) would be a false
+ * alarm — the operator gets a `doctor` note instead. HTTP clients disagree on which casing
+ * wins when both `NO_PROXY` and `no_proxy` are set (curl and undici read `no_proxy` first),
+ * so every casing that is set must exempt both hosts on its own.
+ */
+export function noProxyExemptsCredentialHosts(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const values = [norm(env.NO_PROXY), norm(env.no_proxy)].filter(
+    (v): v is string => v !== undefined,
+  );
+  if (values.length === 0) return false;
+  return values.every((raw) => {
+    const entries = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+    return CREDENTIAL_HOSTS.every((host) =>
+      entries.some((entry) => noProxyEntryExempts(entry, host)),
+    );
+  });
 }
 
 /**
@@ -777,10 +828,15 @@ export function parseConfig(
   if (egressIssue !== null) throw validationError(`invalid configuration — ${egressIssue}`);
   const timeoutMs = Number(d.X_MCP_TIMEOUT_MS);
   const proxyVariable = envProxyInUse(env, runtime.execArgv);
+  const noProxyExempt = proxyVariable !== null && noProxyExemptsCredentialHosts(env);
   const envProxy: EnvProxy | undefined =
     proxyVariable === null
       ? undefined
-      : { variable: proxyVariable, allowed: d.X_MCP_ALLOW_PROXY === '1' };
+      : {
+          variable: proxyVariable,
+          allowed: d.X_MCP_ALLOW_PROXY === '1',
+          ...(noProxyExempt ? { noProxyExempt: true } : {}),
+        };
 
   // Credentials come from exactly one source: env OR the profile (CFG-3 refuses both).
   const clientId = d.X_MCP_CLIENT_ID ?? resolved?.clientId;
@@ -844,8 +900,10 @@ export function parseConfig(
         'host go out unauthenticated (docs/04 T10).',
     );
   }
-  // CFG-7/AUTH-14 — Node's env proxying would tunnel bearer-token traffic through a proxy.
-  if (envProxy !== undefined && !envProxy.allowed) {
+  // CFG-7/AUTH-14 — Node's env proxying would tunnel bearer-token traffic through a proxy,
+  // unless NO_PROXY already exempts every host that traffic goes to (nothing to warn about
+  // then — doctor reports the exemption instead, see cli/doctor.ts).
+  if (envProxy !== undefined && !envProxy.allowed && envProxy.noProxyExempt !== true) {
     warnings.push(
       `Node env proxying is enabled (NODE_USE_ENV_PROXY / --use-env-proxy) and ${envProxy.variable} is set — ` +
         'API requests, including their Authorization header, go through that proxy. ' +

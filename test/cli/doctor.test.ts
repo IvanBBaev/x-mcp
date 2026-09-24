@@ -510,6 +510,24 @@ test('CFG-7/AUTH-14: an opted-in proxy is a [note] line, and --connect failures 
   assert.doesNotMatch(output, /ignores proxy environment variables/);
 });
 
+test('AUTH-14: a proxy exempted by NO_PROXY for both credential hosts is a [note] line, not a [warn]', async () => {
+  const f = makeDeps({
+    env: {
+      ...HEALTHY_ENV,
+      NODE_USE_ENV_PROXY: '1',
+      HTTPS_PROXY: 'http://proxy.corp:3128',
+      NO_PROXY: 'api.x.com,upload.x.com',
+    },
+    files: HEALTHY_FILES,
+  });
+  const code = await createDoctorCli(f.deps)([]);
+  assert.equal(code, 0);
+  const output = f.stdout();
+  assert.doesNotMatch(output, /\[warn\]\s+config: Node env proxying/);
+  assert.match(output, /\[note\]\s+proxy: Node env proxying is enabled and HTTPS_PROXY is set/);
+  assert.match(output, /NO_PROXY\/no_proxy already exempts api\.x\.com and upload\.x\.com/);
+});
+
 // --- Argument handling ----------------------------------------------------------------------
 
 test('unknown argument exits 1 with usage on stderr and no checks run', async () => {

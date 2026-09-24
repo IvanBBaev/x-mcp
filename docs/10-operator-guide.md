@@ -98,10 +98,12 @@ expanded):
 | Everything else | `$XDG_CONFIG_HOME/x-mcp/tokens.json`, else `~/.config/x-mcp/tokens.json` |
 
 The file is created `0600` (owner read/write only) with `O_NOFOLLOW`/`O_EXCL`. If it is
-later widened, the server prints a one-line `chmod 600` warning to stderr at startup.
-On Windows mode bits are not enforced, so restricting the file is up to you: inspect it
-with `icacls "<tokenFile>"` (`doctor` prints the command with the real path). Keep it
-out of cloud-synced folders — `doctor` warns if it is inside one.
+later widened, the server prints a one-line `chmod 600` warning to stderr at startup
+(printed once, not once per check). On Windows mode bits are not enforced, so restricting
+the file is up to you: startup instead prints a single warning at start that securing the
+file is your responsibility, and points at `icacls "<tokenFile>"` to inspect it (`doctor`
+prints the same command with the real path). Keep it out of cloud-synced folders —
+`doctor` warns if it is inside one.
 
 Authorize with the **same env** you will serve with. If the client config points at a
 different `X_MCP_TOKEN_FILE`, the server will not find the tokens you just minted.
@@ -436,7 +438,9 @@ and are rejected by the config contract.
   (`NODE_USE_ENV_PROXY=1`, or `--use-env-proxy` in `NODE_OPTIONS`): then every request,
   including its `Authorization` header, goes through the proxy, and startup and `doctor`
   warn about it. If the proxy is yours and trusted, set `X_MCP_ALLOW_PROXY=1` to silence
-  the warning (`doctor` then shows it as a note).
+  the warning (`doctor` then shows it as a note). The warning is also silenced, and
+  `doctor` notes it instead, when `NO_PROXY`/`no_proxy` already exempts both
+  `api.x.com` and `upload.x.com` — the proxy then never carries X traffic.
 - **The base URL is pinned** to `https://api.x.com`. Any other host needs
   `X_MCP_ALLOW_INSECURE_BASE_URL=1` and is warned about loudly — testing only.
 - **Tell the agent to call `x_auth_status` first** in any session that will write or needs

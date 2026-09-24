@@ -10,6 +10,16 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- Fixed two follow-ups to warnings introduced earlier in this release. A too-wide
+  POSIX token file no longer prints its `chmod 600` startup warning twice (once from
+  the startup check, once from the store's first load); on Windows, where mode bits
+  are not checked, startup now prints a single warning that securing the token file's
+  ACL is the operator's responsibility, matching what `doctor` already reported
+  (AUTH-12). Separately, `X_MCP_ALLOW_PROXY` is now listed in `server.json`'s
+  environment variables, and the proxy startup warning is now suppressed — with
+  `doctor` noting it instead — when `NO_PROXY`/`no_proxy` already exempts both
+  `api.x.com` and `upload.x.com` from the proxy (AUTH-14).
+
 - `authorize` no longer tries to launch a browser over an SSH session on macOS. Previously
   only the `xdg-open` (Linux/other) path skipped the browser under SSH; on darwin `open`
   was always spawned, which would open a browser on the *remote* Mac's own screen — a

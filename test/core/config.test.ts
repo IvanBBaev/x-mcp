@@ -6,7 +6,12 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseConfig, envProxyInUse, DEFAULT_BASE_URL } from '../../src/core/config.js';
+import {
+  parseConfig,
+  envProxyInUse,
+  noProxyExemptsCredentialHosts,
+  DEFAULT_BASE_URL,
+} from '../../src/core/config.js';
 import { XError } from '../../src/core/errors.js';
 
 /** Assert `fn` throws a fatal `validation` XError whose message matches `re`. */
@@ -669,6 +674,61 @@ test('CFG-7/AUTH-14: envProxyInUse — last flag wins, command line after NODE_O
     envProxyInUse({ NODE_USE_ENV_PROXY: '1', HTTP_PROXY: 'a', HTTPS_PROXY: 'b' }),
     'HTTPS_PROXY',
   );
+});
+
+// --- AUTH-14: NO_PROXY/no_proxy exemption for the credential-bearing hosts --------------
+
+test('AUTH-14: NO_PROXY exempting both api.x.com and upload.x.com suppresses the warning', () => {
+  const cfg = parseConfig({
+    NODE_USE_ENV_PROXY: '1',
+    HTTPS_PROXY: 'http://proxy.corp:3128',
+    NO_PROXY: 'api.x.com,upload.x.com',
+  });
+  assert.deepEqual(cfg.envProxy, {
+    variable: 'HTTPS_PROXY',
+    allowed: false,
+    noProxyExempt: true,
+  });
+  assert.ok(!cfg.warnings.some((w) => /proxy/i.test(w)));
+});
+
+test('AUTH-14: NO_PROXY exempting only one of the two credential hosts still warns', () => {
+  const cfg = parseConfig({
+    NODE_USE_ENV_PROXY: '1',
+    HTTPS_PROXY: 'http://proxy.corp:3128',
+    NO_PROXY: 'api.x.com',
+  });
+  assert.deepEqual(cfg.envProxy, { variable: 'HTTPS_PROXY', allowed: false });
+  assert.equal(cfg.warnings.filter((w) => PROXY_WARNING.test(w)).length, 1);
+});
+
+test('AUTH-14: lowercase no_proxy is honored, and NO_PROXY=* exempts everything', () => {
+  const viaLowercase = parseConfig({
+    NODE_USE_ENV_PROXY: '1',
+    HTTPS_PROXY: 'http://proxy.corp:3128',
+    no_proxy: '.x.com',
+  });
+  assert.equal(viaLowercase.envProxy?.noProxyExempt, true);
+  const viaWildcard = parseConfig({
+    NODE_USE_ENV_PROXY: '1',
+    HTTPS_PROXY: 'http://proxy.corp:3128',
+    NO_PROXY: '*',
+  });
+  assert.equal(viaWildcard.envProxy?.noProxyExempt, true);
+});
+
+test('AUTH-14: noProxyExemptsCredentialHosts — exact host, domain suffix, unrelated hosts, blanks', () => {
+  assert.equal(noProxyExemptsCredentialHosts({}), false);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: '   ' }), false);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: 'example.com' }), false);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: 'api.x.com' }), false); // only one host
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: ' api.x.com , upload.x.com ' }), true);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: 'x.com' }), true); // bare domain suffix
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: '.x.com' }), true); // leading-dot suffix
+  // Clients disagree on which casing wins, so both set casings must exempt the hosts.
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: 'example.com', no_proxy: '*' }), false);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: '*', no_proxy: 'example.com' }), false);
+  assert.equal(noProxyExemptsCredentialHosts({ NO_PROXY: '*', no_proxy: '.x.com' }), true);
 });
 
 // --- CFG-8: unknown X_MCP_* vars warn (never fatal) ------------------------------------

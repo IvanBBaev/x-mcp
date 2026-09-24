@@ -118,10 +118,20 @@ export interface TokenFileStartupDeps {
  * on the first `load()` — which may come much later, or never in a session without X
  * calls. A missing file, a non-regular file (the store refuses symlinks on its own), or
  * an unreadable path yields no warning here; the store reports those on use. On win32 the
- * POSIX bits are meaningless, and the store's one-time PLAT-2 notice covers it.
+ * POSIX bits are meaningless, so the mode check below cannot run at all; say so once at
+ * startup instead of silently skipping it — the wording matches the store's own lazy
+ * `ensureDir()` notice (PLAT-2) so an operator sees the same message whichever path fires
+ * first, and `permissionWarningAlreadyReported` (below) stops it firing twice.
  */
 export function tokenFileStartupWarnings(path: string, deps: TokenFileStartupDeps = {}): string[] {
-  if ((deps.platform ?? process.platform) === 'win32') return [];
+  if ((deps.platform ?? process.platform) === 'win32') {
+    return [
+      `POSIX permission checks for ${path} are skipped on Windows — mode bits ` +
+        "are not enforced there, so securing the token file is the operator's " +
+        `responsibility; inspect its ACL with: icacls "${path}" and run: npx x-mcp-ai doctor ` +
+        '(PLAT-2, AUTH-12).',
+    ];
+  }
   const lstat = deps.lstat ?? lstatSync;
   let stat: { mode: number; isFile(): boolean };
   try {
@@ -184,6 +194,14 @@ export interface FileTokenStoreOptions {
   readonly isPidAlive?: (pid: number) => boolean;
   /** Warning sink; defaults to `console.warn` (stderr — stdout stays MCP-pure). */
   readonly warn?: (message: string) => void;
+  /**
+   * AUTH-12 — set by the composition root when {@link tokenFileStartupWarnings} already
+   * printed this file's permission finding at startup, so the first `load()` does not
+   * print the identical finding again. Seeds both the POSIX (`token-file-perms`) and win32
+   * (`posix-perms-win32`) one-time-warning keys, since the startup check now covers both
+   * platforms and is authoritative for whichever one applies.
+   */
+  readonly permissionWarningAlreadyReported?: boolean;
 }
 
 /** `{pid, timestamp}` as persisted inside the lock file (docs/02 §4A step 2). */
@@ -240,6 +258,12 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
   const win32 = platform === 'win32';
 
   const warnedKeys = new Set<string>();
+  if (options.permissionWarningAlreadyReported === true) {
+    // AUTH-12 — the startup check already printed whichever of these applies (POSIX mode
+    // or win32 ACL notice); pre-seed both keys so `load()`/`ensureDir()` stay silent.
+    warnedKeys.add('token-file-perms');
+    warnedKeys.add('posix-perms-win32');
+  }
   function warnOnce(key: string, message: string): void {
     if (warnedKeys.has(key)) return;
     warnedKeys.add(key);

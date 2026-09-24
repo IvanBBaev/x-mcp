@@ -330,7 +330,7 @@ test('AUTH-12: startup check warns once for a group/other-accessible token file 
   assert.deepEqual(warnings, [tokenFilePermissionWarning('/t/tokens.json', 0o100604)]);
 });
 
-test('AUTH-12: startup check is silent for 0600, missing, non-regular, and win32', () => {
+test('AUTH-12: startup check is silent for 0600, missing, and non-regular on POSIX', () => {
   const missing = (): never => {
     throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   };
@@ -352,18 +352,25 @@ test('AUTH-12: startup check is silent for 0600, missing, non-regular, and win32
     }),
     [],
   );
+});
+
+test('AUTH-12/PLAT-2: startup check on win32 warns once with the ACL-responsibility notice, without consulting POSIX mode bits', () => {
   let probed = false;
-  assert.deepEqual(
-    tokenFileStartupWarnings('/t/tokens.json', {
-      platform: 'win32',
-      lstat: () => {
-        probed = true;
-        return fakeStat(0o100777);
-      },
-    }),
-    [],
-  );
+  const warnings = tokenFileStartupWarnings('/t/tokens.json', {
+    platform: 'win32',
+    lstat: () => {
+      probed = true;
+      return fakeStat(0o100777);
+    },
+  });
   assert.equal(probed, false, 'win32 must not consult POSIX mode bits at all');
+  assert.equal(warnings.length, 1);
+  assert.ok(warnings[0]?.includes('/t/tokens.json'));
+  assert.ok(warnings[0]?.includes('not enforced'));
+  assert.ok(warnings[0]?.includes("operator's responsibility"));
+  assert.ok(warnings[0]?.includes('icacls "/t/tokens.json"'));
+  assert.ok(warnings[0]?.includes('npx x-mcp-ai doctor'));
+  assert.ok(!warnings[0]?.includes('\n'), 'the warning must be a single line');
 });
 
 test(
@@ -379,6 +386,30 @@ test(
     assert.ok(warnings[0]?.includes('mode 644'));
   },
 );
+
+test('AUTH-12: permissionWarningAlreadyReported suppresses the load()-time POSIX duplicate', async (t) => {
+  // Reproduces the composition root's flow: the startup check (tokenFileStartupWarnings,
+  // asserted above) already printed the too-wide finding, so the store it hands the
+  // finding to via this option must not print the SAME finding again on first load().
+  const h = await makeHarness(t);
+  await h.store().persist(PAIR);
+  await h.chmod(h.path, 0o644);
+  const seededStore = h.store({ permissionWarningAlreadyReported: true });
+  await seededStore.load();
+  await seededStore.load();
+  assert.equal(h.warnings.filter((w) => w.includes('chmod 600')).length, 0);
+});
+
+test('AUTH-12: permissionWarningAlreadyReported also suppresses the win32 ensureDir() duplicate', async (t) => {
+  // AUTH-12b's new startup-time win32 warning and the store's pre-existing lazy win32
+  // warning say the same thing (PLAT-2); seeding both dedup keys stops the fix from
+  // creating a NEW win32-only duplicate (startup, then again on first load/persist).
+  const h = await makeHarness(t);
+  const store = h.store({ platform: 'win32', permissionWarningAlreadyReported: true });
+  await store.persist(PAIR);
+  await store.load();
+  assert.equal(h.warnings.filter((w) => w.includes('POSIX permission checks')).length, 0);
+});
 
 // ---------------------------------------------------------------------------
 // PLAT-2: explicit degradation on win32

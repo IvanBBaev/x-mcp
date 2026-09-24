@@ -150,8 +150,10 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
   code exchange) are **not followed** for token-bearing requests — a redirect is surfaced
   as an `api` error. Proxy env vars are ignored by the default fetch; if Node's own env
   proxying is switched on (`NODE_USE_ENV_PROXY=1` or `--use-env-proxy`) while a proxy var
-  is set, startup prints a one-line warning (not a refusal) unless `X_MCP_ALLOW_PROXY=1`,
-  and `doctor` reports it.
+  is set, startup prints a one-line warning (not a refusal) unless `X_MCP_ALLOW_PROXY=1`
+  or `NO_PROXY`/`no_proxy` already exempts both `api.x.com` and `upload.x.com` from the
+  proxy, and `doctor` reports it either way (a warning, or a note that the exemption
+  already covers it).
 
 - **AUTH-15 — `auth_status` in app-only mode** `P1` `[ARCH-F14]`
   App-only context has no authenticated user: `auth_status` returns

@@ -226,13 +226,18 @@ Roadmap open question 2, resolved (WP-0.4; ratified over hide-by-default):
 - The token path is never followed through a symlink.
 - Startup **refuses to operate** if the token directory is writable by group or other
   (a symlink-plant / lock-race precondition); the token file itself warns at wider-than
-  `0600` perms (T1) — once at server startup (`src/index.ts`, via
-  `tokenFileStartupWarnings`) and once on the store's first load, both from the same
-  `tokenFilePermissionWarning` rule (AUTH-12). On win32 the POSIX perm/`O_NOFOLLOW` checks
-  degrade explicitly with a one-time warning (PLAT-2) that states mode bits are not
-  enforced, that securing the file is the operator's responsibility, and names
-  `icacls "<tokenFile>"` and `npx x-mcp-ai doctor`; `doctor` prints the same `icacls`
-  command with the real path.
+  `0600` perms (T1) — from the same `tokenFilePermissionWarning` rule, checked once at
+  server startup (`src/index.ts`, via `tokenFileStartupWarnings`) and again on the
+  store's first load, but printed **exactly once**: the startup check reports it, and,
+  when it did, forwards that fact into the composed store
+  (`tokenFilePermissionAlreadyReported`) so the first-load check stays silent about the
+  same file instead of repeating it (AUTH-12). On win32 the POSIX perm/`O_NOFOLLOW`
+  checks are skipped outright; startup instead prints a single documented warning
+  (PLAT-2) that mode bits are not enforced there, that securing the file is the
+  operator's responsibility, and names `icacls "<tokenFile>"` and `npx x-mcp-ai doctor`;
+  the store's own win32 `O_NOFOLLOW`-degradation notice is suppressed the same way so it
+  does not repeat the startup line, and `doctor` prints the same `icacls` command with
+  the real path.
 - The same `0600`-and-warn discipline extends to the **profiles file** and any
   client-secret material at rest (T16/CFG-6); the profiles file's `policy` is re-validated
   at load. **It warns, it does not refuse** (`src/index.ts`, `profilesPermissionWarning`) —
@@ -310,7 +315,9 @@ lives in `api/http`:
   line) Node routes every fetch — `Authorization` header included — through the proxy.
   When that is on and a proxy var is set, startup prints a single-line warning (not a
   refusal) and `doctor` repeats it, unless `X_MCP_ALLOW_PROXY=1` records that the proxy is
-  trusted (CFG-7, AUTH-14). The warning names the variable, never its value (a proxy URL
+  trusted, or `NO_PROXY`/`no_proxy` already exempts both `api.x.com` and `upload.x.com`
+  from the proxy — in which case `doctor` notes the exemption instead of warning
+  (CFG-7, AUTH-14). The warning names the variable, never its value (a proxy URL
   may carry credentials).
 - `X_MCP_BASE_URL` is **env-only** (never a tool parameter), requires `https://`, and only
   takes effect for a non-`*.x.com` host when `X_MCP_ALLOW_INSECURE_BASE_URL=1` is set. When

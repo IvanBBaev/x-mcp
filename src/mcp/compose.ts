@@ -121,6 +121,14 @@ export interface ComposeOverrides {
   readonly random?: Random;
   readonly tokens?: TokenStore;
   readonly dispatcher?: Dispatcher;
+  /**
+   * AUTH-12 — the entrypoint's own startup check already printed the too-wide
+   * token-file-permission warning; forwarded to {@link createConfiguredTokenStore} so the
+   * real file-backed store's first `load()` does not print the identical finding again.
+   * Ignored when `overrides.tokens` is set — a test-supplied store owns its own warning
+   * behavior, if any.
+   */
+  readonly tokenFilePermissionAlreadyReported?: boolean;
 }
 
 /** Everything the entrypoint (and the integrator) needs a handle on. */
@@ -189,7 +197,13 @@ function composeOAuth2(
   sleep: Sleep,
   dispatcher: Dispatcher | undefined,
 ): OAuth2Auth | undefined {
-  const store = overrides.tokens ?? createConfiguredTokenStore(config, clock, sleep);
+  const store =
+    overrides.tokens ??
+    createConfiguredTokenStore(config, clock, sleep, {
+      ...(overrides.tokenFilePermissionAlreadyReported !== undefined
+        ? { permissionWarningAlreadyReported: overrides.tokenFilePermissionAlreadyReported }
+        : {}),
+    });
   if (store === undefined || config.authMode !== 'oauth2') return undefined;
   return createOAuth2Auth({
     clock,

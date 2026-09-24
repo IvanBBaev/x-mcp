@@ -246,12 +246,22 @@ function runtimeOf(deps: DoctorDeps): ConfigRuntime {
 }
 
 /**
- * CFG-7/AUTH-14 — where API traffic will actually go. An un-opted-in env proxy is already a
- * `[warn] config` line (it is one of `Config.warnings`); this states the opted-in case, so
- * a trusted proxy is visible rather than silent.
+ * CFG-7/AUTH-14 — where API traffic will actually go. An un-opted-in, non-exempt env proxy
+ * is already a `[warn] config` line (it is one of `Config.warnings`); this states the two
+ * cases where that warning is (rightly) absent — opted in, or exempted by NO_PROXY — so
+ * either is visible as a note rather than looking like the check never ran.
  */
 function checkProxy(config: Config, report: Report): void {
-  if (config.envProxy?.allowed === true) {
+  if (config.envProxy === undefined) return;
+  if (config.envProxy.noProxyExempt === true) {
+    report(
+      'note',
+      'proxy',
+      `Node env proxying is enabled and ${config.envProxy.variable} is set, but NO_PROXY/no_proxy already exempts api.x.com and upload.x.com — the proxy never carries X traffic`,
+    );
+    return;
+  }
+  if (config.envProxy.allowed === true) {
     report(
       'note',
       'proxy',

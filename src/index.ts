@@ -150,17 +150,27 @@ function tokenFileWarnings(config: Config): string[] {
 
 async function serve(): Promise<void> {
   const { config, warnings } = loadConfig();
+  const silent = config.logLevel === 'silent';
+  const permissionWarnings = tokenFileWarnings(config);
 
   // Non-fatal startup notices (CFG-6/CFG-7/CFG-8, AUTH-12) go to stderr ONLY, so stdout
   // stays protocol-pure (MCP-1) at every log level. The file-permission findings come
   // first: "your credentials file is world-readable" outranks "unknown X_MCP_* variable".
-  if (config.logLevel !== 'silent') {
-    for (const warning of [...warnings, ...tokenFileWarnings(config), ...config.warnings]) {
+  if (!silent) {
+    for (const warning of [...warnings, ...permissionWarnings, ...config.warnings]) {
       warn(warning);
     }
   }
 
-  const { server } = composeServer(config);
+  // AUTH-12 — when the check above actually printed a too-wide/ACL-unenforced token-file
+  // finding, tell the real file-backed store not to print the identical finding again the
+  // first time it loads (previously a genuine duplicate: this line, then the store's own
+  // load()-time check). Tied to whether we printed, not just to whether oauth2/file mode
+  // is in play, so a file that only becomes too-wide AFTER startup is still caught by the
+  // store's own check.
+  const { server } = composeServer(config, {
+    tokenFilePermissionAlreadyReported: !silent && permissionWarnings.length > 0,
+  });
 
   // MCP-3 — graceful shutdown: a host that is done closes our stdin (EOF) or signals us;
   // every path closes the server once and exits cleanly instead of lingering or crashing.
