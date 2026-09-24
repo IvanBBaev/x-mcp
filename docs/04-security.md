@@ -48,7 +48,7 @@ the section that specifies the control).
 | T4 | Prompt-injected agent posts/DMs on attacker's behalf | Malicious text in a fetched post/DM steers the model into `post_create`/`dm_send` | Two-axis policy (§3): default preset is read-only and excludes `read:dm`; DM writes require an explicit opt-in cell (never a preset); destructive class separated; least-privilege via per-cell overrides. **The policy model is the real control — content marking (§5) is not** |
 | T5 | Accidental mass actions / spam | Agent loops a write tool | No batch write tools exist; single-target graph ops; policy classes make write bursts visible; Automation-Rules stance in catalog "Deliberate omissions" |
 | T6 | Wrong-account writes | Multiple profiles, agent assumes wrong identity | One profile per process, so the acting account is fixed for the session and the defence is making it cheap to *check*: `x_auth_status`'s **summary** leads with `@handle` (falling back to the numeric id, and saying so outright under app-only) — the summary rather than only `data.me`, because the summary is the part that survives compaction into a transcript. Write results carry the id and the canonical **handle-free** permalink (REND-4) and do **not** re-echo the account: a per-write echo would have to be re-derived from the same single session identity, so it would restate `x_auth_status` without independently confirming anything (T-320 F10) |
-| T7 | Budget/financial exhaustion | Agent burns paid reads/writes or triggers overage | Session credit budget + typed `budget` error (operator-set, model-immutable); no auto-pagination; preemptive rate-limit refusal (only after a bucket has failed once — [02 §7](02-architecture.md), F6); platform "out of credits" mapped to `billing` |
+| T7 | Budget/financial exhaustion | Agent burns paid reads/writes or triggers overage | Session credit budget + typed `budget` error (operator-set, model-immutable); no auto-pagination; preemptive rate-limit refusal (every response trains the table — [02 §7](02-architecture.md), F6 closed); platform "out of credits" mapped to `billing` |
 | T8 | MITM / endpoint spoofing | Redirected or spoofed TLS endpoint | HTTPS only, default undici TLS verification, base URL pinned to `*.x.com`; `X_MCP_BASE_URL` is env-only and gated by `X_MCP_ALLOW_INSECURE_BASE_URL=1` (CFG-7). The token-leak control is auth-header **host-scoping** — see T10/§4.4 |
 | T9 | Malicious media path exfiltration | `media_upload` tricked into reading an arbitrary file | `X_MCP_MEDIA_DIR` **required** (default-deny); realpath after symlink resolution, `O_NOFOLLOW` on the final component, same-fd sniff-and-upload (no TOCTOU); extension + magic-byte agreement; per-type size caps — see §7 |
 | **T10** | **Bearer-token exfiltration via base-URL / host confusion (confused deputy)** | The auth header carries the account token. If a request reaches a non-`x.com` host — via a socially-engineered `X_MCP_BASE_URL`, a malicious `X_MCP_PROFILES_FILE`, an HTTP(S) proxy env var, or a followed redirect — the token is sent to the attacker. T8 pins the base URL but not *where the auth header is attached*. | **Host-scope the `Authorization` header** (§4.4): attach it only for hosts on the hardcoded allowlist (`x.com` + subdomains, HTTPS) — which pointedly does **not** include the CFG-7 dev host, and refuse OAuth2 outright against one. Never follow redirects on token-bearing requests. Ignore proxy env vars for token-bearing calls unless explicitly opted in. `X_MCP_BASE_URL` env-only, `https://`-only, dev-flag gated (CFG-7) |
@@ -226,8 +226,13 @@ Roadmap open question 2, resolved (WP-0.4; ratified over hide-by-default):
 - The token path is never followed through a symlink.
 - Startup **refuses to operate** if the token directory is writable by group or other
   (a symlink-plant / lock-race precondition); the token file itself warns at wider-than
-  `0600` perms (T1). On win32 the POSIX perm/`O_NOFOLLOW` checks degrade explicitly with a
-  one-time warning (PLAT-2); `doctor` can inspect ACLs.
+  `0600` perms (T1) — once at server startup (`src/index.ts`, via
+  `tokenFileStartupWarnings`) and once on the store's first load, both from the same
+  `tokenFilePermissionWarning` rule (AUTH-12). On win32 the POSIX perm/`O_NOFOLLOW` checks
+  degrade explicitly with a one-time warning (PLAT-2) that states mode bits are not
+  enforced, that securing the file is the operator's responsibility, and names
+  `icacls "<tokenFile>"` and `npx x-mcp-ai doctor`; `doctor` prints the same `icacls`
+  command with the real path.
 - The same `0600`-and-warn discipline extends to the **profiles file** and any
   client-secret material at rest (T16/CFG-6); the profiles file's `policy` is re-validated
   at load. **It warns, it does not refuse** (`src/index.ts`, `profilesPermissionWarning`) —
@@ -258,7 +263,18 @@ initial tokens). Invariants:
   `authorize --manual` prints the authorization URL and accepts the **full redirect URL
   pasted back**; `state` is still validated and the code is still consumed exactly once —
   no listener is opened. The default browser flow **detects launch failure and falls back
-  to these manual instructions instead of hanging.**
+  to these manual instructions instead of hanging.** It spawns the platform's own opener
+  (`open` on macOS, `rundll32 url.dll,FileProtocolHandler` on Windows, `xdg-open`
+  elsewhere); a missing opener or a non-zero exit counts as a failure on every platform.
+  An SSH session (`SSH_CONNECTION` / `SSH_TTY`, checked before anything is spawned) counts
+  as a failure too, on **macOS and the `xdg-open` platforms** — over SSH, `open` would
+  launch a browser on the *remote* machine's own screen, unreachable by the SSH user, so
+  the flow falls back to manual instructions instead of spawning it and waiting out the
+  callback timeout. Windows has no SSH check (AUTH-16 leaves remote-Windows launch
+  behavior to the generic failure/timeout fallback). Off macOS/Windows, a missing
+  `DISPLAY` / `WAYLAND_DISPLAY` counts as a failure too — macOS has no such notion, so it
+  is exempt from that check. The opener's argv carries the authorization URL, i.e. `state`
+  and `code_challenge` only, never the code or the verifier.
 
 ### 4.4 Authorization header host-scoping (confused-deputy control) (T10/AUTH-14)
 
@@ -283,11 +299,19 @@ lives in `api/http`:
   the code plus PKCE verifier — to the configured host. There is no degraded mode to fall
   back to, so the process does not start. The check runs *after* profile resolution,
   because a profile may set `auth_mode` (it cannot set the base URL).
-- **Redirects are not followed** for token-bearing requests. A 301/302/307/308 on such a
-  request surfaces as a typed `api` error — a redirect must never carry the token to a new
-  host.
-- **Proxy env vars** (`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`) are **ignored** for
-  token-bearing calls unless explicitly opted in (CFG-7).
+- **Redirects are not followed** for token-bearing requests. Every fetch uses
+  `redirect: 'manual'`; a 301/302/307/308 (on any method) surfaces as a typed `api` error
+  — a redirect must never carry the token to a new host. The OAuth2 token refresh and the
+  `authorize` code exchange do not follow a 3xx either, so the refresh token, the code and
+  the PKCE verifier never chase a `Location` (AUTH-14).
+- **Proxy env vars** (`HTTP_PROXY`/`HTTPS_PROXY`) are **ignored** by the default fetch
+  dispatcher, and `ALL_PROXY` is never read. The exception is Node's own env proxying:
+  with `NODE_USE_ENV_PROXY=1` or `--use-env-proxy` (in `NODE_OPTIONS` or on the command
+  line) Node routes every fetch — `Authorization` header included — through the proxy.
+  When that is on and a proxy var is set, startup prints a single-line warning (not a
+  refusal) and `doctor` repeats it, unless `X_MCP_ALLOW_PROXY=1` records that the proxy is
+  trusted (CFG-7, AUTH-14). The warning names the variable, never its value (a proxy URL
+  may carry credentials).
 - `X_MCP_BASE_URL` is **env-only** (never a tool parameter), requires `https://`, and only
   takes effect for a non-`*.x.com` host when `X_MCP_ALLOW_INSECURE_BASE_URL=1` is set. When
   active it appears in the startup banner and in `auth_status` (CFG-7).

@@ -449,7 +449,8 @@ nothing to the next reader. This section is the disposition of each finding, add
 remediation pass. Where a finding was closed by *correcting the doc* rather than by code, it
 says so: the promise was wrong, not the implementation.
 
-**Disposition: 7 fixed in code · 2 closed as documentation corrections · 2 accepted (F6, F9).**
+**Disposition: 7 fixed in code · 2 closed as documentation corrections · 2 accepted at the time
+of the audit and closed since (F6 on 2026-09-19, F9 on 2026-09-22 — see their entries below).**
 
 The §1 verdict's blocking correction (F1) is **closed**, so the release gate it named is
 open. §2's counts still read `12 mitigated + tested · 1 untested · 4 gaps`; with F1, F6-adj,
@@ -463,10 +464,10 @@ F7, F8 and F10 closed, T1, T3, T6, T10 and T17 now hold as documented, and the o
 | F3 | MEDIUM | **fixed (code)** | platform text sanitized on the error path *and* the success path |
 | F4 | MEDIUM | **fixed (code)** | `rawSummary()` on every raw branch |
 | F5 | MEDIUM-LOW | **closed (doc)** | `docs/04` §6 rewritten to describe the no-log-layer reality |
-| F6 | MEDIUM-LOW | **accepted** | documented residual; needs an API-layer success-header hook |
+| F6 | MEDIUM-LOW | **fixed (code), 2026-09-19** | `onResponse` seam on the http client, wired per bucket |
 | F7 | MEDIUM-LOW | **closed (doc)** | `docs/04` §4.1/§4.2 qualified to the file backend |
 | F8 | LOW | **fixed (code)** | `keychainChildEnv()` env allowlist |
-| F9 | LOW | **accepted** | documented residual (`src/core/registry.ts:259-265`, `docs/02` §7) |
+| F9 | LOW | **half misdiagnosed, half fixed (code), 2026-09-22** | charge-at-check was already shipped; per-resource settlement added |
 | F10 | LOW | **fixed (code + doc)** | `token_store`, account-leading summary, doc corrections |
 | F11 | LOW | **closed (doc)** | `docs/04` T16 states the warn-not-refuse behavior and why |
 
@@ -555,6 +556,19 @@ every endpoint's response path — disproportionate at 1.0.0 for a control that 
 pinned by `test/scenarios/walkthrough-b.test.ts:371`, so it is a known shape and any change
 is visible. Carried forward as a post-1.0 item.
 
+**Closed 2026-09-19.** The success-path hook landed as a third seam on the http client —
+`HttpClientConfig.onResponse: (status, headers) => void`, called synchronously for every
+response the origin returned (2xx, refused 3xx, retried 5xx, 429 alike), once per attempt,
+before the body is read. `mcp/compose` wires `tracker.record` through it on each per-bucket
+client and the error mapper is pure mapping again; the fallback client for local-only tools
+has no observer. The preflight is now the look-ahead docs/02 §7 always described: a 200 that
+reports `remaining: 0` exhausts the bucket and the next call is refused before HTTP
+(`test/scenarios/walkthrough-b.test.ts`, `RATE-2/INT-3`), three concurrent successes settle
+into one window (`test/mcp/server.test.ts`, `MCP-8/CONC-2`), and the seam's own contract —
+fires on success, fires before `mapError`, once per attempt, never on a transport failure —
+is pinned in `test/api/http.test.ts`. The "post-1.0" label was a proportionality call, not a
+dependency; the change touched one function in `api/http` and the wiring in `mcp/compose`.
+
 ### F7 — the refresh lock under the keychain backend
 
 Closed as a documentation correction; the code was already honest (`withLock` is an
@@ -603,6 +617,36 @@ honest user to inconvenience an attacker who is already rate-limited by the pref
 4. Per-request accounting is the real fix for the second half and needs the API layer to
 report what it actually sent; that is a design change, not a patch, and it is out of this
 audit's remit. Revisit both if the budget is ever made authoritative.
+
+**Corrected and closed 2026-09-22.** The first half of the finding — *"a call that reaches the
+network and then throws is charged nothing"* — was **never true of the shipped server**, and
+the correction paragraph above repeats the error rather than catching it. Both readings came
+from the code comment at `src/core/registry.ts:259-265`, which asserted it; nobody followed
+the seam to its implementation. `BudgetGate` is a port, and the gate the composition actually
+installs is `createBudgetGate` (`src/mcp/gates.ts`), whose `check` performs the real
+`SessionBudget.reserve` — it must, because `reserve` is the single synchronous
+check-and-reserve that CONC-2 depends on — while the post-handler `reserve` is a WeakMap
+read-back keyed by the estimate's object identity. So the money moves at **step 3**, and a
+call that dies at the rate-limit gate or inside the handler **stays charged**. The behaviour
+was pinned by tests the whole time (`test/mcp/gates.test.ts`, `test/mcp/server.test.ts`:
+*"the failed call must stay charged (INT-2)"*). The lesson is the same one §7 opens with: a
+comment is not the code, and an audit that reads the port's doc instead of the adapter's
+implementation will report the port's wording as behaviour.
+
+The second half stands and is now fixed, though it was not the half the finding emphasised.
+The real under-charge was not multi-request tools — `x_media_upload`'s chunked upload is
+genuinely one `w:action`, which is $0 on X's published page anyway — it was that **every read
+was charged one unit price no matter how many resources it returned**, while the platform
+bills reads per resource ([01](../01-api-landscape.md) §3.1). A `x_post_search` page of 100
+posts was charged $0.005 instead of $0.50: a 100× under-count on the most-used tool in the
+server, in a direction that makes `hard` mode fail open. Handlers now report the count
+(`ToolOutput.units`), the registry hands it to the gate at step 6 and the gate **settles**
+the check-time reservation to `unit price × count` — a refund for a short page, a top-up for
+a full one, nothing for an empty one. Settlement never throws: the resources were delivered
+before anyone could refuse them, so a `hard`-mode overshoot warns and the next call is the
+one refused. What remains accepted is the per-*request* question the original finding raised
+last, and it remains a design change: the ledger still prices tool calls from a static table
+rather than metering wire traffic.
 
 ### F10 — the three unimplemented reporting clauses
 

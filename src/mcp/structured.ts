@@ -60,7 +60,13 @@ function compactOrRaw(compact: SchemaNode): SchemaNode {
   return { anyOf: [compact, RAW_ENVELOPE] };
 }
 
-/** `Page<T>` (frozen; REND-5/REND-10): `next_token`/`note` present only when meaningful. */
+/**
+ * `Page<T>` (frozen; REND-5/REND-10): `next_token`/`note` present only when meaningful.
+ * A page may also carry the optional REND-2 `missing[]` (same shape as on `BatchResult`);
+ * it is deliberately left undeclared here - the object is open (no `additionalProperties:
+ * false`), so such a page still conforms, and declaring it on every paged tool would cost
+ * ~4.5 kB of the `tools/list` context budget (T-313, scripts/context-gate.mjs).
+ */
 function pageOf(item: SchemaNode): SchemaNode {
   return {
     type: 'object',
@@ -309,6 +315,7 @@ const COUNTS_DATA: SchemaNode = {
     },
     total: NUM,
     next_token: STR,
+    note: STR,
   },
   required: ['counts', 'total'],
 };
