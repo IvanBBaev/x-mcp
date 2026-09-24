@@ -50,8 +50,9 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import { authError } from '../../core/errors.js';
+import { formatLogLine } from '../../core/log.js';
 import type { TokenPair, TokenStore } from '../../core/ports.js';
-import { TOKEN_FILE_SCHEMA_VERSION } from './filestore.js';
+import { TOKEN_FILE_SCHEMA_VERSION, persistedLifetime } from './filestore.js';
 
 /** Keychain "service" attribute the token entry is filed under. */
 export const KEYCHAIN_SERVICE = 'x-mcp-ai';
@@ -320,7 +321,7 @@ function encodePayload(pair: TokenPair): string {
     revision: (pair.version ?? 0) + 1,
     access_token: pair.access_token,
     obtained_at: pair.obtained_at,
-    expires_in: pair.expires_in,
+    expires_in: persistedLifetime(pair.expires_in),
   };
   if (pair.refresh_token !== undefined) body['refresh_token'] = pair.refresh_token;
   return Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
@@ -382,10 +383,15 @@ function decodePayload(raw: string, entry: string): TokenPair {
   if (typeof obtainedAt !== 'number' || !Number.isFinite(obtainedAt)) {
     corrupt('is missing a numeric "obtained_at" field');
   }
-  const expiresIn = parsed['expires_in'];
-  if (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn)) {
+  // `null` = UNKNOWN lifetime (AUTH-11), loaded back as NaN; absent/non-numeric is corrupt.
+  const rawExpiresIn = parsed['expires_in'];
+  if (
+    rawExpiresIn !== null &&
+    (typeof rawExpiresIn !== 'number' || !Number.isFinite(rawExpiresIn))
+  ) {
     corrupt('is missing a numeric "expires_in" field');
   }
+  const expiresIn = rawExpiresIn === null ? Number.NaN : rawExpiresIn;
   const refreshToken = parsed['refresh_token'];
   if (refreshToken !== undefined && (typeof refreshToken !== 'string' || refreshToken === '')) {
     corrupt('has a malformed "refresh_token" field');
@@ -453,7 +459,9 @@ export function createKeychainTokenStore(options: KeychainTokenStoreOptions = {}
   const account = assertSafeIdentifier('account', options.account ?? KEYCHAIN_ACCOUNT);
   const label = assertSafeIdentifier('label', options.label ?? KEYCHAIN_LABEL);
   const runner = options.runner ?? nodeKeychainRunner;
-  const warn = options.warn ?? ((message: string) => console.warn(message));
+  const warn =
+    options.warn ??
+    ((message: string) => console.warn(formatLogLine('warn', message, new Date().toISOString())));
   const tool = PLATFORM_TOOL[platform];
   const entry = `${service}/${account}`;
 
@@ -583,7 +591,7 @@ export function createKeychainTokenStore(options: KeychainTokenStoreOptions = {}
     if (!warnedAboutLock) {
       warnedAboutLock = true;
       warn(
-        `x-mcp-ai: the OS keychain backend serializes token refresh within THIS process only; ` +
+        'the OS keychain backend serializes token refresh within THIS process only; ' +
           'unlike the file store it has no cross-process refresh lock. If several x-mcp-ai ' +
           'processes share this account, use X_MCP_TOKEN_FILE so concurrent refreshes stay ' +
           'single-flight (AUTH-5).',

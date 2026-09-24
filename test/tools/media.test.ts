@@ -862,7 +862,9 @@ test(
     assert.ok(warnings.length <= 1, `expected at most one warning, got ${String(warnings.length)}`);
     if (process.platform !== 'win32') {
       assert.equal(warnings.length, 1);
-      assert.match(warnings[0] ?? '', /O_NOFOLLOW is unavailable/);
+      // This test injects its own `warn` port, so it captures the raw message text —
+      // JSON-wrapping happens only at the DEFAULT sink (media-nofollow.test.ts covers that).
+      assert.match(warnings[0] ?? '', /^O_NOFOLLOW is unavailable/);
       assert.match(warnings[0] ?? '', /PLAT-2/);
     }
     // A regular file still opens through the same fallback path.

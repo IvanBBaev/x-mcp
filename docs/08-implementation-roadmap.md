@@ -188,7 +188,8 @@ above; this is the single list to walk before tagging:
       all dispositioned in that document's §7 — 7 fixed in code, 2 closed as
       documentation corrections (the promise was wrong, not the implementation),
       2 accepted as documented residuals (F6 preemptive-refusal training, F9 budget
-      under-accounting). The blocking HIGH (F1: credentials followed
+      under-accounting; F6 was later closed on 2026-09-19 by the `onResponse` seam —
+      audit §7). The blocking HIGH (F1: credentials followed
       `X_MCP_BASE_URL` anywhere, so an operator-set or profile-set base URL could
       exfiltrate the token) is closed by an independent hardcoded egress allowlist in
       `src/core/egress.ts`, plus a startup refusal under `oauth2`. §1–§6 of the audit

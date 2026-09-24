@@ -1,4 +1,5 @@
 {
+  "_provenance": "Synthetic: hand-written to the documented X API v2 envelope for GET /2/users/:id/owned_lists with the owner_id expansion (docs.x.com/x-api/lists); fictional lists, not a live capture. Authored 2026-08-09. Exercises: list-page compaction and owner resolution via includes.users.",
   "data": [
     {
       "id": "1900000000000000001",
