@@ -265,10 +265,16 @@ initial tokens). Invariants:
   no listener is opened. The default browser flow **detects launch failure and falls back
   to these manual instructions instead of hanging.** It spawns the platform's own opener
   (`open` on macOS, `rundll32 url.dll,FileProtocolHandler` on Windows, `xdg-open`
-  elsewhere); a missing opener, a non-zero exit, or — off macOS/Windows — no `DISPLAY` /
-  `WAYLAND_DISPLAY` or an SSH session (`SSH_CONNECTION` / `SSH_TTY`, checked before
-  anything is spawned) counts as a failure. The opener's argv carries the authorization
-  URL, i.e. `state` and `code_challenge` only, never the code or the verifier.
+  elsewhere); a missing opener or a non-zero exit counts as a failure on every platform.
+  An SSH session (`SSH_CONNECTION` / `SSH_TTY`, checked before anything is spawned) counts
+  as a failure too, on **macOS and the `xdg-open` platforms** — over SSH, `open` would
+  launch a browser on the *remote* machine's own screen, unreachable by the SSH user, so
+  the flow falls back to manual instructions instead of spawning it and waiting out the
+  callback timeout. Windows has no SSH check (AUTH-16 leaves remote-Windows launch
+  behavior to the generic failure/timeout fallback). Off macOS/Windows, a missing
+  `DISPLAY` / `WAYLAND_DISPLAY` counts as a failure too — macOS has no such notion, so it
+  is exempt from that check. The opener's argv carries the authorization URL, i.e. `state`
+  and `code_challenge` only, never the code or the verifier.
 
 ### 4.4 Authorization header host-scoping (confused-deputy control) (T10/AUTH-14)
 

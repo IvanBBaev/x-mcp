@@ -10,6 +10,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `authorize` no longer tries to launch a browser over an SSH session on macOS. Previously
+  only the `xdg-open` (Linux/other) path skipped the browser under SSH; on darwin `open`
+  was always spawned, which would open a browser on the *remote* Mac's own screen — a
+  session the SSH user cannot reach — and the loopback redirect it produced could never
+  reach the local listener either. An SSH session on macOS now gets the same immediate
+  "open the URL manually, or re-run with `--manual`" fallback that an SSH session on Linux
+  already got. A local (non-SSH) macOS session, and Windows over SSH, are unaffected.
+
 - `x_post_get`, `x_user_get` and `x_list_get` now carry the untrusted-content note in
   `summary` (REND-6) whenever a result actually returned third-party text — matching
   every other tool that renders posts, users, DMs, or lists. Previously these three

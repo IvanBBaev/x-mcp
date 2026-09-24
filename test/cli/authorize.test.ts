@@ -1181,13 +1181,31 @@ test('AUTH-16: createSystemBrowserOpener — an SSH session resolves false witho
 
 test('AUTH-16: createSystemBrowserOpener — darwin runs `open` with the URL as one argv element', async () => {
   const fake = fakeSpawn({ exitCode: 0 });
-  // darwin needs no DISPLAY.
+  // darwin needs no DISPLAY, and this is a local (non-SSH) session: no regression from the
+  // darwin SSH check below — a plain local macOS run still launches the browser.
   const open = createSystemBrowserOpener({ spawn: fake.spawn, platform: 'darwin', env: {} });
   assert.equal(await open(OPEN_URL), true);
   assert.deepEqual(
     fake.calls.map((c) => [c.command, ...c.args]),
     [['open', OPEN_URL]],
   );
+});
+
+test('AUTH-16: createSystemBrowserOpener — an SSH session on darwin resolves false without spawning', async () => {
+  // Over SSH to a Mac, `open` would launch a browser on the remote machine's own screen —
+  // unreachable by the SSH user — and the loopback redirect could never reach this process's
+  // listener either. Previously darwin had no SSH check at all (unlike the xdg-open branch);
+  // this pins the fix.
+  for (const sshVar of ['SSH_CONNECTION', 'SSH_TTY']) {
+    const fake = fakeSpawn({ exitCode: 0 });
+    const open = createSystemBrowserOpener({
+      spawn: fake.spawn,
+      platform: 'darwin',
+      env: { [sshVar]: '10.0.0.1 51234 10.0.0.2 22' },
+    });
+    assert.equal(await open(OPEN_URL), false, sshVar);
+    assert.equal(fake.calls.length, 0, `${sshVar}: nothing was spawned`);
+  }
 });
 
 test('AUTH-16 + AUTH-13: createSystemBrowserOpener — win32 uses rundll32, the `&`-laden URL intact in one argv element', async () => {

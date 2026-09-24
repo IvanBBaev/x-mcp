@@ -155,15 +155,17 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
 
 - **AUTH-15 — `auth_status` in app-only mode** `P1` `[ARCH-F14]`
   App-only context has no authenticated user: `auth_status` returns
-  `{context: "app-only", user: null, scopes: [...], policy: <matrix>}` — defined
-  degraded shape, no 403, no invented fields.
+  `{auth_mode: "app-only", token_store, scopes: [...], availability: [...], policy:
+  <matrix>, note: <explanation>}` — `me` is omitted entirely (never a `null`
+  placeholder) — defined degraded shape, no 403, no invented fields.
 
 - **AUTH-16 — Headless / no-browser authorize** `P2` `[new]`
-  On SSH sessions and containers there is no local browser and the loopback
-  redirect never reaches the server's listener. `authorize --manual` prints the
-  authorization URL and accepts the full redirect URL pasted back; `state` is still
-  validated and the code is consumed exactly once. The default browser flow detects
-  launch failure and falls back to manual instructions instead of hanging.
+  On SSH sessions (macOS included — `open` would launch on the *remote* Mac's own
+  screen) and containers there is no local browser and the loopback redirect never
+  reaches the server's listener. `authorize --manual` prints the authorization URL
+  and accepts the full redirect URL pasted back; `state` is still validated and the
+  code is consumed exactly once. The default browser flow detects launch failure and
+  falls back to manual instructions instead of hanging.
 
 ## 3. OA1 — OAuth 1.0a signing *(dropped — decision NO-GO)*
 

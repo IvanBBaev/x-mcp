@@ -795,10 +795,19 @@ export const BROWSER_LAUNCH_GRACE_MS = 2_000;
  * unref'd with stdio ignored, and resolves `false` on any launch failure so the flow falls
  * back to manual instructions instead of waiting out the callback timeout.
  *
- *   • darwin → `open <url>`.
+ *   • darwin → `open <url>`, but not over SSH: an SSH session (`SSH_CONNECTION`/`SSH_TTY`)
+ *     resolves `false` without spawning. Over SSH to a Mac, `open` launches a browser on
+ *     the *remote* machine's own screen — a session the SSH user cannot see — and the
+ *     loopback redirect it would produce never reaches the local listener either way, so
+ *     spawning it only wastes the callback timeout. Unlike the `xdg-open` branch below,
+ *     no `DISPLAY`/`WAYLAND_DISPLAY` check applies: macOS has no such notion, and a local
+ *     (non-SSH) macOS session always has a real console to open into.
  *   • win32 → `rundll32 url.dll,FileProtocolHandler <url>`. Not `cmd /c start`: cmd would
  *     split the URL at every `&` of its query string, and escaping for cmd's parser on top
  *     of Node's own argv quoting is fragile. rundll32 takes the URL as a plain argument.
+ *     No SSH check here — an `ssh`-to-Windows session is rare enough, and remote-launched
+ *     GUI behavior varies enough across Windows SSH servers, that AUTH-16 leaves it to the
+ *     generic launch-failure/timeout fallback instead of a platform-specific guess.
  *   • anything else → `xdg-open <url>`, but only with a graphical session: no `DISPLAY` and
  *     no `WAYLAND_DISPLAY`, or an SSH session (`SSH_CONNECTION`/`SSH_TTY`), resolves `false`
  *     without spawning — a browser there would open on the wrong machine, or not at all.
@@ -850,12 +859,17 @@ function browserCommand(
   env: NodeJS.ProcessEnv,
   url: string,
 ): { file: string; args: string[] } | null {
-  if (platform === 'darwin') return { file: 'open', args: [url] };
+  const overSsh = isSet(env['SSH_CONNECTION']) || isSet(env['SSH_TTY']);
+  if (platform === 'darwin') {
+    // Over SSH, `open` launches a browser on the remote Mac's own screen — unreachable by
+    // the SSH user — and the loopback redirect it produces can never reach this process's
+    // listener either. Fall back to manual instructions instead of spawning it.
+    return overSsh ? null : { file: 'open', args: [url] };
+  }
   if (platform === 'win32') {
     return { file: 'rundll32', args: ['url.dll,FileProtocolHandler', url] };
   }
   const graphical = isSet(env['DISPLAY']) || isSet(env['WAYLAND_DISPLAY']);
-  const overSsh = isSet(env['SSH_CONNECTION']) || isSet(env['SSH_TTY']);
   if (!graphical || overSsh) return null;
   return { file: 'xdg-open', args: [url] };
 }
