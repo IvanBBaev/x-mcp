@@ -27,6 +27,7 @@ import {
   postUrl,
   rawSummary,
   renderPosts,
+  withUntrustedNote,
 } from '../core/render.js';
 import type { RawSingleResponse } from '../core/render.js';
 import { parsePostId } from '../core/resolve.js';
@@ -94,11 +95,14 @@ export const xPostGet = defineTool({
     }
 
     const batch = renderPosts(res);
+    const summary = `${batch.items.length} post(s)${
+      batch.missing?.length ? `, ${batch.missing.length} missing` : ''
+    }`;
     return {
       data: batch,
-      summary: `${batch.items.length} post(s)${
-        batch.missing?.length ? `, ${batch.missing.length} missing` : ''
-      }`,
+      // REND-6: BatchResult has no page-level `note` field, so the untrusted-content
+      // warning rides on `summary` instead (only when a post actually came back).
+      summary: batch.items.length > 0 ? withUntrustedNote(summary) : summary,
       units,
     };
   },

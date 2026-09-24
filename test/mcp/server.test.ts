@@ -19,6 +19,7 @@ import type { Composition } from '../../src/mcp/compose.js';
 import { buildMcpServer } from '../../src/mcp/server.js';
 import { defineTool } from '../../src/core/tooldef.js';
 import type { EndpointInvoker } from '../../src/core/tooldef.js';
+import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { Dispatcher, Ports } from '../../src/core/ports.js';
 import type { Registry } from '../../src/core/registry.js';
 import type { RateLimitStatus } from '../../src/api/ratelimit.js';
@@ -295,7 +296,8 @@ test('MCP-2: tools/call round-trips a read tool through the full composed pipeli
   const payload = textPayload<Rendered>(result);
   const batch = payload.data as { items: unknown[] };
   assert.equal(batch.items.length, 2);
-  assert.equal(payload.summary, '2 post(s)');
+  // REND-6: the untrusted-content note rides on `summary` for BatchResult shapes.
+  assert.equal(payload.summary, `2 post(s) ${UNTRUSTED_CONTENT_NOTE}`);
   // ResultMeta (COST-3) flows from the real budget through the registry envelope.
   assert.ok(payload.meta.cost_usd > 0);
   assert.equal(payload.meta.session_total_usd, payload.meta.cost_usd);
@@ -417,7 +419,8 @@ test('MCP-8/CONC-2: parallel tools/call requests interleave safely with no cross
       assert.equal(post.text, `post ${post.id}`);
       assert.equal(post.author, `@author_${post.id}`);
     }
-    assert.equal(payload.summary, `${expected.length} post(s)`);
+    // REND-6: every one of these calls returns at least one post, so each carries the note.
+    assert.equal(payload.summary, `${expected.length} post(s) ${UNTRUSTED_CONTENT_NOTE}`);
   });
 
   // (2) Atomic check-and-reserve (CONC-2): the price is per RESOURCE returned (COST-3), so

@@ -354,7 +354,9 @@ test('get: GET /2/lists/:id renders the compact list with the owner handle', asy
     follower_count: 7,
     owner: '@alice_dev',
   });
-  assert.equal(out.summary, `List "AI builders" (id ${LIST_ID}).`);
+  // REND-6: a resolved list carries third-party name/description text, so the untrusted-
+  // content note rides on `summary` (CompactList has no `note` field of its own).
+  assert.equal(out.summary, `List "AI builders" (id ${LIST_ID}). ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });
@@ -402,6 +404,8 @@ test('DRIFT-1: get with a data-less 200 renders an empty compact list, no crash'
 
   // Every optional field is omitted; the required id/name degrade to empty strings.
   assert.deepEqual(out.data, { id: '', name: '' });
+  // REND-6: nothing third-party actually came back (no `data` in the envelope), so no note —
+  // matches the batch tools' items.length > 0 gate.
   assert.equal(out.summary, `List "" (id ${LIST_ID}).`);
   mock.assertDone();
   await mock.close();

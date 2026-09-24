@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_post_get`, `x_user_get` and `x_list_get` now carry the untrusted-content note in
+  `summary` (REND-6) whenever a result actually returned third-party text — matching
+  every other tool that renders posts, users, DMs, or lists. Previously these three
+  were the only readers that returned third-party text without the warning.
+
 - Non-fatal stderr notices (startup permission warnings, the O_NOFOLLOW degradation
   notice, the keychain single-process-lock notice) are now single-line JSON,
   `{"ts", "level", "msg"}`, instead of a plain-text `x-mcp-ai: warning: <text>` line.

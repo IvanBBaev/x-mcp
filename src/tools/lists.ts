@@ -46,6 +46,7 @@ import {
   renderMissing,
   renderPostPage,
   renderUserPage,
+  withUntrustedNote,
 } from '../core/render.js';
 import type { RawListResponse } from '../core/render.js';
 import type { Page } from '../core/render-shapes.js';
@@ -396,7 +397,12 @@ export const xListGet = defineTool({
     }
     // REND-5: renderList omits `owner` when the includes cannot resolve it — never throws.
     const list = renderList(res.data ?? {}, res.includes);
-    return { data: list, summary: `List "${list.name}" (id ${listId}).` };
+    const summary = `List "${list.name}" (id ${listId}).`;
+    // REND-6: CompactList has no `note` field, so the untrusted-content warning rides on
+    // `summary` instead — but only when a list actually came back (`res.data !== undefined`);
+    // the DRIFT-1 data-less-200 fallback above renders an empty placeholder with nothing
+    // third-party in it, so it gets no note, matching the batch tools' `items.length > 0` gate.
+    return { data: list, summary: res.data !== undefined ? withUntrustedNote(summary) : summary };
   },
 });
 

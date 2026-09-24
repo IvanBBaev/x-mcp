@@ -8,7 +8,7 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import { capRawMaxResults, rawSummary, renderUsers } from '../core/render.js';
+import { capRawMaxResults, rawSummary, renderUsers, withUntrustedNote } from '../core/render.js';
 import type { RawListResponse, RawUser } from '../core/render.js';
 import type { BatchResult, CompactUser, Missing } from '../core/render-shapes.js';
 import { classifyUserRef } from '../core/resolve.js';
@@ -118,7 +118,9 @@ export const xUserGet = defineTool({
     const summary = `${items.length} user(s)${
       missing.length > 0 ? `, ${missing.length} missing` : ''
     }`;
-    return { data: batch, summary, units };
+    // REND-6: BatchResult has no page-level `note` field, so the untrusted-content warning
+    // rides on `summary` instead (only when a profile actually came back).
+    return { data: batch, summary: items.length > 0 ? withUntrustedNote(summary) : summary, units };
   },
 });
 

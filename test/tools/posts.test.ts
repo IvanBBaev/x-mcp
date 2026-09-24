@@ -107,7 +107,9 @@ test('two posts compact to items with @handle authors, metrics, and refs', async
   assert.deepEqual(second.reply_to, { id: '111', author: '@author_one' });
   assert.deepEqual(second.quoted, { id: '333', author: '@author_three' });
 
-  assert.match(out.summary ?? '', /^2 post\(s\)$/);
+  // REND-6: a batch with at least one item carries the untrusted-content note on `summary`
+  // (BatchResult has no page-level `note` field to carry it on).
+  assert.equal(out.summary, `2 post(s) ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });
@@ -124,7 +126,27 @@ test('partial failure yields one item and one classified missing entry', async (
   assert.equal(batch.items.length, 1);
   assert.equal(batch.items[0]?.id, '111');
   assert.deepEqual(batch.missing, [{ id: '999', reason: 'not-found' }]);
-  assert.match(out.summary ?? '', /1 post\(s\), 1 missing/);
+  // REND-6: still carries the note — at least one item came back.
+  assert.equal(out.summary, `1 post(s), 1 missing ${UNTRUSTED_CONTENT_NOTE}`);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('REND-6: an all-missing batch (0 items) carries no untrusted-content note', async () => {
+  const mock = mockHttp();
+  // No `data` at all — every requested id came back only in `errors[]`. Nothing third-party
+  // rendered, so nothing to warn about (unlike the raw path, which warns unconditionally).
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'GET', query: queryFor('999') })
+    .reply(200, { errors: [{ value: '999', title: 'Not Found Error' }] });
+
+  const out = await xPostGet.handler({ ids: ['999'] }, contextFor(mock));
+  const batch = out.data as BatchResult<CompactPost>;
+
+  assert.equal(batch.items.length, 0);
+  assert.deepEqual(batch.missing, [{ id: '999', reason: 'not-found' }]);
+  assert.equal(out.summary, '0 post(s), 1 missing');
 
   mock.assertDone();
   await mock.close();
