@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseConfig, DEFAULT_BASE_URL } from '../../src/core/config.js';
+import { parseConfig, envProxyInUse, DEFAULT_BASE_URL } from '../../src/core/config.js';
 import { XError } from '../../src/core/errors.js';
 
 /** Assert `fn` throws a fatal `validation` XError whose message matches `re`. */
@@ -604,6 +604,71 @@ test('CFG-7: an *.x.com host is accepted without the flag', () => {
   const cfg = parseConfig({ X_MCP_BASE_URL: 'https://api.sandbox.x.com' });
   assert.equal(cfg.baseUrl, 'https://api.sandbox.x.com');
   assert.ok(cfg.warnings.some((w) => /non-default X API base URL/.test(w)));
+});
+
+// --- CFG-7/AUTH-14: Node's own env proxying ---------------------------------------------
+
+const PROXY_WARNING = /Node env proxying is enabled.*HTTPS_PROXY is set.*X_MCP_ALLOW_PROXY=1/s;
+
+test('CFG-7/AUTH-14: a proxy var alone is silent — fetch ignores it unless Node env proxying is on', () => {
+  const cfg = parseConfig({ HTTPS_PROXY: 'http://proxy.corp:3128' });
+  assert.equal(cfg.envProxy, undefined);
+  assert.ok(!cfg.warnings.some((w) => /proxy/i.test(w)));
+});
+
+test('CFG-7/AUTH-14: NODE_USE_ENV_PROXY=1 plus a proxy var warns once and still starts', () => {
+  const cfg = parseConfig({ NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: 'http://proxy.corp:3128' });
+  assert.deepEqual(cfg.envProxy, { variable: 'HTTPS_PROXY', allowed: false });
+  assert.equal(cfg.warnings.filter((w) => PROXY_WARNING.test(w)).length, 1);
+  // One stderr line, and the proxy URL (which may carry credentials) is never echoed.
+  assert.ok(cfg.warnings.every((w) => !w.includes('\n') && !w.includes('proxy.corp')));
+});
+
+test('CFG-7/AUTH-14: --use-env-proxy in NODE_OPTIONS or execArgv enables the check', () => {
+  const env = { NODE_OPTIONS: '--max-old-space-size=512 --use-env-proxy', HTTPS_PROXY: 'http://p' };
+  assert.ok(parseConfig(env).warnings.some((w) => PROXY_WARNING.test(w)));
+  const viaArgv = parseConfig({ HTTPS_PROXY: 'http://p' }, undefined, {
+    execArgv: ['--use-env-proxy'],
+  });
+  assert.ok(viaArgv.warnings.some((w) => PROXY_WARNING.test(w)));
+});
+
+test('CFG-7/AUTH-14: X_MCP_ALLOW_PROXY=1 silences the warning but keeps the fact on Config', () => {
+  const cfg = parseConfig({
+    NODE_USE_ENV_PROXY: '1',
+    https_proxy: 'http://p',
+    X_MCP_ALLOW_PROXY: '1',
+  });
+  assert.deepEqual(cfg.envProxy, { variable: 'https_proxy', allowed: true });
+  assert.ok(!cfg.warnings.some((w) => /proxy/i.test(w)));
+  assertFatal(() => parseConfig({ X_MCP_ALLOW_PROXY: 'yes' }), /X_MCP_ALLOW_PROXY/);
+});
+
+test('CFG-7/AUTH-14: envProxyInUse — last flag wins, command line after NODE_OPTIONS, blank vars unset', () => {
+  // Enabled, but no proxy variable (blank counts as unset, CFG-4) → nothing to route through.
+  assert.equal(envProxyInUse({ NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: '  ' }), null);
+  assert.equal(envProxyInUse({ NODE_USE_ENV_PROXY: '0', HTTP_PROXY: 'http://p' }), null);
+  assert.equal(envProxyInUse({ NODE_USE_ENV_PROXY: '1', http_proxy: 'http://p' }), 'http_proxy');
+  // A later --no-use-env-proxy switches it back off, in NODE_OPTIONS or on the command line.
+  assert.equal(
+    envProxyInUse({ NODE_OPTIONS: '--use-env-proxy --no-use-env-proxy', HTTP_PROXY: 'http://p' }),
+    null,
+  );
+  assert.equal(
+    envProxyInUse({ NODE_OPTIONS: '--use-env-proxy', HTTP_PROXY: 'http://p' }, [
+      '--no-use-env-proxy',
+    ]),
+    null,
+  );
+  assert.equal(
+    envProxyInUse({ NODE_USE_ENV_PROXY: '1', HTTP_PROXY: 'http://p' }, ['--no-use-env-proxy']),
+    null,
+  );
+  // HTTPS_PROXY is reported first: the API is https-only.
+  assert.equal(
+    envProxyInUse({ NODE_USE_ENV_PROXY: '1', HTTP_PROXY: 'a', HTTPS_PROXY: 'b' }),
+    'HTTPS_PROXY',
+  );
 });
 
 // --- CFG-8: unknown X_MCP_* vars warn (never fatal) ------------------------------------

@@ -18,13 +18,16 @@ import {
   setReplyHidden,
 } from '../api/endpoints/posts.js';
 import type { RawCreatedPost } from '../api/endpoints/posts.js';
+import { WRITE_AMBIGUITY } from '../api/http.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
 import {
   RAW_MAX_RESULTS,
+  billableUnits,
   capRawMaxResults,
   postUrl,
   rawSummary,
   renderPosts,
+  withUntrustedNote,
 } from '../core/render.js';
 import type { RawSingleResponse } from '../core/render.js';
 import { parsePostId } from '../core/resolve.js';
@@ -73,6 +76,11 @@ export const xPostGet = defineTool({
     const ids = [...new Set(input.ids.map(parsePostId))];
     const res = await getPosts(ctx.http, { ids });
 
+    // Billed per post X actually returned, not per call and not per id asked for (COST-3):
+    // ids that came back in `errors[]` (deleted, protected) returned no resource. Counted
+    // from the raw envelope so the REND-10 cap below does not change the price.
+    const units = billableUnits(res);
+
     if (input.raw === true) {
       const all = res.data ?? [];
       const capped = all.slice(0, capRawMaxResults(all.length));
@@ -82,15 +90,20 @@ export const xPostGet = defineTool({
         summary: rawSummary(
           `${capped.length} raw post(s)${truncated ? ` (capped at ${RAW_MAX_RESULTS})` : ''}`,
         ),
+        units,
       };
     }
 
     const batch = renderPosts(res);
+    const summary = `${batch.items.length} post(s)${
+      batch.missing?.length ? `, ${batch.missing.length} missing` : ''
+    }`;
     return {
       data: batch,
-      summary: `${batch.items.length} post(s)${
-        batch.missing?.length ? `, ${batch.missing.length} missing` : ''
-      }`,
+      // REND-6: BatchResult has no page-level `note` field, so the untrusted-content
+      // warning rides on `summary` instead (only when a post actually came back).
+      summary: batch.items.length > 0 ? withUntrustedNote(summary) : summary,
+      units,
     };
   },
 });
@@ -101,6 +114,10 @@ export const xPostGet = defineTool({
 const BASE_POST_USD = 0.015;
 /** COST-4: the raised per-post price X charges when the text carries a URL. */
 const URL_POST_USD = 0.2;
+/** COST-4: why a URL post costs more, shared by the budget refusal and the result note. */
+const URL_PRICE_NOTE =
+  `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
+  `instead of the $${BASE_POST_USD} base price (COST-4).`;
 
 /** POST-2: the platform's fixed weighted width of any URL, and the weighted limit. */
 const URL_WEIGHT = 23;
@@ -108,15 +125,18 @@ const WEIGHTED_LIMIT = 280;
 
 // COST-4: URL detection ERRS TOWARD WARNING — an explicit http(s):// URL, or anything
 // shaped like a bare domain the platform's auto-linker could pick up (dotted labels with
-// a 2+-letter TLD, optional path). A false positive (e.g. "node.js") merely over-warns;
+// a 2+-letter TLD, optional path). Labels and TLDs may be non-Latin (IDN, e.g. a Cyrillic
+// domain under .rf) or punycode (xn--p1ai); the lookbehind stands in for `\b`, which only knows
+// ASCII word characters. A false positive (e.g. "node.js") merely over-warns;
 // a miss would silently underquote the $0.20 price. Kept as a SOURCE string so call
 // sites build fresh RegExp objects — no shared lastIndex state between `g` users.
 const URL_PATTERN =
-  'https?:\\/\\/\\S+|\\b[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*\\.[a-z]{2,}(?:\\/\\S*)?';
+  'https?:\\/\\/\\S+|(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]*' +
+  '(?:\\.[\\p{L}\\p{N}][\\p{L}\\p{N}-]*)*\\.(?:xn--[a-z0-9-]+|\\p{L}{2,})(?:\\/\\S*)?';
 
 /** COST-4: does the text contain something X would price as a URL post? */
 function containsUrl(text: string): boolean {
-  return new RegExp(URL_PATTERN, 'i').test(text);
+  return new RegExp(URL_PATTERN, 'iu').test(text);
 }
 
 /**
@@ -125,7 +145,7 @@ function containsUrl(text: string): boolean {
  * count. The X API stays authoritative; this number only decorates the mapped 400.
  */
 function weightedLength(text: string): number {
-  const collapsed = text.replace(new RegExp(URL_PATTERN, 'gi'), 'x'.repeat(URL_WEIGHT));
+  const collapsed = text.replace(new RegExp(URL_PATTERN, 'giu'), 'x'.repeat(URL_WEIGHT));
   return [...collapsed].length;
 }
 
@@ -166,6 +186,24 @@ const THREAD_RESUME_GUIDANCE =
 function withGuidance(err: XError, guidance: string, retryable: boolean): XError {
   return new XError(err.kind, err.message + guidance, {
     retryable,
+    fix: err.fix,
+    data: err.data,
+    cause: err,
+  });
+}
+
+/**
+ * POST-4 / NET-4: api/http already ends an ambiguous write failure with the generic
+ * {@link WRITE_AMBIGUITY} note. These tools know more — a create has a safe probe, a delete
+ * or hide is safe to repeat — so their guidance REPLACES that note rather than following a
+ * "do not re-issue" it may contradict.
+ */
+function withAmbiguityGuidance(err: XError, guidance: string): XError {
+  const base = err.message.endsWith(WRITE_AMBIGUITY)
+    ? err.message.slice(0, -WRITE_AMBIGUITY.length)
+    : err.message;
+  return new XError(err.kind, base + guidance, {
+    retryable: false,
     fix: err.fix,
     data: err.data,
     cause: err,
@@ -222,7 +260,7 @@ function mapCreateFailure(err: XError, hasReplyTo: boolean, text: string): XErro
     );
   } else if (isAmbiguousWriteFailure(err)) {
     // POST-4 / NET-4: decorate, never remap the class.
-    mapped = withGuidance(err, CREATE_AMBIGUITY_GUIDANCE, false);
+    mapped = withAmbiguityGuidance(err, CREATE_AMBIGUITY_GUIDANCE);
   }
 
   // POST-9: thread guidance rides on WHATEVER the failure became.
@@ -304,7 +342,9 @@ export const xPostCreate = defineTool({
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
   cost: (input) =>
-    containsUrl(input.text) ? { class: 'w:post', usd: URL_POST_USD } : { class: 'w:post' },
+    containsUrl(input.text)
+      ? { class: 'w:post', usd: URL_POST_USD, note: URL_PRICE_NOTE }
+      : { class: 'w:post' },
   annotations: {
     title: CREATE_TITLE,
     readOnlyHint: false,
@@ -366,13 +406,7 @@ export const xPostCreate = defineTool({
     const data = {
       id,
       url,
-      ...(containsUrl(input.text)
-        ? {
-            note:
-              `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
-              `instead of the $${BASE_POST_USD} base price (COST-4).`,
-          }
-        : {}),
+      ...(containsUrl(input.text) ? { note: URL_PRICE_NOTE } : {}),
     };
     return { data, summary: `Post created: ${url}` };
   },
@@ -436,7 +470,7 @@ export const xPostDelete = defineTool({
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
         // NET-4 on a destructive write: decorate with the (delete-safe) ambiguity note.
-        throw withGuidance(err, DELETE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, DELETE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
@@ -516,7 +550,7 @@ export const xPostHideReply = defineTool({
         throw withGuidance(err, HIDE_FORBIDDEN_GUIDANCE, false);
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
-        throw withGuidance(err, HIDE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, HIDE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
