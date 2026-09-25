@@ -22,12 +22,12 @@ import type { Composition } from '../../src/mcp/compose.js';
  * docs/reference/tools.md (regenerate with `npm run docs:gen`), the docs/03-tool-catalog.md
  * reconciliation, and the context budget in scripts/context-gate.mjs.
  */
-const REGISTERED_TOOLS = 41;
+const REGISTERED_TOOLS = 42;
 
 /** The registry packages (`src/tools/<package>.ts`) and how many tools each contributes. */
 const PACKAGE_SIZES: ReadonlyArray<readonly [string, number]> = [
   ['auth', 2],
-  ['posts', 4],
+  ['posts', 5],
   ['users', 1],
   ['search', 2],
   ['engagement', 4],
