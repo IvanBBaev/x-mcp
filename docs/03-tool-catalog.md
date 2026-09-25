@@ -1,11 +1,11 @@
 # 03 — Tool catalog
 
-**41 tools in 10 packages** (the frozen tool-name contract other tasks build against).
+**42 tools in 10 packages** (the frozen tool-name contract other tasks build against).
 
-- **All 41 are unconditional** — always registered once their phase has shipped. The one
+- **All 42 are unconditional** — always registered once their phase has shipped. The one
   conditional entry, `x_usage_get`, was resolved **GO on 2026-07-31** (WP-3.11 / T-317)
   on the T-010 fact-check in docs/01 §3.5; it now ships as a normal Phase-3 tool.
-- Phase 3 has shipped, so a **default deployment registers all 41**. A deployment held
+- Phase 3 has shipped, so a **default deployment registers all 42**. A deployment held
   at Phase 1+2 registers **14** (6 Phase-1 reads + 8 Phase-2 auth/write tools);
   `X_MCP_AVAILABILITY` gates nothing further, because no shipped tool is `pilot`,
   `premium-user`, or `enterprise`.
@@ -13,7 +13,7 @@
 > Count reconciliation (T-019, closed 2026-08-09 by [decisions/0002](decisions/0002-remaining-catalogued-tools.md)):
 > the reviews and roadmap once quoted "~46 full / ~28 typical" against a 50-row design
 > catalogue. That catalogue was a *design* surface; the shipped surface is
-> **41 / 41 / ~14** (rows / unconditional / registered at Phase 1+2). The nine rows
+> **42 / 42 / ~14** (rows / unconditional / registered at Phase 1+2). The nine rows
 > that never became tools were cut, not deferred — see
 > [Deliberate omissions](#deliberate-omissions).
 > **Availability note:** full-archive search/counts and profile search are `app+user`
@@ -29,14 +29,14 @@
 
 ### Registered surface
 
-**41 of the 41 catalogued tools are registered today**, in 12 registry packages
+**42 of the 42 catalogued tools are registered today**, in 12 registry packages
 (`src/tools/<package>.ts`). Per-tool detail — titles, input fields, scopes, MCP hints — is
 in the generated [`reference/tools.md`](reference/tools.md).
 
 | Registry package | Registered | Tools |
 |---|--:|---|
 | `auth` | 2 | `x_auth_status`, `x_rate_limit_status` |
-| `posts` | 4 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply` |
+| `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
 | `users` | 1 | `x_user_get` |
 | `search` | 2 | `x_search_recent`, `x_post_counts_recent` |
 | `engagement` | 4 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list` |
@@ -52,7 +52,7 @@ Callable tools per `X_MCP_POLICY` preset (denied tools stay registered and refus
 
 | `read-only` | `engage` | `publish` | `manage` | `full` | `full` + DM allow |
 |--:|--:|--:|--:|--:|--:|
-| 21 | 26 | 32 | 34 | 37 | 41 |
+| 21 | 26 | 33 | 35 | 38 | 42 |
 
 Every catalogued tool is registered.
 
@@ -109,10 +109,14 @@ Every catalogued tool is registered.
   argument accepts the canonical id, and where noted a `@handle`/handle or a status
   URL; the server resolves them before calling the API.
 - **Pagination**: all list-returning tools take `max_results` + `page_token`, return
-  `next_token` + `result_count`. `page_token` bridges to the v2 `next_token` cursor
-  (corner case PAGE-2); `max_results` is clamped to each endpoint's bounds in both
-  directions (PAGE-3). All read tools accept optional `raw: true` (uncompacted
-  payload, size-capped per corner case REND-9).
+  `next_token` + `result_count`, and — when X reported per-item errors on an HTTP 200 —
+  a `missing[]` of `{id, reason}` like batch lookups (REND-2; a page with only errors
+  says so in its `note` instead of the zero-results note). `page_token` bridges to the
+  v2 request cursor verbatim (corner case PAGE-1); a cursor X rejects as stale or
+  invalid comes back as a `validation` error telling the agent to restart from the first
+  page (PAGE-2). `max_results` is clamped to each endpoint's bounds in both directions
+  (PAGE-3). Every read tool except the DM reads accepts optional `raw: true`
+  (uncompacted payload, size-capped per corner case REND-10).
 - **Untrusted content**: post/user/DM text is third-party data and is rendered as
   inert content, never as instructions (corner case REND-6).
 - **Destructive-op rule**: irreversible **content deletion** is never hidden behind
@@ -137,6 +141,7 @@ Every catalogued tool is registered.
 | `x_post_delete` | destructive:content | user-only | w:action | P2 | X (Twitter): delete own post by id. Standalone (never behind an enum) |
 | `x_post_get` | read:content | app+user | r:post | P1 | X (Twitter): batch post lookup — `ids: string[]` (1–100), each an id or a status URL. Compact shape (author, text, metrics, refs, media) |
 | `x_post_hide_reply` | write:moderation | user-only | w:action | P3 | X (Twitter): hide / unhide a reply to own post (`PUT /2/tweets/:id/hidden`) |
+| `x_thread_create` | write:content | user-only | w:post | P3 | X (Twitter): post a thread — `posts: string[]` (2-25), each sent as a reply to the previous. Same per-post rate/cost/policy checks as `x_post_create`, run for every post before any call is sent. A mid-thread failure reports what already published and where it stopped (nothing is auto-deleted), so the agent resumes with `x_post_create`'s `reply_to_id` |
 
 ## search — discovery
 
@@ -225,8 +230,7 @@ Split into two tools (corner case MEDIA-3); `alt_text` is folded into upload (fo
 
 - **No batch write tools** (mass-follow, mass-like, thread-blast) — Automation Rules
   risk; a thread is composed one `x_post_create` (with `reply_to_id`) at a time, which
-  keeps the human/agent in a reviewable loop. A `x_thread_create` convenience tool is
-  Phase 3, gated behind the `publish` policy, capped at 25 posts.
+  keeps the human/agent in a reviewable loop.
 - **No filtered-stream tools** in v1 — long-lived connections don't fit the stdio
   request/response model; revisit with Streamable HTTP (roadmap Phase 4).
 - **No list-conversations DM tool** — v2 exposes no such endpoint; DM reads go through

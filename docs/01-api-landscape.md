@@ -139,7 +139,7 @@ operator-declared availability set** (roadmap WP-0.10):
   universally-available pay-per-use surface). The specially-provisioned classes
   (`pilot`, `premium-user`, `enterprise`) are **off** until explicitly listed.
 - **Surfaced in `auth_status`.** The resolved availability set is reported alongside
-  `context` / `user` / `scopes` / `policy` ([07](07-corner-cases.md) AUTH-15), so the
+  `auth_mode` / `me` / `scopes` / `policy` ([07](07-corner-cases.md) AUTH-15), so the
   agent and operator can see exactly what the account is declared to reach.
 - **Consumed by the registry** ([08](08-implementation-roadmap.md) WP-1.3): a tool whose
   declared availability class is **not** in the resolved set is **not registered at
