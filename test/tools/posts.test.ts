@@ -17,6 +17,7 @@ import {
   postsTools,
 } from '../../src/tools/posts.js';
 import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
 import type { ErrorClass } from '../../src/core/errors.js';
 import type { ToolContext } from '../../src/core/tooldef.js';
 import type { BatchResult, CompactPost } from '../../src/core/render-shapes.js';
@@ -1145,13 +1146,40 @@ test('x_thread_create: posts bounds are validated by the schema (2-25, strict)',
   );
 });
 
-test('POST-1: any whitespace-only post in the thread rejects before any HTTP is sent', async () => {
+test('POST-1: any whitespace-only post in the thread rejects before any HTTP is sent', () => {
   // The bad post is THIRD, not first — proving every post is validated up front, not just
   // the one about to be sent.
+  const parsed = xThreadCreate.input.safeParse({ posts: ['fine', 'also fine', '  \n\t '] });
+  assert.equal(parsed.success, false);
+  assert.match(parsed.error?.issues[0]?.message ?? '', /Post 3 of 3 is whitespace-only/);
+  assert.deepEqual(parsed.error?.issues[0]?.path, ['posts', 2]);
+});
+
+test('POST-1 / delta audit 09 F1: a whitespace-only thread post is refused before the budget charge', async () => {
+  // Schema validation is registry step 1 and the budget charge is step 4, so a rejected
+  // thread must reach neither the budget gate nor the network.
+  let budgetChecks = 0;
+  const reg = createRegistry([xThreadCreate], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        budgetChecks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  const posts = [...Array.from({ length: 24 }, (_, i) => `see https://example.com/${i}`), ' '];
   await assert.rejects(
-    () => xThreadCreate.handler({ posts: ['fine', 'also fine', '  \n\t '] }, noHttpCtx()),
-    xErrorOf('validation', /Post 3 of 3 is whitespace-only/),
+    () => reg.call('x_thread_create', { posts }, noHttpCtx()),
+    xErrorOf('validation', /Post 25 of 25 is whitespace-only/),
   );
+  assert.equal(budgetChecks, 0);
 });
 
 test('x_thread_create: a mid-thread failure reports published posts, failed_at, and POST-9 resume guidance without throwing', async () => {

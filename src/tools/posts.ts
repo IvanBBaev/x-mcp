@@ -574,6 +574,22 @@ const threadInput = z
       .array(z.string().min(1))
       .min(2)
       .max(25)
+      // POST-1 per post, in the schema rather than the handler: schema validation is
+      // pipeline step 1, the budget charge is step 4, so a rejected thread is never billed
+      // (delta audit 09 F1). Refinements do not reach the JSON Schema, so this costs no bytes.
+      .superRefine((posts, ctx) => {
+        for (const [index, text] of posts.entries()) {
+          if (text !== '' && text.trim() === '') {
+            ctx.addIssue({
+              code: 'custom',
+              path: [index],
+              message:
+                `Post ${index + 1} of ${posts.length} is whitespace-only. Provide ` +
+                'non-whitespace text for every post (POST-1); nothing was sent or charged.',
+            });
+          }
+        }
+      })
       .describe('Thread texts, in order (2-25); each replies to the previous.'),
   })
   .strict();
@@ -620,16 +636,6 @@ export const xThreadCreate = defineTool({
   phase: 3,
   input: threadInput,
   handler: async (input, ctx) => {
-    // POST-1 applies per post; validate ALL of them before any HTTP call is sent.
-    for (const [index, text] of input.posts.entries()) {
-      if (text.trim() === '') {
-        throw validationError(
-          `Post ${index + 1} of ${input.posts.length} is whitespace-only. Provide ` +
-            'non-whitespace text for every post (POST-1); nothing was sent.',
-        );
-      }
-    }
-
     const posts: { id: string; url: string }[] = [];
     let replyToId: string | undefined;
     for (const [index, text] of input.posts.entries()) {
