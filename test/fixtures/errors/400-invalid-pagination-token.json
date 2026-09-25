@@ -1,0 +1,17 @@
+{
+  "_provenance": "X API v2 400 invalid-request naming the pagination cursor as the rejected parameter (a stale or mangled `pagination_token` handed back as `page_token`). The envelope is the documented invalid-request problem body (same shape as 400-unmapped.json); the per-parameter entry follows the documented `errors[].parameters` + `message` form with the cursor as the parameter. Source: docs.x.com/x-api/fundamentals/errors invalid-request. Modelled, not a live capture. Exercises: PAGE-2 — the one API-returned 400 that maps to `validation`, not `api`. Authored 2026-09-23.",
+  "status": 400,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Invalid Request",
+    "type": "https://api.twitter.com/2/problems/invalid-request",
+    "status": 400,
+    "detail": "One or more parameters to your request was invalid.",
+    "errors": [
+      {
+        "parameters": { "pagination_token": ["cursor==stale"] },
+        "message": "The `pagination_token` query parameter value [cursor==stale] is not valid"
+      }
+    ]
+  }
+}

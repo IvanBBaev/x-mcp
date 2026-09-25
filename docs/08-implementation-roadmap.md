@@ -188,7 +188,8 @@ above; this is the single list to walk before tagging:
       all dispositioned in that document's §7 — 7 fixed in code, 2 closed as
       documentation corrections (the promise was wrong, not the implementation),
       2 accepted as documented residuals (F6 preemptive-refusal training, F9 budget
-      under-accounting). The blocking HIGH (F1: credentials followed
+      under-accounting; F6 was later closed on 2026-09-19 by the `onResponse` seam —
+      audit §7). The blocking HIGH (F1: credentials followed
       `X_MCP_BASE_URL` anywhere, so an operator-set or profile-set base URL could
       exfiltrate the token) is closed by an independent hardcoded egress allowlist in
       `src/core/egress.ts`, plus a startup refusal under `oauth2`. §1–§6 of the audit
@@ -196,7 +197,13 @@ above; this is the single list to walk before tagging:
       baseline — the two decisions/0002 tools (39 → 41) and the two later src/ commits —
       was audited 2026-08-30 in
       [reviews/08-delta-audit-2026-08-30.md](reviews/08-delta-audit-2026-08-30.md):
-      clean, no new findings at MEDIUM or above.*
+      clean, no new findings at MEDIUM or above. The next delta — the `x_thread_create`
+      tool (Phase 3) plus the COST-3/AUTH-11/12/14/16/CFG-5/REND-2/6/9 hardening —
+      was audited 2026-09-25 in
+      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md):
+      one new MEDIUM finding (`x_thread_create` charges its full aggregate cost
+      before validating post text, so a local whitespace rejection still burns the
+      charge), open at time of writing.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
