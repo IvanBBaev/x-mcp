@@ -197,7 +197,13 @@ above; this is the single list to walk before tagging:
       baseline — the two decisions/0002 tools (39 → 41) and the two later src/ commits —
       was audited 2026-08-30 in
       [reviews/08-delta-audit-2026-08-30.md](reviews/08-delta-audit-2026-08-30.md):
-      clean, no new findings at MEDIUM or above.*
+      clean, no new findings at MEDIUM or above. The next delta — the `x_thread_create`
+      tool (Phase 3) plus the COST-3/AUTH-11/12/14/16/CFG-5/REND-2/6/9 hardening —
+      was audited 2026-09-25 in
+      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md):
+      one new MEDIUM finding (`x_thread_create` charges its full aggregate cost
+      before validating post text, so a local whitespace rejection still burns the
+      charge), open at time of writing.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
