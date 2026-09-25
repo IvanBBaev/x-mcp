@@ -22,6 +22,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_post_create` no longer charges the session budget for a post it refuses locally.
+  Whitespace-only text, a poll combined with `media_ids`, and a malformed `reply_to_id`
+  or `quote_id` are now rejected at input validation, before the budget check, instead
+  of after it. The refusal is still a `validation` error and still sends nothing; its
+  message now names the offending field.
+
 - Fixed two follow-ups to warnings introduced earlier in this release. A too-wide
   POSIX token file no longer prints its `chmod 600` startup warning twice (once from
   the startup check, once from the store's first load); on Windows, where mode bits

@@ -18,8 +18,9 @@ import {
 } from '../../src/tools/posts.js';
 import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import type { ErrorClass } from '../../src/core/errors.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import type { BatchResult, CompactPost } from '../../src/core/render-shapes.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
@@ -321,6 +322,30 @@ function noHttpCtx(): ToolContext {
 }
 
 /**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
+}
+
+/**
  * Capture the raw JSON request body a POST interceptor receives, while matching any
  * body. Lets a test pin the exact wire body (undici hands the matcher the buffered
  * body string for a string-bodied fetch).
@@ -419,17 +444,21 @@ test('POST-1: unicode text is sent byte-identical — no normalization, no trimm
   await mock.close();
 });
 
-test('POST-1: whitespace-only text rejects as validation before any HTTP', async () => {
+test('POST-1: whitespace-only text rejects as validation before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCreate);
   await assert.rejects(
-    () => xPostCreate.handler({ text: ' \n\t ' }, noHttpCtx()),
-    xErrorOf('validation', /whitespace-only/),
+    () => reg.call('x_post_create', { text: ' \n\t ' }, noHttpCtx()),
+    xErrorOf('validation', /text: Post text is whitespace-only/),
   );
+  assert.equal(budgetChecks(), 0);
 });
 
-test('POST-6: poll and media_ids are mutually exclusive, checked before any HTTP', async () => {
+test('POST-6: poll and media_ids are mutually exclusive, refused before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCreate);
   await assert.rejects(
     () =>
-      xPostCreate.handler(
+      reg.call(
+        'x_post_create',
         {
           text: 'pick one',
           media_ids: ['900'],
@@ -437,8 +466,9 @@ test('POST-6: poll and media_ids are mutually exclusive, checked before any HTTP
         },
         noHttpCtx(),
       ),
-    xErrorOf('validation', /mutually exclusive/),
+    xErrorOf('validation', /poll: poll and media_ids are mutually exclusive/),
   );
+  assert.equal(budgetChecks(), 0);
 });
 
 test('POST-6: schema pre-validates poll bounds, media count, and the reply_settings enum', () => {
@@ -710,11 +740,17 @@ test('x_post_create: a poll rides the body as options + duration_minutes', async
   await mock.close();
 });
 
-test('x_post_create: a handle as reply_to_id rejects before any HTTP', async () => {
+test('x_post_create: a malformed reply_to_id or quote_id rejects before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCreate);
   await assert.rejects(
-    () => xPostCreate.handler({ text: 'hi', reply_to_id: '@jack' }, noHttpCtx()),
-    xErrorOf('validation', /numeric id or a status URL/),
+    () => reg.call('x_post_create', { text: 'hi', reply_to_id: '@jack' }, noHttpCtx()),
+    xErrorOf('validation', /reply_to_id: .*numeric id or a status URL/),
   );
+  await assert.rejects(
+    () => reg.call('x_post_create', { text: 'hi', quote_id: 'not an id' }, noHttpCtx()),
+    xErrorOf('validation', /quote_id: Not a recognized X post id or status URL/),
+  );
+  assert.equal(budgetChecks(), 0);
 });
 
 test('x_post_delete: happy path deletes by id', async () => {
@@ -1158,28 +1194,13 @@ test('POST-1: any whitespace-only post in the thread rejects before any HTTP is 
 test('POST-1 / delta audit 09 F1: a whitespace-only thread post is refused before the budget charge', async () => {
   // Schema validation is registry step 1 and the budget charge is step 4, so a rejected
   // thread must reach neither the budget gate nor the network.
-  let budgetChecks = 0;
-  const reg = createRegistry([xThreadCreate], {
-    policy: {
-      preset: 'publish',
-      hideDenied: false,
-      isAllowed: () => true,
-      denyError: () => apiError('unused'),
-    },
-    budget: {
-      check: () => {
-        budgetChecks += 1;
-      },
-      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
-    },
-    rateLimit: { preflight: () => {} },
-  });
+  const { reg, budgetChecks } = chargeCountingRegistry(xThreadCreate);
   const posts = [...Array.from({ length: 24 }, (_, i) => `see https://example.com/${i}`), ' '];
   await assert.rejects(
     () => reg.call('x_thread_create', { posts }, noHttpCtx()),
     xErrorOf('validation', /Post 25 of 25 is whitespace-only/),
   );
-  assert.equal(budgetChecks, 0);
+  assert.equal(budgetChecks(), 0);
 });
 
 test('x_thread_create: a mid-thread failure reports published posts, failed_at, and POST-9 resume guidance without throwing', async () => {

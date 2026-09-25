@@ -323,7 +323,46 @@ const createInput = z
       .optional()
       .describe('Who may reply. Omit to allow everyone.'),
   })
-  .strict();
+  .strict()
+  // POST-1 / POST-6 and the reply/quote reference shape, in the schema rather than the
+  // handler: schema validation is pipeline step 1 and the budget charge is step 4, so a
+  // locally rejected post is never billed (delta audit 09 F1 residual). Refinements do not
+  // reach the JSON Schema, so this costs no context bytes.
+  .superRefine((input, ctx) => {
+    // POST-1: the ONLY local text rule is rejecting whitespace-only. Everything else is
+    // sent byte-identical — no trim, no unicode normalization. What the user wrote posts.
+    if (input.text !== '' && input.text.trim() === '') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['text'],
+        message:
+          'Post text is whitespace-only. Provide non-whitespace text (POST-1: it will be ' +
+          'sent byte-identical, with no normalization or trimming).',
+      });
+    }
+    // POST-6: the cross-field exclusivity (poll shape, duration bounds, media count and the
+    // reply_settings enum are enforced by the field schemas above).
+    if (input.poll !== undefined && input.media_ids !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['poll'],
+        message:
+          'poll and media_ids are mutually exclusive — an X post carries a poll OR media, ' +
+          'never both (POST-6). Drop one of the two and retry; the request was not sent.',
+      });
+    }
+    // Reply/quote references accept a bare id or a full status URL; anything else is refused.
+    for (const field of ['reply_to_id', 'quote_id'] as const) {
+      const ref = input[field];
+      if (ref === undefined) continue;
+      try {
+        parsePostId(ref);
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: [field], message: err.message });
+      }
+    }
+  });
 
 /**
  * `x_post_create` — create a post (docs/03 posts §; POST-1..4/6/7/9, COST-4, NET-4).
@@ -354,26 +393,8 @@ export const xPostCreate = defineTool({
   phase: 2,
   input: createInput,
   handler: async (input, ctx) => {
-    // POST-1: the ONLY local text rule is rejecting whitespace-only. Everything else is
-    // sent byte-identical — no trim, no unicode normalization. What the user wrote posts.
-    if (input.text.trim() === '') {
-      throw validationError(
-        'Post text is whitespace-only. Provide non-whitespace text (POST-1: it will be ' +
-          'sent byte-identical, with no normalization or trimming).',
-      );
-    }
-    // POST-6: composite constraints fail as typed validation errors BEFORE any HTTP.
-    // (Poll shape, duration bounds, media count, and the reply_settings enum are already
-    // enforced by the input schema; the cross-field exclusivity is checked here.)
-    if (input.poll !== undefined && input.media_ids !== undefined) {
-      throw validationError(
-        'poll and media_ids are mutually exclusive — an X post carries a poll OR media, ' +
-          'never both (POST-6). Drop one of the two and retry; the request was not sent.',
-      );
-    }
-
-    // Reply/quote references accept a bare id or a full status URL; `parsePostId` throws
-    // a typed `validation` error for anything else — still before any HTTP.
+    // Text, POST-6 exclusivity and the reference shapes were validated by the schema, so
+    // `parsePostId` cannot throw here; it only normalizes a status URL to its id.
     const replyToId = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
     const quoteId = input.quote_id !== undefined ? parsePostId(input.quote_id) : undefined;
 
