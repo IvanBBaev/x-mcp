@@ -22,6 +22,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `tools/list` is about 1.5 KB smaller. Redundant wording in tool and parameter
+  descriptions — restatements of limits the schema already carries, and of what a
+  parameter's own description already says — was tightened. No tool, parameter,
+  constraint or behaviour changed.
+
 - `x_search_recent`, `x_search_archive`, `x_post_counts_recent`, `x_post_counts_archive`,
   `x_post_get`, `x_list_get`, `x_list_members`, and `x_list_timeline` no longer charge the
   session budget for a call they refuse locally. A query using a removed engagement

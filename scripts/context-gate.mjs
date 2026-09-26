@@ -38,8 +38,10 @@
 // THE BUDGET. Measured at the 42-tool surface (Phase 3's `x_thread_create` added): **79,987
 // bytes** worst case (`read-only`, hide-denied off, all availability classes; the spread
 // across presets is only ~700 B). The cap is **80,000 bytes** — 13 B of headroom, effectively
-// none: **the surface is full**. `x_thread_create` landed at its terse-wording floor (see its
-// description/schema) to fit inside the ~1,555 B that remained at the 41-tool baseline. The
+// none. `x_thread_create` landed at its terse-wording floor (see its description/schema) to fit
+// inside the ~1,555 B that remained at the 41-tool baseline. Tightening redundant description
+// wording (restatements of what the JSON Schema or a parameter's own description already
+// carries) then brought the surface to **78,434 bytes** — ~1,566 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -59,7 +61,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 79_987;
+const BASELINE_BYTES = 78_434;
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;

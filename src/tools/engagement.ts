@@ -226,11 +226,11 @@ const bookmarksListInput = z
       .number()
       .int()
       .optional()
-      .describe('Results per page (1-100); out-of-range values are clamped into the window.'),
+      .describe('Results per page (1-100); out-of-range values are clamped.'),
     page_token: z
       .string()
       .optional()
-      .describe('Opaque pagination cursor returned as next_token by a previous call.'),
+      .describe('Pagination cursor: the next_token from a previous call.'),
     raw: z
       .boolean()
       .optional()

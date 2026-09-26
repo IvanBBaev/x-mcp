@@ -305,10 +305,10 @@ schemas, scopes, cost class, availability — is
 | engagement | `x_repost_set` | write:engagement |  | ✅ | Repost (retweet) a post as the authenticated user, or undo that repost. |
 | engagement | `x_bookmark_set` | write:engagement |  | ✅ | Add a post to the authenticated user's bookmarks or remove it. |
 | engagement | `x_bookmarks_list` | read:content | ✅ | ✅ | The authenticated user's own bookmarks, newest first — the read half of `x_bookmark_set`. |
-| timelines | `x_timeline_home` | read:content | ✅ | ✅ | Read the authenticated X (Twitter) user's home timeline in reverse-chronological order (the accounts they follow, newest first). |
-| timelines | `x_timeline_mentions` | read:content | ✅ |  | Read posts mentioning an X (Twitter) user (defaults to the authenticated user). |
+| timelines | `x_timeline_home` | read:content | ✅ | ✅ | Read the authenticated X (Twitter) user's home timeline in reverse-chronological order (accounts they follow, newest first). |
+| timelines | `x_timeline_mentions` | read:content | ✅ |  | Read posts mentioning an X (Twitter) user (default: authenticated user). |
 | timelines | `x_timeline_user` | read:content | ✅ |  | Read an X (Twitter) user's own posts, newest first, optionally excluding replies and/or reposts, within optional time bounds. |
-| graph | `x_follow_set` | write:social-graph |  | ✅ | Follow or unfollow a user as the authenticated user. |
+| graph | `x_follow_set` | write:social-graph |  | ✅ | Follow or unfollow a user as the authenticated user — a single target, no batch, by design. |
 | graph | `x_mute_set` | write:social-graph |  | ✅ | Mute or unmute a user as the authenticated user. |
 | graph | `x_block_set` | destructive:social-graph |  | ✅ | Block or unblock a user as the authenticated user. |
 | graph | `x_followers_list` | read:social-graph | ✅ |  | List the accounts following an X (Twitter) user. |
@@ -318,12 +318,12 @@ schemas, scopes, cost class, availability — is
 | lists | `x_list_update` | write:content |  | ✅ | Update the authenticated user's own list metadata — `name`, `description`, and/or `private`. |
 | lists | `x_list_delete` | destructive:content |  | ✅ | Permanently delete the authenticated user's own list. |
 | lists | `x_list_get` | read:content | ✅ |  | Read one list's metadata — name, description, privacy, member and follower counts, and owner handle. |
-| lists | `x_lists_owned` | read:content | ✅ |  | The lists a user owns (defaults to the authenticated user). |
-| lists | `x_list_member_set` | write:content |  | ✅ | Add a user to the authenticated user's own list or remove one — a single user per call. |
+| lists | `x_lists_owned` | read:content | ✅ |  | The lists a user owns (default: authenticated user). |
+| lists | `x_list_member_set` | write:content |  | ✅ | Add or remove one member from the authenticated user's own list — a reversible membership write. |
 | lists | `x_list_members` | read:content | ✅ |  | The members of a list. |
 | lists | `x_list_timeline` | read:content | ✅ |  | Posts from a list's timeline (recent posts by its members). |
-| lists | `x_list_follow_set` | write:engagement |  | ✅ | Follow a list as the authenticated user, or unfollow it. |
-| lists | `x_list_pin_set` | write:engagement |  | ✅ | Pin a list in the authenticated user's list view, or unpin it. |
+| lists | `x_list_follow_set` | write:engagement |  | ✅ | Follow a list as the authenticated user, or unfollow it — a reversible engagement write. |
+| lists | `x_list_pin_set` | write:engagement |  | ✅ | Pin a list in the authenticated user's list view, or unpin it — a reversible engagement write. |
 | media | `x_media_upload` | write:content |  | ✅ | Upload a local image, GIF, or video via the chunked v2 flow and return a `media_id` to attach with `x_post_create`. |
 | media | `x_media_status` | read:content | ✅ | ✅ | Check the async processing state of an uploaded media by `media_id`. |
 | dm | `x_dm_events_list` | read:dm | ✅ | ✅ | List all recent direct-message events across the authenticated X (Twitter) user's conversations, newest first. |

@@ -150,7 +150,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > 2026-09-24) moved the surface to **42 tools in 12 packages** — the package count is
 > unaffected, it joins the existing `posts` package. The `tools/list` payload is now
 > 79,987 B of the 80,000 B budget (13 B of headroom left); see
-> [13-compatibility.md](13-compatibility.md) §4.5.1 for the re-probe.
+> [13-compatibility.md](13-compatibility.md) §4.5.1 for the re-probe. Tightening redundant
+> tool and parameter descriptions (no parameter, constraint or behaviour change) then
+> brought it down to **78,434 B** (1,566 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -192,7 +194,9 @@ above; this is the single list to walk before tagging:
       Re-measured 2026-09-26 after `x_thread_create` landed: worst case **79,987 B
       against the 80,000 B cap** (0.0% headroom — 13 B left). The surface cannot
       absorb another tool without either a cap raise or cutting description bytes
-      elsewhere.*
+      elsewhere. Description tightening the same day (redundant restatements of
+      what the JSON Schema or a parameter's own description already says) moved
+      the baseline 79,987 → **78,434 B** (2.0% headroom).*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
       Audited the shipped code, not the design: 17 threats and 4 kill-chains walked
