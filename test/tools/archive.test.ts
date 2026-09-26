@@ -14,10 +14,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createHttpClient } from '../../src/api/http.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import type { RawCountsResponse } from '../../src/api/endpoints/search.js';
 import { archiveTools, xPostCountsArchive, xSearchArchive } from '../../src/tools/archive.js';
 import {
@@ -258,20 +260,70 @@ function isRemovedOperatorError(err: unknown): boolean {
   return true;
 }
 
-test('DRIFT-3: x_search_archive rejects each removed engagement operator before any request', async () => {
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged
+ * (delta audit 09 Finding 1 residual) — doubly important here, where a leaked archive call can
+ * burn hundreds of `r:post` credits. Mirrors `test/tools/posts.test.ts`'s helper.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
+}
+
+test('DRIFT-3: x_search_archive rejects each removed engagement operator before the budget charge or any request', async () => {
   for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+    const { reg, budgetChecks } = chargeCountingRegistry(xSearchArchive);
     await assert.rejects(
-      () => xSearchArchive.handler({ query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
+      () => reg.call('x_search_archive', { query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
       isRemovedOperatorError,
     );
+    assert.equal(budgetChecks(), 0);
   }
 });
 
-test('DRIFT-3: x_post_counts_archive applies the same pre-validation', async () => {
+test('DRIFT-3: x_post_counts_archive applies the same pre-validation before the budget charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCountsArchive);
   await assert.rejects(
-    () => xPostCountsArchive.handler({ query: 'ai min_replies:100' }, noHttpCtx()),
+    () => reg.call('x_post_counts_archive', { query: 'ai min_replies:100' }, noHttpCtx()),
     isRemovedOperatorError,
   );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('DRIFT-3: x_search_archive.input.safeParse rejects a removed operator, naming the field', () => {
+  const rejected = xSearchArchive.input.safeParse({ query: 'from:xdevelopers min_likes:5' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /operator removed by X/);
+  }
+});
+
+test('DRIFT-3: x_post_counts_archive.input.safeParse rejects a removed operator, naming the field', () => {
+  const rejected = xPostCountsArchive.input.safeParse({ query: 'ai min_reposts:10' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /operator removed by X/);
+  }
 });
 
 test('DRIFT-3: an operator name as a plain word is not a false positive', async () => {

@@ -18,7 +18,9 @@ import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type {
   RawList,
@@ -27,7 +29,7 @@ import type {
   RawTweet,
   RawUser,
 } from '../../src/core/render.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import {
   listsTools,
   xListCreate,
@@ -82,6 +84,31 @@ function isValidation(re: RegExp) {
     assert.match(err.message, re);
     return true;
   };
+}
+
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged
+ * (delta audit 09 Finding 1 residual). Mirrors `test/tools/posts.test.ts`'s helper of the same name.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
 }
 
 // The list-object projection getList/ownedLists request (must mirror api/endpoints/lists).
@@ -902,6 +929,47 @@ test('REND-8: malformed list references are validation errors before any request
     () => xListMembers.handler({ list_id: 'https://x.com/some_user' }, noHttpCtx()),
     isValidation(/Not a recognized X list id or list URL/),
   );
+});
+
+test('x_list_get.input.safeParse rejects a malformed list_id, naming the field', () => {
+  const rejected = xListGet.input.safeParse({ list_id: 'not a list!!' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['list_id']);
+    assert.match(issue?.message ?? '', /Not a recognized X list id or list URL/);
+  }
+});
+
+test('x_list_members.input.safeParse rejects a malformed list_id, naming the field', () => {
+  const rejected = xListMembers.input.safeParse({ list_id: '@somehandle' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['list_id']);
+    assert.match(issue?.message ?? '', /Not a recognized X list id or list URL/);
+  }
+});
+
+test('x_list_timeline.input.safeParse rejects a malformed list_id, naming the field', () => {
+  const rejected = xListTimeline.input.safeParse({ list_id: '   ' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['list_id']);
+    assert.match(issue?.message ?? '', /Empty list reference/);
+  }
+});
+
+test('a malformed list_id rejects before the budget charge or any HTTP (get/members/timeline)', async () => {
+  for (const tool of [xListGet, xListMembers, xListTimeline] as const) {
+    const { reg, budgetChecks } = chargeCountingRegistry(tool);
+    await assert.rejects(
+      () => reg.call(tool.name, { list_id: 'not a list!!' }, noHttpCtx()),
+      isValidation(/Not a recognized X list id or list URL/),
+    );
+    assert.equal(budgetChecks(), 0);
+  }
 });
 
 test('REND-8: a malformed member reference is a validation error before any request', async () => {

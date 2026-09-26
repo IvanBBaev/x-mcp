@@ -35,7 +35,7 @@ import {
 } from '../api/endpoints/lists.js';
 import type { ListPageParams } from '../api/endpoints/lists.js';
 import { createHandleLookup, getMe as getUsersMe } from '../api/endpoints/users.js';
-import { apiError, notFoundError, validationError } from '../core/errors.js';
+import { XError, apiError, notFoundError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
   billableUnits,
@@ -80,6 +80,22 @@ function parseListId(input: string): string {
   const id = match?.[1];
   if (id !== undefined) return id;
   throw validationError(`Not a recognized X list id or list URL: "${preview(value)}".`);
+}
+
+/**
+ * `list_id` pre-validation, attached to a schema's `.superRefine` for the (non-zero-cost)
+ * tools below: mirrors `parsePostId`'s schema-level check in `tools/posts.ts` so a locally
+ * rejected list reference is never billed (delta audit 09 Finding 1 residual). `parseListId` still
+ * runs in the handler afterwards — this only pre-empts the throw, not the normalization of
+ * a list URL to its canonical numeric id.
+ */
+function checkListId(listId: string, ctx: z.RefinementCtx): void {
+  try {
+    parseListId(listId);
+  } catch (err) {
+    if (!(err instanceof XError)) throw err;
+    ctx.addIssue({ code: 'custom', path: ['list_id'], message: err.message });
+  }
 }
 
 // --- User resolution -------------------------------------------------------------
@@ -366,7 +382,10 @@ export const xListDelete = defineTool({
 
 // --- x_list_get ------------------------------------------------------------------
 
-const getInput = z.object({ list_id: listIdField, raw: rawField }).strict();
+const getInput = z
+  .object({ list_id: listIdField, raw: rawField })
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListGet = defineTool({
   name: 'x_list_get',
@@ -383,6 +402,8 @@ export const xListGet = defineTool({
   phase: 3,
   input: getInput,
   handler: async (input, ctx) => {
+    // `getInput`'s `.superRefine` already validated `list_id`, so this cannot throw — it
+    // only normalizes a list URL to its canonical numeric id.
     const listId = parseListId(input.list_id);
     const res = await getList(ctx.http, listId);
     if (input.raw === true) {
@@ -505,7 +526,8 @@ const membersInput = z
     page_token: pageTokenField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListMembers = defineTool({
   name: 'x_list_members',
@@ -523,6 +545,7 @@ export const xListMembers = defineTool({
   input: membersInput,
   handler: async (input, ctx) => {
     const prepared = preparePage(input);
+    // `membersInput`'s `.superRefine` already validated `list_id`, so this cannot throw.
     const listId = parseListId(input.list_id);
     const res = await listMembers(ctx.http, listId, prepared.params);
     if (input.raw === true) return rawOutput(res);
@@ -539,7 +562,8 @@ const timelineInput = z
     page_token: pageTokenField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListTimeline = defineTool({
   name: 'x_list_timeline',
@@ -557,6 +581,7 @@ export const xListTimeline = defineTool({
   input: timelineInput,
   handler: async (input, ctx) => {
     const prepared = preparePage(input);
+    // `timelineInput`'s `.superRefine` already validated `list_id`, so this cannot throw.
     const listId = parseListId(input.list_id);
     const res = await listTimeline(ctx.http, listId, prepared.params);
     if (input.raw === true) return rawOutput(res);

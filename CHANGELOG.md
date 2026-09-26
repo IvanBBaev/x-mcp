@@ -22,6 +22,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_search_recent`, `x_search_archive`, `x_post_counts_recent`, `x_post_counts_archive`,
+  `x_post_get`, `x_list_get`, `x_list_members`, and `x_list_timeline` no longer charge the
+  session budget for a call they refuse locally. A query using a removed engagement
+  operator (DRIFT-3), a malformed post reference in `x_post_get`'s `ids`, and a malformed
+  `list_id` are now rejected at input validation, before the budget check, instead of
+  after it. The refusal is still a `validation` error and still sends nothing; its
+  message keeps naming the offending field.
+
 - `x_dm_send` no longer charges the session budget for a DM it refuses locally. Passing
   both `conversation_id` and `participant` (or neither), a malformed `conversation_id`,
   and a `participant` of `"me"` are now rejected at input validation, before the budget

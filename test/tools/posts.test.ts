@@ -253,6 +253,28 @@ test('POST-8: 101 ids fail input validation before any HTTP; 100 ids pass', () =
   assert.equal(xPostGet.input.safeParse({ ids: ids(100) }).success, true);
 });
 
+test('x_post_get: a handle in ids fails input validation, naming the array index', () => {
+  // Mirrors x_post_create's reply_to_id/quote_id schema check (delta audit 09 Finding 1 residual):
+  // `getInput`'s `.superRefine` runs `parsePostId` per entry so a bad reference is refused
+  // at the schema boundary, before the registry's budget charge.
+  const rejected = xPostGet.input.safeParse({ ids: ['111', '@jack'] });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['ids', 1]);
+    assert.match(issue?.message ?? '', /numeric id or a status URL/);
+  }
+});
+
+test('x_post_get: a malformed id in ids rejects before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostGet);
+  await assert.rejects(
+    () => reg.call('x_post_get', { ids: ['@jack'] }, noHttpCtx()),
+    xErrorOf('validation', /ids\.0: .*numeric id or a status URL/),
+  );
+  assert.equal(budgetChecks(), 0);
+});
+
 test('POST-8: duplicate references collapse to one id on the wire', async () => {
   const mock = mockHttp();
   // The interceptor pins ids=111,222 — undici string-compares the full sorted query, so a

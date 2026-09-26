@@ -41,6 +41,33 @@ const TITLE = 'Get posts';
  * ids that could not be fetched (deleted / protected / not found — REND-2). `raw: true`
  * bypasses compaction and returns the uncompacted, size-capped API envelope (REND-10).
  */
+const getInput = z
+  .object({
+    ids: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(100)
+      .describe(
+        'Post references to fetch. Each is a numeric post id or a full status URL ' +
+          '(e.g. https://x.com/user/status/123). 1-100 per call.',
+      ),
+    raw: z.boolean().optional(),
+  })
+  .strict()
+  // Each reference accepts a bare id or a full status URL; anything else is refused here,
+  // in the schema rather than the handler, so a locally rejected batch is never billed
+  // (delta audit 09 Finding 1 residual, same fix as `x_post_create`'s reply/quote refs above).
+  .superRefine((input, ctx) => {
+    for (const [index, ref] of input.ids.entries()) {
+      try {
+        parsePostId(ref);
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: ['ids', index], message: err.message });
+      }
+    }
+  });
+
 export const xPostGet = defineTool({
   name: 'x_post_get',
   title: TITLE,
@@ -55,22 +82,10 @@ export const xPostGet = defineTool({
   cost: 'r:post',
   annotations: { title: TITLE, readOnlyHint: true, openWorldHint: true },
   phase: 1,
-  input: z
-    .object({
-      ids: z
-        .array(z.string().min(1))
-        .min(1)
-        .max(100)
-        .describe(
-          'Post references to fetch. Each is a numeric post id or a full status URL ' +
-            '(e.g. https://x.com/user/status/123). 1-100 per call.',
-        ),
-      raw: z.boolean().optional(),
-    })
-    .strict(),
+  input: getInput,
   handler: async (input, ctx) => {
-    // Normalize every reference to a canonical numeric id. `parsePostId` throws a
-    // `validation` error for a handle or garbage input — that propagates unchanged.
+    // Every reference was validated by the schema, so `parsePostId` cannot throw here; it
+    // only normalizes a status URL to its canonical numeric id.
     // POST-8: duplicates are de-duplicated AFTER normalization (so a bare id and a
     // status URL of the same post collapse) and before the request is sent.
     const ids = [...new Set(input.ids.map(parsePostId))];

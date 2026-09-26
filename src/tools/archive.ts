@@ -15,7 +15,6 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
 import { normalizeTimeBounds } from '../core/timebounds.js';
@@ -24,20 +23,31 @@ import type { SearchArchiveParams } from '../api/endpoints/archive.js';
 
 // DRIFT-3: engagement-threshold operators X removed from the v2 syntax on 2026-01-19.
 // A query using one would be rejected server-side AFTER the paid read was already spent, so
-// both archive handlers pre-validate and refuse before any HTTP — doubly important here,
+// both archive schemas pre-validate and refuse before any HTTP — doubly important here,
 // where a single full-archive page can cost hundreds of `r:post` credits. Re-implemented
 // locally (not imported) because tools/search keeps its checker module-private and that
-// slice is read-only to T-306; the operator list is frozen alongside the drift note.
+// slice is read-only to T-306; the operator list is frozen alongside the drift note. The
+// check runs in the schema (`.superRefine`), not the handler — schema validation is
+// registry pipeline step 1 and the budget charge is step 4, so a locally-refused query is
+// never billed (delta audit 09 Finding 1 residual, same fix as `x_post_create`).
 const REMOVED_OPERATORS = ['min_likes', 'min_replies', 'min_reposts'] as const;
 
-/** DRIFT-3 pre-validation: throw a typed `validation` error for removed operators. */
-function rejectRemovedOperators(query: string): void {
-  const found = REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+/** DRIFT-3: which removed operators (if any) a query uses. */
+function findRemovedOperators(query: string): readonly string[] {
+  return REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+}
+
+/** DRIFT-3 pre-validation, attached to a schema's `query` field via `.superRefine`. */
+function checkRemovedOperators(query: string, ctx: z.RefinementCtx): void {
+  const found = findRemovedOperators(query);
   if (found.length > 0) {
-    throw validationError(
-      `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
+    ctx.addIssue({
+      code: 'custom',
+      path: ['query'],
+      message:
+        `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
         'remove it from the query (the request was not sent, so no read was spent).',
-    );
+    });
   }
 }
 
@@ -74,7 +84,8 @@ const searchInput = z
       .optional()
       .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
 
 export const xSearchArchive = defineTool({
   name: 'x_search_archive',
@@ -94,8 +105,8 @@ export const xSearchArchive = defineTool({
   phase: 3,
   input: searchInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: refuse removed operators before anything else — never burn a paid read.
-    rejectRemovedOperators(input.query);
+    // DRIFT-3: removed operators are refused by `searchInput`'s `.superRefine` before the
+    // registry's budget charge (delta audit 09 Finding 1 residual) — nothing left to check here.
     // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
     const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const clamp =
@@ -173,7 +184,8 @@ const countsInput = z
       .optional()
       .describe('Return the exact API JSON instead of the compact histogram.'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
 
 /** One compact histogram bucket: numbers + ISO timestamps only, never third-party text. */
 interface CountBucket {
@@ -203,8 +215,8 @@ export const xPostCountsArchive = defineTool({
   phase: 3,
   input: countsInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: counts hit the same query parser, so the same pre-validation applies.
-    rejectRemovedOperators(input.query);
+    // DRIFT-3: counts hit the same query parser; `countsInput`'s `.superRefine` refuses a
+    // removed operator before the registry's budget charge (delta audit 09 Finding 1 residual).
     // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
     const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const nextToken = toCursor(input.page_token);
