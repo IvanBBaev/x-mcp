@@ -31,7 +31,7 @@ import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker, ToolOutput } from '../core/tooldef.js';
 import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { renderDmPage } from '../core/render.js';
+import { billableUnits, renderDmPage } from '../core/render.js';
 import type { RawDmEvent, RawListResponse } from '../core/render.js';
 import type { CompactDm, Page } from '../core/render-shapes.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
@@ -168,6 +168,8 @@ function renderDmEvents(
   return {
     data: includeText ? page : minimizeDmPage(page),
     summary: `${page.result_count} DM event(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+    // Billed per DM event returned (COST-3) — omitting the bodies does not make them free.
+    units: billableUnits(res),
   };
 }
 
