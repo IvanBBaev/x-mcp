@@ -18,13 +18,16 @@ import {
   setReplyHidden,
 } from '../api/endpoints/posts.js';
 import type { RawCreatedPost } from '../api/endpoints/posts.js';
+import { WRITE_AMBIGUITY } from '../api/http.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
 import {
   RAW_MAX_RESULTS,
+  billableUnits,
   capRawMaxResults,
   postUrl,
   rawSummary,
   renderPosts,
+  withUntrustedNote,
 } from '../core/render.js';
 import type { RawSingleResponse } from '../core/render.js';
 import { parsePostId } from '../core/resolve.js';
@@ -38,6 +41,33 @@ const TITLE = 'Get posts';
  * ids that could not be fetched (deleted / protected / not found — REND-2). `raw: true`
  * bypasses compaction and returns the uncompacted, size-capped API envelope (REND-10).
  */
+const getInput = z
+  .object({
+    ids: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(100)
+      .describe(
+        'Post references to fetch. Each is a numeric post id or a full status URL ' +
+          '(e.g. https://x.com/user/status/123). 1-100 per call.',
+      ),
+    raw: z.boolean().optional(),
+  })
+  .strict()
+  // Each reference accepts a bare id or a full status URL; anything else is refused here,
+  // in the schema rather than the handler, so a locally rejected batch is never billed
+  // (delta audit 09 Finding 1 residual, same fix as `x_post_create`'s reply/quote refs above).
+  .superRefine((input, ctx) => {
+    for (const [index, ref] of input.ids.entries()) {
+      try {
+        parsePostId(ref);
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: ['ids', index], message: err.message });
+      }
+    }
+  });
+
 export const xPostGet = defineTool({
   name: 'x_post_get',
   title: TITLE,
@@ -52,26 +82,19 @@ export const xPostGet = defineTool({
   cost: 'r:post',
   annotations: { title: TITLE, readOnlyHint: true, openWorldHint: true },
   phase: 1,
-  input: z
-    .object({
-      ids: z
-        .array(z.string().min(1))
-        .min(1)
-        .max(100)
-        .describe(
-          'Post references to fetch. Each is a numeric post id or a full status URL ' +
-            '(e.g. https://x.com/user/status/123). 1-100 per call.',
-        ),
-      raw: z.boolean().optional(),
-    })
-    .strict(),
+  input: getInput,
   handler: async (input, ctx) => {
-    // Normalize every reference to a canonical numeric id. `parsePostId` throws a
-    // `validation` error for a handle or garbage input — that propagates unchanged.
+    // Every reference was validated by the schema, so `parsePostId` cannot throw here; it
+    // only normalizes a status URL to its canonical numeric id.
     // POST-8: duplicates are de-duplicated AFTER normalization (so a bare id and a
     // status URL of the same post collapse) and before the request is sent.
     const ids = [...new Set(input.ids.map(parsePostId))];
     const res = await getPosts(ctx.http, { ids });
+
+    // Billed per post X actually returned, not per call and not per id asked for (COST-3):
+    // ids that came back in `errors[]` (deleted, protected) returned no resource. Counted
+    // from the raw envelope so the REND-10 cap below does not change the price.
+    const units = billableUnits(res);
 
     if (input.raw === true) {
       const all = res.data ?? [];
@@ -82,15 +105,20 @@ export const xPostGet = defineTool({
         summary: rawSummary(
           `${capped.length} raw post(s)${truncated ? ` (capped at ${RAW_MAX_RESULTS})` : ''}`,
         ),
+        units,
       };
     }
 
     const batch = renderPosts(res);
+    const summary = `${batch.items.length} post(s)${
+      batch.missing?.length ? `, ${batch.missing.length} missing` : ''
+    }`;
     return {
       data: batch,
-      summary: `${batch.items.length} post(s)${
-        batch.missing?.length ? `, ${batch.missing.length} missing` : ''
-      }`,
+      // REND-6: BatchResult has no page-level `note` field, so the untrusted-content
+      // warning rides on `summary` instead (only when a post actually came back).
+      summary: batch.items.length > 0 ? withUntrustedNote(summary) : summary,
+      units,
     };
   },
 });
@@ -101,6 +129,10 @@ export const xPostGet = defineTool({
 const BASE_POST_USD = 0.015;
 /** COST-4: the raised per-post price X charges when the text carries a URL. */
 const URL_POST_USD = 0.2;
+/** COST-4: why a URL post costs more, shared by the budget refusal and the result note. */
+const URL_PRICE_NOTE =
+  `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
+  `instead of the $${BASE_POST_USD} base price (COST-4).`;
 
 /** POST-2: the platform's fixed weighted width of any URL, and the weighted limit. */
 const URL_WEIGHT = 23;
@@ -108,15 +140,18 @@ const WEIGHTED_LIMIT = 280;
 
 // COST-4: URL detection ERRS TOWARD WARNING — an explicit http(s):// URL, or anything
 // shaped like a bare domain the platform's auto-linker could pick up (dotted labels with
-// a 2+-letter TLD, optional path). A false positive (e.g. "node.js") merely over-warns;
+// a 2+-letter TLD, optional path). Labels and TLDs may be non-Latin (IDN, e.g. a Cyrillic
+// domain under .rf) or punycode (xn--p1ai); the lookbehind stands in for `\b`, which only knows
+// ASCII word characters. A false positive (e.g. "node.js") merely over-warns;
 // a miss would silently underquote the $0.20 price. Kept as a SOURCE string so call
 // sites build fresh RegExp objects — no shared lastIndex state between `g` users.
 const URL_PATTERN =
-  'https?:\\/\\/\\S+|\\b[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9][a-z0-9-]*)*\\.[a-z]{2,}(?:\\/\\S*)?';
+  'https?:\\/\\/\\S+|(?<![\\p{L}\\p{N}-])[\\p{L}\\p{N}][\\p{L}\\p{N}-]*' +
+  '(?:\\.[\\p{L}\\p{N}][\\p{L}\\p{N}-]*)*\\.(?:xn--[a-z0-9-]+|\\p{L}{2,})(?:\\/\\S*)?';
 
 /** COST-4: does the text contain something X would price as a URL post? */
 function containsUrl(text: string): boolean {
-  return new RegExp(URL_PATTERN, 'i').test(text);
+  return new RegExp(URL_PATTERN, 'iu').test(text);
 }
 
 /**
@@ -125,7 +160,7 @@ function containsUrl(text: string): boolean {
  * count. The X API stays authoritative; this number only decorates the mapped 400.
  */
 function weightedLength(text: string): number {
-  const collapsed = text.replace(new RegExp(URL_PATTERN, 'gi'), 'x'.repeat(URL_WEIGHT));
+  const collapsed = text.replace(new RegExp(URL_PATTERN, 'giu'), 'x'.repeat(URL_WEIGHT));
   return [...collapsed].length;
 }
 
@@ -166,6 +201,24 @@ const THREAD_RESUME_GUIDANCE =
 function withGuidance(err: XError, guidance: string, retryable: boolean): XError {
   return new XError(err.kind, err.message + guidance, {
     retryable,
+    fix: err.fix,
+    data: err.data,
+    cause: err,
+  });
+}
+
+/**
+ * POST-4 / NET-4: api/http already ends an ambiguous write failure with the generic
+ * {@link WRITE_AMBIGUITY} note. These tools know more — a create has a safe probe, a delete
+ * or hide is safe to repeat — so their guidance REPLACES that note rather than following a
+ * "do not re-issue" it may contradict.
+ */
+function withAmbiguityGuidance(err: XError, guidance: string): XError {
+  const base = err.message.endsWith(WRITE_AMBIGUITY)
+    ? err.message.slice(0, -WRITE_AMBIGUITY.length)
+    : err.message;
+  return new XError(err.kind, base + guidance, {
+    retryable: false,
     fix: err.fix,
     data: err.data,
     cause: err,
@@ -222,7 +275,7 @@ function mapCreateFailure(err: XError, hasReplyTo: boolean, text: string): XErro
     );
   } else if (isAmbiguousWriteFailure(err)) {
     // POST-4 / NET-4: decorate, never remap the class.
-    mapped = withGuidance(err, CREATE_AMBIGUITY_GUIDANCE, false);
+    mapped = withAmbiguityGuidance(err, CREATE_AMBIGUITY_GUIDANCE);
   }
 
   // POST-9: thread guidance rides on WHATEVER the failure became.
@@ -285,7 +338,46 @@ const createInput = z
       .optional()
       .describe('Who may reply. Omit to allow everyone.'),
   })
-  .strict();
+  .strict()
+  // POST-1 / POST-6 and the reply/quote reference shape, in the schema rather than the
+  // handler: schema validation is pipeline step 1 and the budget charge is step 4, so a
+  // locally rejected post is never billed (delta audit 09 F1 residual). Refinements do not
+  // reach the JSON Schema, so this costs no context bytes.
+  .superRefine((input, ctx) => {
+    // POST-1: the ONLY local text rule is rejecting whitespace-only. Everything else is
+    // sent byte-identical — no trim, no unicode normalization. What the user wrote posts.
+    if (input.text !== '' && input.text.trim() === '') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['text'],
+        message:
+          'Post text is whitespace-only. Provide non-whitespace text (POST-1: it will be ' +
+          'sent byte-identical, with no normalization or trimming).',
+      });
+    }
+    // POST-6: the cross-field exclusivity (poll shape, duration bounds, media count and the
+    // reply_settings enum are enforced by the field schemas above).
+    if (input.poll !== undefined && input.media_ids !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['poll'],
+        message:
+          'poll and media_ids are mutually exclusive — an X post carries a poll OR media, ' +
+          'never both (POST-6). Drop one of the two and retry; the request was not sent.',
+      });
+    }
+    // Reply/quote references accept a bare id or a full status URL; anything else is refused.
+    for (const field of ['reply_to_id', 'quote_id'] as const) {
+      const ref = input[field];
+      if (ref === undefined) continue;
+      try {
+        parsePostId(ref);
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: [field], message: err.message });
+      }
+    }
+  });
 
 /**
  * `x_post_create` — create a post (docs/03 posts §; POST-1..4/6/7/9, COST-4, NET-4).
@@ -304,7 +396,9 @@ export const xPostCreate = defineTool({
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
   cost: (input) =>
-    containsUrl(input.text) ? { class: 'w:post', usd: URL_POST_USD } : { class: 'w:post' },
+    containsUrl(input.text)
+      ? { class: 'w:post', usd: URL_POST_USD, note: URL_PRICE_NOTE }
+      : { class: 'w:post' },
   annotations: {
     title: CREATE_TITLE,
     readOnlyHint: false,
@@ -314,26 +408,8 @@ export const xPostCreate = defineTool({
   phase: 2,
   input: createInput,
   handler: async (input, ctx) => {
-    // POST-1: the ONLY local text rule is rejecting whitespace-only. Everything else is
-    // sent byte-identical — no trim, no unicode normalization. What the user wrote posts.
-    if (input.text.trim() === '') {
-      throw validationError(
-        'Post text is whitespace-only. Provide non-whitespace text (POST-1: it will be ' +
-          'sent byte-identical, with no normalization or trimming).',
-      );
-    }
-    // POST-6: composite constraints fail as typed validation errors BEFORE any HTTP.
-    // (Poll shape, duration bounds, media count, and the reply_settings enum are already
-    // enforced by the input schema; the cross-field exclusivity is checked here.)
-    if (input.poll !== undefined && input.media_ids !== undefined) {
-      throw validationError(
-        'poll and media_ids are mutually exclusive — an X post carries a poll OR media, ' +
-          'never both (POST-6). Drop one of the two and retry; the request was not sent.',
-      );
-    }
-
-    // Reply/quote references accept a bare id or a full status URL; `parsePostId` throws
-    // a typed `validation` error for anything else — still before any HTTP.
+    // Text, POST-6 exclusivity and the reference shapes were validated by the schema, so
+    // `parsePostId` cannot throw here; it only normalizes a status URL to its id.
     const replyToId = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
     const quoteId = input.quote_id !== undefined ? parsePostId(input.quote_id) : undefined;
 
@@ -366,13 +442,7 @@ export const xPostCreate = defineTool({
     const data = {
       id,
       url,
-      ...(containsUrl(input.text)
-        ? {
-            note:
-              `The text contains a URL, so X prices this post at $${URL_POST_USD.toFixed(2)} ` +
-              `instead of the $${BASE_POST_USD} base price (COST-4).`,
-          }
-        : {}),
+      ...(containsUrl(input.text) ? { note: URL_PRICE_NOTE } : {}),
     };
     return { data, summary: `Post created: ${url}` };
   },
@@ -436,7 +506,7 @@ export const xPostDelete = defineTool({
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
         // NET-4 on a destructive write: decorate with the (delete-safe) ambiguity note.
-        throw withGuidance(err, DELETE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, DELETE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
@@ -516,7 +586,7 @@ export const xPostHideReply = defineTool({
         throw withGuidance(err, HIDE_FORBIDDEN_GUIDANCE, false);
       }
       if (XError.is(err) && isAmbiguousWriteFailure(err)) {
-        throw withGuidance(err, HIDE_AMBIGUITY_GUIDANCE, false);
+        throw withAmbiguityGuidance(err, HIDE_AMBIGUITY_GUIDANCE);
       }
       throw err;
     }
@@ -530,5 +600,108 @@ export const xPostHideReply = defineTool({
   },
 });
 
+// --- x_thread_create ----------------------------------------------------------------
+
+const THREAD_TITLE = 'Create thread';
+
+const threadInput = z
+  .object({
+    posts: z
+      .array(z.string().min(1))
+      .min(2)
+      .max(25)
+      // POST-1 per post, in the schema rather than the handler: schema validation is
+      // pipeline step 1, the budget charge is step 4, so a rejected thread is never billed
+      // (delta audit 09 F1). Refinements do not reach the JSON Schema, so this costs no bytes.
+      .superRefine((posts, ctx) => {
+        for (const [index, text] of posts.entries()) {
+          if (text !== '' && text.trim() === '') {
+            ctx.addIssue({
+              code: 'custom',
+              path: [index],
+              message:
+                `Post ${index + 1} of ${posts.length} is whitespace-only. Provide ` +
+                'non-whitespace text for every post (POST-1); nothing was sent or charged.',
+            });
+          }
+        }
+      })
+      .describe('Thread texts, in order (2-25); each replies to the previous.'),
+  })
+  .strict();
+
+/** COST-4 applies per post; the whole thread is priced and charged as one aggregate. */
+const THREAD_COST_NOTE =
+  "Aggregate of each post's own price (COST-4 applies per post); charged upfront and not " +
+  'refunded if the thread stops early.';
+
+/**
+ * `x_thread_create` — roadmap Phase 3 convenience (docs/03, docs/06): post a thread as one
+ * call instead of N manual `x_post_create` calls. Built on `x_post_create`'s own internals
+ * unchanged — post 1 standalone, each following post replies to the previous id, and EVERY
+ * post goes through the same per-post rate/cost/policy checks (no bypass). A mid-thread
+ * failure is reported, not thrown (REND-2 precedent): the result lists what already
+ * published and where it stopped, so the agent resumes with `x_post_create`'s
+ * `reply_to_id` (POST-9); nothing already posted is auto-deleted. Gated at `write:content`,
+ * the same cell as `x_post_create` — callable only from the `publish` preset and above.
+ */
+export const xThreadCreate = defineTool({
+  name: 'x_thread_create',
+  title: THREAD_TITLE,
+  description:
+    'X (Twitter): post a thread — posts: string[] (2-25), each replying to the previous. ' +
+    'Same per-post checks as x_post_create. On failure: returns posts published so far ' +
+    "plus the failed index, to resume via x_post_create's reply_to_id. Never auto-deletes.",
+  policy: 'write:content',
+  availability: 'user-only',
+  scopes: ['tweet.read', 'tweet.write', 'users.read'],
+  cost: (input) => {
+    const posts = input.posts ?? [];
+    const usd = posts.reduce(
+      (sum, text) => sum + (containsUrl(text) ? URL_POST_USD : BASE_POST_USD),
+      0,
+    );
+    return { class: 'w:post', usd, note: THREAD_COST_NOTE };
+  },
+  annotations: {
+    title: THREAD_TITLE,
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: true,
+  },
+  phase: 3,
+  input: threadInput,
+  handler: async (input, ctx) => {
+    const posts: { id: string; url: string }[] = [];
+    let replyToId: string | undefined;
+    for (const [index, text] of input.posts.entries()) {
+      let res: RawSingleResponse<RawCreatedPost>;
+      try {
+        res = await createPost(ctx.http, {
+          text,
+          ...(replyToId !== undefined ? { replyToId } : {}),
+        });
+      } catch (err) {
+        if (!XError.is(err)) throw err;
+        // Reuses x_post_create's own failure mapping (POST-2/3/4/7/9, NET-4) unchanged:
+        // `hasReplyTo` is true from the second post on, so POST-9 thread-resume guidance
+        // rides on the mapped error exactly as it would for a standalone reply failure.
+        const mapped = mapCreateFailure(err, replyToId !== undefined, text);
+        return {
+          data: { ok: false, posts, failed_at: index, error: mapped.toPayload().error },
+          summary: `Thread stopped at post ${index + 1}/${input.posts.length}: ${mapped.message}`,
+        };
+      }
+      const id = res.data?.id ?? '';
+      posts.push({ id, url: postUrl(id) });
+      replyToId = id;
+    }
+    return {
+      data: { ok: true, posts },
+      summary: `Thread created: ${posts.length} posts, starting at ${posts[0]?.url ?? ''}`,
+    };
+  },
+});
+
 /** Every tool this module contributes to the registry. */
-export const postsTools = [xPostGet, xPostCreate, xPostDelete, xPostHideReply];
+export const postsTools = [xPostGet, xPostCreate, xPostDelete, xPostHideReply, xThreadCreate];

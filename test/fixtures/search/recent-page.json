@@ -1,4 +1,5 @@
 {
+  "_provenance": "Synthetic: hand-written to the documented X API v2 envelope for GET /2/tweets/search/recent with the tweet.fields/expansions the tools request (docs.x.com/x-api/posts/search); fictional posts, not a live capture. Also reused as a generic post page by the timeline, list and engagement tests. Authored 2026-07-23. Exercises: post-page compaction, author resolution via includes.users, next_token pass-through.",
   "data": [
     {
       "id": "1800000000000000001",

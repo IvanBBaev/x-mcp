@@ -14,10 +14,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createHttpClient } from '../../src/api/http.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import type { RawCountsResponse } from '../../src/api/endpoints/search.js';
 import { searchTools, xPostCountsRecent, xSearchRecent } from '../../src/tools/search.js';
 import {
@@ -35,7 +37,9 @@ function makeCtx(http: ReturnType<typeof mockHttp>): ToolContext {
   const sleep = fakeSleep(clock);
   const random = fakeRandom([0.5]);
   const client = createHttpClient({ sleep: sleep.fn, random, dispatcher: http.dispatcher });
-  return { ports: makePorts({ dispatcher: http.dispatcher }), http: client };
+  // The tool clock sits after every time window used below, so no end_time is clamped (REND-9).
+  const toolClock = fakeClock(Date.parse('2026-08-01T00:00:00.000Z'));
+  return { ports: makePorts({ clock: toolClock, dispatcher: http.dispatcher }), http: client };
 }
 
 // The compaction field params every search request carries (must mirror api/endpoints/search).
@@ -95,6 +99,9 @@ test('x_search_recent: happy path renders a compact page with @handles and next_
 
   assert.equal(page.items.length, 3);
   assert.equal(page.result_count, 3);
+  // COST-3: the page is billed per post it returned, so the handler reports three units
+  // for the registry to settle the reservation with — not one for the call.
+  assert.equal(out.units, 3);
   assert.equal(page.next_token, 'abc');
   assert.equal(page.items[0]?.author, '@alice_dev');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
@@ -125,11 +132,11 @@ test('x_search_recent: over-bound max_results is clamped and the note explains i
   await http.close();
 });
 
-test('x_search_recent: page_token and time window ride the wire verbatim (PAGE-1)', async () => {
+test('x_search_recent: page_token rides the wire verbatim, the time window ISO-normalized (PAGE-1, REND-9)', async () => {
   const http = mockHttp();
   // The intercept pins the RENAMED wire params: page_token -> next_token, start_time and
-  // end_time passed through untouched. A match proves the bridge, since undici
-  // string-compares the full sorted query.
+  // end_time re-emitted as canonical ISO-8601 UTC (REND-9). A match proves the bridge, since
+  // undici string-compares the full sorted query.
   http.pool
     .intercept({
       path: '/2/tweets/search/recent',
@@ -138,8 +145,8 @@ test('x_search_recent: page_token and time window ride the wire verbatim (PAGE-1
         query: 'x',
         ...SEARCH_FIELD_PARAMS,
         next_token: 'abc',
-        start_time: '2026-07-20T00:00:00Z',
-        end_time: '2026-07-27T00:00:00Z',
+        start_time: '2026-07-20T00:00:00.000Z',
+        end_time: '2026-07-27T00:00:00.000Z',
       },
     })
     .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
@@ -160,6 +167,44 @@ test('x_search_recent: page_token and time window ride the wire verbatim (PAGE-1
 
   http.assertDone();
   await http.close();
+});
+
+test('REND-9: x_search_recent clamps a near-now end_time to 10 s in the past and notes it', async () => {
+  const http = mockHttp();
+  // makeCtx's tool clock sits at 2026-08-01T00:00:00.000Z; an end_time at that instant falls
+  // inside the 10 s rejection window, so the wire must carry the clamped value instead.
+  http.pool
+    .intercept({
+      path: '/2/tweets/search/recent',
+      method: 'GET',
+      query: { query: 'x', ...SEARCH_FIELD_PARAMS, end_time: '2026-07-31T23:59:50.000Z' },
+    })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
+
+  const out = await xSearchRecent.handler(
+    { query: 'x', end_time: '2026-08-01T00:00:00Z' },
+    makeCtx(http),
+  );
+  const page = out.data as CompactPageResult;
+
+  assert.ok(page.note);
+  assert.match(page.note, /end_time adjusted to 2026-07-31T23:59:50\.000Z/);
+  assert.match(page.note, /at least 10 seconds in the past/);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('REND-9: x_search_recent rejects an unparseable time bound before any request', async () => {
+  await assert.rejects(
+    () => xSearchRecent.handler({ query: 'x', end_time: 'not-a-date' }, noHttpCtx()),
+    (err: unknown) => {
+      assert.ok(XError.is(err), 'expected an XError');
+      assert.equal(err.kind, 'validation');
+      assert.match(err.message, /end_time is not a recognizable timestamp/);
+      return true;
+    },
+  );
 });
 
 test('x_search_recent: raw:true returns the exact envelope and caps the wire at 25 (REND-10)', async () => {
@@ -183,21 +228,23 @@ test('x_search_recent: raw:true returns the exact envelope and caps the wire at 
   assert.deepEqual(out.data, fixture);
   // …but the REND-6 warning still rides the summary (T-320 F4).
   assert.equal(out.summary, `3 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  // A raw read pays for the same three posts: the price follows the response, not the shape.
+  assert.equal(out.units, 3);
 
   http.assertDone();
   await http.close();
 });
 
-test('x_search_recent: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('x_search_recent: raw without max_results sends the raw default (REND-10); a data-less 200 counts as 0', async () => {
   const http = mockHttp();
-  // No max_results on the wire at all — the raw cap only applies when the caller asked
-  // for a size. A degraded envelope with no `data` must not crash the summary (DRIFT-1).
+  // With no size asked for, the raw read sends the raw default (10) (REND-10). A degraded
+  // envelope with no `data` must not crash the summary (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   http.pool
     .intercept({
       path: '/2/tweets/search/recent',
       method: 'GET',
-      query: { query: 'x', ...SEARCH_FIELD_PARAMS },
+      query: { query: 'x', ...SEARCH_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, envelope);
 
@@ -205,6 +252,7 @@ test('x_search_recent: raw without max_results sends no cap; a data-less 200 cou
 
   assert.deepEqual(out.data, envelope);
   assert.equal(out.summary, `0 raw result(s). ${UNTRUSTED_CONTENT_NOTE}`);
+  assert.equal(out.units, 0); // no resource returned, nothing to charge for (REND-1)
 
   http.assertDone();
   await http.close();
@@ -224,6 +272,7 @@ test('x_search_recent: empty results carry the zero-results note', async () => {
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 0);
+  assert.equal(out.units, 0); // an empty page is free (COST-3/REND-1)
   assert.equal(page.next_token, undefined);
   assert.equal(page.note, 'No results matched this query.');
 
@@ -250,20 +299,73 @@ function isRemovedOperatorError(err: unknown): boolean {
   return true;
 }
 
-test('DRIFT-3: x_search_recent rejects each removed engagement operator before any request', async () => {
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged
+ * (delta audit 09 Finding 1 residual). Mirrors `test/tools/posts.test.ts`'s helper of the same name.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
+}
+
+test('DRIFT-3: x_search_recent rejects each removed engagement operator before the budget charge or any request', async () => {
   for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+    const { reg, budgetChecks } = chargeCountingRegistry(xSearchRecent);
     await assert.rejects(
-      () => xSearchRecent.handler({ query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
+      () => reg.call('x_search_recent', { query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
       isRemovedOperatorError,
     );
+    assert.equal(budgetChecks(), 0);
   }
 });
 
-test('DRIFT-3: x_post_counts_recent applies the same pre-validation', async () => {
+test('DRIFT-3: x_post_counts_recent applies the same pre-validation before the budget charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCountsRecent);
   await assert.rejects(
-    () => xPostCountsRecent.handler({ query: 'ai min_likes:100' }, noHttpCtx()),
+    () => reg.call('x_post_counts_recent', { query: 'ai min_likes:100' }, noHttpCtx()),
     isRemovedOperatorError,
   );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('DRIFT-3: x_search_recent.input.safeParse rejects a removed operator, naming the field', () => {
+  const rejected = xSearchRecent.input.safeParse({ query: 'from:xdevelopers min_replies:5' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /operator removed by X/);
+  }
+  assert.equal(
+    xSearchRecent.input.safeParse({ query: 'from:xdevelopers -is:retweet' }).success,
+    true,
+  );
+});
+
+test('DRIFT-3: x_post_counts_recent.input.safeParse rejects a removed operator, naming the field', () => {
+  const rejected = xPostCountsRecent.input.safeParse({ query: 'ai min_reposts:10' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /operator removed by X/);
+  }
 });
 
 test('DRIFT-3: an operator name as a plain word is not a false positive', async () => {
@@ -308,10 +410,11 @@ test('x_post_counts_recent: maps buckets to numeric counts with a total', async 
   await http.close();
 });
 
-test('x_post_counts_recent: granularity, window, and page_token ride the wire verbatim', async () => {
+test('x_post_counts_recent: granularity and page_token ride the wire, the window ISO-normalized', async () => {
   const http = mockHttp();
-  // Pins every optional query param the tool can forward: granularity and the time window
-  // pass through untouched, page_token is bridged to next_token (PAGE-1).
+  // Pins every optional query param the tool can forward: granularity passes through, the
+  // time window is re-emitted as canonical ISO-8601 UTC (REND-9), and page_token is bridged
+  // to next_token (PAGE-1).
   http.pool
     .intercept({
       path: '/2/tweets/counts/recent',
@@ -319,8 +422,8 @@ test('x_post_counts_recent: granularity, window, and page_token ride the wire ve
       query: {
         query: 'x',
         granularity: 'day',
-        start_time: '2026-07-20T00:00:00Z',
-        end_time: '2026-07-27T00:00:00Z',
+        start_time: '2026-07-20T00:00:00.000Z',
+        end_time: '2026-07-27T00:00:00.000Z',
         next_token: 'ct1',
       },
     })

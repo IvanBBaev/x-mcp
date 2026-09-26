@@ -1736,6 +1736,9 @@
                 },
                 "next_token": {
                   "type": "string"
+                },
+                "note": {
+                  "type": "string"
                 }
               },
               "required": ["counts", "total"]
@@ -1797,6 +1800,9 @@
                   "type": "number"
                 },
                 "next_token": {
+                  "type": "string"
+                },
+                "note": {
                   "type": "string"
                 }
               },
@@ -2535,6 +2541,57 @@
           "required": ["type"]
         }
       }
+    },
+    "x_thread_create": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "posts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id", "url"]
+              }
+            },
+            "failed_at": {
+              "type": "number"
+            }
+          },
+          "required": ["ok", "posts"]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "meta": {
+          "type": "object",
+          "properties": {
+            "cost_usd": {
+              "type": "number"
+            },
+            "session_total_usd": {
+              "type": "number"
+            },
+            "budget_warning": {
+              "type": "string"
+            }
+          },
+          "required": ["cost_usd", "session_total_usd"]
+        }
+      },
+      "required": ["data", "meta"]
     },
     "x_timeline_home": {
       "type": "object",

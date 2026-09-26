@@ -8,25 +8,36 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import { validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
+import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
+import { normalizeTimeBounds } from '../core/timebounds.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
 
 // DRIFT-3: engagement-threshold operators X removed from the v2 syntax on 2026-01-19.
 // A query using one would be rejected server-side AFTER the paid read was already
-// spent, so both search-slice handlers pre-validate and refuse before any HTTP.
+// spent, so both search-slice schemas pre-validate and refuse before any HTTP — and, since
+// schema validation is registry pipeline step 1 and the budget charge is step 4, before that
+// charge too, via `.superRefine` (schema-level, not the handler) so a locally-refused query
+// is never billed (delta audit 09 Finding 1 residual, same fix as `x_post_create`).
 const REMOVED_OPERATORS = ['min_likes', 'min_replies', 'min_reposts'] as const;
 
-/** DRIFT-3 pre-validation: throw a typed `validation` error for removed operators. */
-function rejectRemovedOperators(query: string): void {
-  const found = REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+/** DRIFT-3: which removed operators (if any) a query uses. */
+function findRemovedOperators(query: string): readonly string[] {
+  return REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+}
+
+/** DRIFT-3 pre-validation, attached to a schema's `query` field via `.superRefine`. */
+function checkRemovedOperators(query: string, ctx: z.RefinementCtx): void {
+  const found = findRemovedOperators(query);
   if (found.length > 0) {
-    throw validationError(
-      `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
+    ctx.addIssue({
+      code: 'custom',
+      path: ['query'],
+      message:
+        `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
         'remove it from the query (the request was not sent, so no read was spent).',
-    );
+    });
   }
 }
 
@@ -48,7 +59,12 @@ const searchInput = z
       .optional()
       .describe('Opaque pagination cursor returned as next_token by a previous call.'),
     start_time: z.string().optional().describe('Oldest post timestamp to include (ISO-8601 UTC).'),
-    end_time: z.string().optional().describe('Newest post timestamp to include (ISO-8601 UTC).'),
+    end_time: z
+      .string()
+      .optional()
+      .describe(
+        'Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted).',
+      ),
     sort_order: z
       .enum(['recency', 'relevancy'])
       .optional()
@@ -58,7 +74,8 @@ const searchInput = z
       .optional()
       .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
 
 export const xSearchRecent = defineTool({
   name: 'x_search_recent',
@@ -75,8 +92,10 @@ export const xSearchRecent = defineTool({
   phase: 1,
   input: searchInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: refuse removed operators before anything else — never burn a paid read.
-    rejectRemovedOperators(input.query);
+    // DRIFT-3: removed operators are refused by `searchInput`'s `.superRefine` before the
+    // registry's budget charge (delta audit 09 Finding 1 residual) — nothing left to check here.
+    // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
+    const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const clamp =
       input.max_results !== undefined
         ? clampMaxResults(input.max_results, PAGE_BOUNDS.searchRecent)
@@ -86,37 +105,43 @@ export const xSearchRecent = defineTool({
 
     // REND-10: a raw read caps the outgoing max_results at the raw ceiling (25) and returns
     // the exact API JSON; a compact read uses the endpoint-clamped value (10-100).
-    const maxResults =
-      input.raw === true
-        ? input.max_results !== undefined
-          ? capRawMaxResults(input.max_results)
-          : undefined
-        : clamp?.value;
+    const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
 
     const params: SearchRecentParams = {
       query: input.query,
       ...(maxResults !== undefined ? { maxResults } : {}),
       ...(nextToken !== undefined ? { nextToken } : {}),
-      ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
-      ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
+      ...(bounds.startTime !== undefined ? { startTime: bounds.startTime } : {}),
+      ...(bounds.endTime !== undefined ? { endTime: bounds.endTime } : {}),
       ...(input.sort_order !== undefined ? { sortOrder: input.sort_order } : {}),
     };
 
     const res = await searchRecent(ctx.http, params);
 
+    // Billed per post returned, not per search (COST-3): a full page of 100 costs 100
+    // post reads. The count comes from the raw envelope, before any local capping.
+    const units = billableUnits(res);
+
     if (input.raw === true) {
-      return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+      return {
+        data: res,
+        summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+        units,
+      };
     }
 
     let page = renderPostPage(res);
-    // Attach the clamp note WITHOUT buildPage (INT-5 name collision) by merging onto the
-    // rendered page; the existing untrusted/zero-results note is preserved after it.
-    if (clamp?.note) {
-      page = { ...page, note: page.note ? `${clamp.note} ${page.note}` : clamp.note };
+    // Attach the clamp notes WITHOUT buildPage (INT-5 name collision) by merging onto the
+    // rendered page; the existing untrusted/zero-results note is preserved after them.
+    const notes = [...(clamp?.note ? [clamp.note] : []), ...bounds.notes];
+    if (notes.length > 0) {
+      const prefix = notes.join(' ');
+      page = { ...page, note: page.note ? `${prefix} ${page.note}` : prefix };
     }
     return {
       data: page,
       summary: `${page.result_count} result(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+      units,
     };
   },
 });
@@ -131,7 +156,12 @@ const countsInput = z
       .optional()
       .describe('Histogram bucket size; defaults to hour.'),
     start_time: z.string().optional().describe('Oldest bucket timestamp (ISO-8601 UTC).'),
-    end_time: z.string().optional().describe('Newest bucket timestamp (ISO-8601 UTC).'),
+    end_time: z
+      .string()
+      .optional()
+      .describe(
+        'Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted).',
+      ),
     page_token: z
       .string()
       .optional()
@@ -141,7 +171,8 @@ const countsInput = z
       .optional()
       .describe('Return the exact API JSON instead of the compact histogram.'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
 
 /** One compact histogram bucket: numbers + ISO timestamps only, never third-party text. */
 interface CountBucket {
@@ -170,14 +201,16 @@ export const xPostCountsRecent = defineTool({
   phase: 1,
   input: countsInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: counts hit the same query parser, so the same pre-validation applies.
-    rejectRemovedOperators(input.query);
+    // DRIFT-3: counts hit the same query parser; `countsInput`'s `.superRefine` refuses a
+    // removed operator before the registry's budget charge (delta audit 09 Finding 1 residual).
+    // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
+    const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const nextToken = toCursor(input.page_token);
     const res = await countsRecent(ctx.http, {
       query: input.query,
       ...(input.granularity !== undefined ? { granularity: input.granularity } : {}),
-      ...(input.start_time !== undefined ? { startTime: input.start_time } : {}),
-      ...(input.end_time !== undefined ? { endTime: input.end_time } : {}),
+      ...(bounds.startTime !== undefined ? { startTime: bounds.startTime } : {}),
+      ...(bounds.endTime !== undefined ? { endTime: bounds.endTime } : {}),
       ...(nextToken !== undefined ? { nextToken } : {}),
     });
 
@@ -185,11 +218,16 @@ export const xPostCountsRecent = defineTool({
       return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw bucket(s).`) };
     }
 
-    const counts: readonly CountBucket[] = (res.data ?? []).map((b) => ({
-      ...(b.start !== undefined ? { start: b.start } : {}),
-      ...(b.end !== undefined ? { end: b.end } : {}),
-      count: finiteCount(b.tweet_count),
-    }));
+    // REND-9: bucket bounds are re-emitted as ISO-8601 UTC; an unparseable one is omitted.
+    const counts: readonly CountBucket[] = (res.data ?? []).map((b) => {
+      const start = toIso(b.start);
+      const end = toIso(b.end);
+      return {
+        ...(start !== undefined ? { start } : {}),
+        ...(end !== undefined ? { end } : {}),
+        count: finiteCount(b.tweet_count),
+      };
+    });
     const total =
       res.meta?.total_tweet_count !== undefined
         ? finiteCount(res.meta.total_tweet_count)
@@ -198,6 +236,7 @@ export const xPostCountsRecent = defineTool({
       counts,
       total,
       ...(res.meta?.next_token !== undefined ? { next_token: res.meta.next_token } : {}),
+      ...(bounds.notes.length > 0 ? { note: bounds.notes.join(' ') } : {}),
     };
     return { data, summary: `${total} posts across ${counts.length} buckets.` };
   },

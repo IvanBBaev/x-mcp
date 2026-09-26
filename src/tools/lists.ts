@@ -35,15 +35,18 @@ import {
 } from '../api/endpoints/lists.js';
 import type { ListPageParams } from '../api/endpoints/lists.js';
 import { createHandleLookup, getMe as getUsersMe } from '../api/endpoints/users.js';
-import { apiError, validationError } from '../core/errors.js';
+import { XError, apiError, notFoundError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
-  capRawMaxResults,
+  billableUnits,
+  rawMaxResults,
   rawSummary,
   renderList,
   renderListPage,
+  renderMissing,
   renderPostPage,
   renderUserPage,
+  withUntrustedNote,
 } from '../core/render.js';
 import type { RawListResponse } from '../core/render.js';
 import type { Page } from '../core/render-shapes.js';
@@ -77,6 +80,22 @@ function parseListId(input: string): string {
   const id = match?.[1];
   if (id !== undefined) return id;
   throw validationError(`Not a recognized X list id or list URL: "${preview(value)}".`);
+}
+
+/**
+ * `list_id` pre-validation, attached to a schema's `.superRefine` for the (non-zero-cost)
+ * tools below: mirrors `parsePostId`'s schema-level check in `tools/posts.ts` so a locally
+ * rejected list reference is never billed (delta audit 09 Finding 1 residual). `parseListId` still
+ * runs in the handler afterwards — this only pre-empts the throw, not the normalization of
+ * a list URL to its canonical numeric id.
+ */
+function checkListId(listId: string, ctx: z.RefinementCtx): void {
+  try {
+    parseListId(listId);
+  } catch (err) {
+    if (!(err instanceof XError)) throw err;
+    ctx.addIssue({ code: 'custom', path: ['list_id'], message: err.message });
+  }
 }
 
 // --- User resolution -------------------------------------------------------------
@@ -141,12 +160,7 @@ function preparePage(input: SharedPageInput): PreparedPage {
     input.max_results !== undefined
       ? clampMaxResults(input.max_results, PAGE_BOUNDS.engagementList)
       : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const paginationToken = toCursor(input.page_token);
 
   const notes: string[] = [];
@@ -163,13 +177,24 @@ function preparePage(input: SharedPageInput): PreparedPage {
 
 // --- Output shaping --------------------------------------------------------------
 
-/** `raw: true` output: the exact API JSON, size-capped upstream (REND-10). */
+/**
+ * `raw: true` output: the exact API JSON, size-capped upstream (REND-10). Billed per
+ * resource the page returned, not per call (COST-3).
+ */
 function rawOutput<T>(res: RawListResponse<T>): ToolOutput {
-  return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+  return {
+    data: res,
+    summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+    units: billableUnits(res),
+  };
 }
 
-/** Compact-page output with the normalization notes prefixed onto the page note. */
-function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
+/**
+ * Compact-page output with the normalization notes prefixed onto the page note. `units` is
+ * the billable count, which the caller takes from the RAW envelope rather than from the
+ * rendered page: what X charges for is what it sent, whatever rendering then drops (COST-3).
+ */
+function pageOutput<T>(page: Page<T>, notes: readonly string[], units: number): ToolOutput {
   let shaped = page;
   if (notes.length > 0) {
     const prefix = notes.join(' ');
@@ -178,6 +203,7 @@ function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
   return {
     data: shaped,
     summary: `${shaped.result_count} result(s)${shaped.next_token !== undefined ? ', more available' : ''}.`,
+    units,
   };
 }
 
@@ -356,7 +382,10 @@ export const xListDelete = defineTool({
 
 // --- x_list_get ------------------------------------------------------------------
 
-const getInput = z.object({ list_id: listIdField, raw: rawField }).strict();
+const getInput = z
+  .object({ list_id: listIdField, raw: rawField })
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListGet = defineTool({
   name: 'x_list_get',
@@ -373,14 +402,28 @@ export const xListGet = defineTool({
   phase: 3,
   input: getInput,
   handler: async (input, ctx) => {
+    // `getInput`'s `.superRefine` already validated `list_id`, so this cannot throw — it
+    // only normalizes a list URL to its canonical numeric id.
     const listId = parseListId(input.list_id);
     const res = await getList(ctx.http, listId);
     if (input.raw === true) {
       return { data: res, summary: rawSummary(`Raw list ${listId}.`) };
     }
+    // REND-2: a 200 that carries only `errors[]` means X could not return the list (missing,
+    // or private to someone else). Rendering `{}` would pass it off as a real, empty list, so
+    // this single lookup fails typed instead, with the controlled reason only (REND-7).
+    if (res.data === undefined && (res.errors?.length ?? 0) > 0) {
+      const reason = renderMissing(res.errors)[0]?.reason ?? 'not-found';
+      throw notFoundError(`List ${listId} could not be read (${reason}).`);
+    }
     // REND-5: renderList omits `owner` when the includes cannot resolve it — never throws.
     const list = renderList(res.data ?? {}, res.includes);
-    return { data: list, summary: `List "${list.name}" (id ${listId}).` };
+    const summary = `List "${list.name}" (id ${listId}).`;
+    // REND-6: CompactList has no `note` field, so the untrusted-content warning rides on
+    // `summary` instead — but only when a list actually came back (`res.data !== undefined`);
+    // the DRIFT-1 data-less-200 fallback above renders an empty placeholder with nothing
+    // third-party in it, so it gets no note, matching the batch tools' `items.length > 0` gate.
+    return { data: list, summary: res.data !== undefined ? withUntrustedNote(summary) : summary };
   },
 });
 
@@ -418,7 +461,7 @@ export const xListsOwned = defineTool({
     const userId = await resolveUserRef(input.user ?? 'me', ctx.http);
     const res = await ownedLists(ctx.http, userId, prepared.params);
     if (input.raw === true) return rawOutput(res);
-    return pageOutput(renderListPage(res), prepared.notes);
+    return pageOutput(renderListPage(res), prepared.notes, billableUnits(res));
   },
 });
 
@@ -483,7 +526,8 @@ const membersInput = z
     page_token: pageTokenField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListMembers = defineTool({
   name: 'x_list_members',
@@ -501,10 +545,11 @@ export const xListMembers = defineTool({
   input: membersInput,
   handler: async (input, ctx) => {
     const prepared = preparePage(input);
+    // `membersInput`'s `.superRefine` already validated `list_id`, so this cannot throw.
     const listId = parseListId(input.list_id);
     const res = await listMembers(ctx.http, listId, prepared.params);
     if (input.raw === true) return rawOutput(res);
-    return pageOutput(renderUserPage(res), prepared.notes);
+    return pageOutput(renderUserPage(res), prepared.notes, billableUnits(res));
   },
 });
 
@@ -517,7 +562,8 @@ const timelineInput = z
     page_token: pageTokenField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => checkListId(value.list_id, ctx));
 
 export const xListTimeline = defineTool({
   name: 'x_list_timeline',
@@ -535,10 +581,11 @@ export const xListTimeline = defineTool({
   input: timelineInput,
   handler: async (input, ctx) => {
     const prepared = preparePage(input);
+    // `timelineInput`'s `.superRefine` already validated `list_id`, so this cannot throw.
     const listId = parseListId(input.list_id);
     const res = await listTimeline(ctx.http, listId, prepared.params);
     if (input.raw === true) return rawOutput(res);
-    return pageOutput(renderPostPage(res), prepared.notes);
+    return pageOutput(renderPostPage(res), prepared.notes, billableUnits(res));
   },
 });
 
