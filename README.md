@@ -4,7 +4,7 @@
 
 | | | | | | |
 |:--:|:--:|:--:|:--:|:--:|:--:|
-| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-41-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
+| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-42-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
 
 </div>
 
@@ -16,7 +16,7 @@ pay-per-use pricing so an agent can never quietly overspend.
 > **Status: pre-1.0, under active development, published on npm as
 > [`x-mcp-ai`](https://www.npmjs.com/package/x-mcp-ai)** (currently `0.8.0`, published from
 > CI with npm provenance). Pin an exact version while the project is on `0.x`
-> ([Setup](#setup)). **41 tools across 12 packages** are registered today; the full designed
+> ([Setup](#setup)). **42 tools across 12 packages** are registered today; the full designed
 > surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and has landed
 > in full. The public API is unstable until `1.0.0`.
 
@@ -46,7 +46,7 @@ model picks the tool. Three representative asks:
 // "Like that launch post for me."
 {
   "tool": "x_like_set",
-  "arguments": { "post_id": "1899…", "action": "like" }
+  "arguments": { "post": "1899…", "action": "like" }
 }
 ```
 
@@ -62,7 +62,7 @@ model picks the tool. Three representative asks:
 
 ## Features
 
-- **41 tools across 12 packages** over the X API v2 — read posts, users and timelines,
+- **42 tools across 12 packages** over the X API v2 — read posts, users and timelines,
   search (recent and full-archive), engage, publish, manage lists, upload media, walk the
   social graph, and read/send DMs behind an explicit opt-in.
 - **Two-axis policy model** (`operation:domain`) with five presets — `read-only` (default),
@@ -189,6 +189,7 @@ X_MCP_AUTH_MODE=oauth2 X_MCP_CLIENT_ID=… node build/src/index.js authorize
 | `X_MCP_PROFILE` | | | Active profile name (required with a profiles file). |
 | `X_MCP_BASE_URL` | `https://api.x.com` | | API base URL; must be `https://` and `*.x.com`. |
 | `X_MCP_ALLOW_INSECURE_BASE_URL` | `0` | | `1` → permit a non-`x.com` base URL (testing only). |
+| `X_MCP_ALLOW_PROXY` | `0` | | `1` → silence the startup warning when Node env proxying (`NODE_USE_ENV_PROXY=1` / `--use-env-proxy`) sends requests through a proxy var. |
 | `X_MCP_TIMEOUT_MS` | `30000` | | Per-request timeout, milliseconds. |
 | `X_MCP_LOG_LEVEL` | `info` | | `silent` \| `error` \| `info` \| `debug`. |
 
@@ -207,12 +208,12 @@ Every tool maps to one **policy cell** — an `operation:domain` pair. Operation
 |---|---|--:|
 | `read-only` *(default)* | all `read:*` cells **except** `read:dm` | 21 |
 | `engage` | read-only **+** `write:engagement` | 26 |
-| `publish` | engage **+** `write:content`, `write:moderation` | 32 |
-| `manage` | publish **+** `destructive:content` | 34 |
-| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 37 |
+| `publish` | engage **+** `write:content`, `write:moderation` | 33 |
+| `manage` | publish **+** `destructive:content` | 35 |
+| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 38 |
 
 > **DM cells are never in a preset — not even `full`.** `read:dm` and `write:dm` must be
-> granted explicitly via `X_MCP_POLICY_ALLOW` (all 41 tools callable). Their unlock hint is
+> granted explicitly via `X_MCP_POLICY_ALLOW` (all 42 tools callable). Their unlock hint is
 > deliberately withheld from policy errors, as it is for every other sensitive cell.
 > Denied tools stay registered but annotated `(disabled by policy <preset>)` unless
 > `X_MCP_HIDE_DENIED=1`.
@@ -274,7 +275,7 @@ gate.
 
 ## Tools
 
-The 41 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
+The 42 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
 callable under the default preset (DM reads excepted: they need an explicit allow).
 "User" marks `user-only` tools, which require OAuth 2.0 user context and are unreachable
 with an app-only bearer token. The designed surface is
@@ -296,6 +297,7 @@ schemas, scopes, cost class, availability — is
 | posts | `x_post_create` | write:content |  | ✅ | Create a post — text, optional reply_to_id, quote_id, media_ids[], poll {options[], duration_minutes}, reply_settings. |
 | posts | `x_post_delete` | destructive:content |  | ✅ | Delete own post by id. |
 | posts | `x_post_hide_reply` | write:moderation |  | ✅ | Hide or unhide a reply to one of your own posts. |
+| posts | `x_thread_create` | write:content |  | ✅ | Post a thread — posts: string[] (2-25), each replying to the previous. |
 | users | `x_user_get` | read:user | ✅ |  | Batch fetch of X (Twitter) user profiles by numeric id, @handle, bare handle, or the sentinel `me` (the authenticated user). |
 | search | `x_search_recent` | read:content | ✅ |  | Search X (Twitter) posts from the last 7 days using the full v2 query syntax (from:, to:, conversation_id:, boolean operators). |
 | search | `x_post_counts_recent` | read:content | ✅ |  | Return a volume histogram (post counts per time bucket) for an X (Twitter) v2 query over the last 7 days, at minute/hour/day granularity. |
@@ -303,10 +305,10 @@ schemas, scopes, cost class, availability — is
 | engagement | `x_repost_set` | write:engagement |  | ✅ | Repost (retweet) a post as the authenticated user, or undo that repost. |
 | engagement | `x_bookmark_set` | write:engagement |  | ✅ | Add a post to the authenticated user's bookmarks or remove it. |
 | engagement | `x_bookmarks_list` | read:content | ✅ | ✅ | The authenticated user's own bookmarks, newest first — the read half of `x_bookmark_set`. |
-| timelines | `x_timeline_home` | read:content | ✅ | ✅ | Read the authenticated X (Twitter) user's home timeline in reverse-chronological order (the accounts they follow, newest first). |
-| timelines | `x_timeline_mentions` | read:content | ✅ |  | Read posts mentioning an X (Twitter) user (defaults to the authenticated user). |
+| timelines | `x_timeline_home` | read:content | ✅ | ✅ | Read the authenticated X (Twitter) user's home timeline in reverse-chronological order (accounts they follow, newest first). |
+| timelines | `x_timeline_mentions` | read:content | ✅ |  | Read posts mentioning an X (Twitter) user (default: authenticated user). |
 | timelines | `x_timeline_user` | read:content | ✅ |  | Read an X (Twitter) user's own posts, newest first, optionally excluding replies and/or reposts, within optional time bounds. |
-| graph | `x_follow_set` | write:social-graph |  | ✅ | Follow or unfollow a user as the authenticated user. |
+| graph | `x_follow_set` | write:social-graph |  | ✅ | Follow or unfollow a user as the authenticated user — a single target, no batch, by design. |
 | graph | `x_mute_set` | write:social-graph |  | ✅ | Mute or unmute a user as the authenticated user. |
 | graph | `x_block_set` | destructive:social-graph |  | ✅ | Block or unblock a user as the authenticated user. |
 | graph | `x_followers_list` | read:social-graph | ✅ |  | List the accounts following an X (Twitter) user. |
@@ -316,12 +318,12 @@ schemas, scopes, cost class, availability — is
 | lists | `x_list_update` | write:content |  | ✅ | Update the authenticated user's own list metadata — `name`, `description`, and/or `private`. |
 | lists | `x_list_delete` | destructive:content |  | ✅ | Permanently delete the authenticated user's own list. |
 | lists | `x_list_get` | read:content | ✅ |  | Read one list's metadata — name, description, privacy, member and follower counts, and owner handle. |
-| lists | `x_lists_owned` | read:content | ✅ |  | The lists a user owns (defaults to the authenticated user). |
-| lists | `x_list_member_set` | write:content |  | ✅ | Add a user to the authenticated user's own list or remove one — a single user per call. |
+| lists | `x_lists_owned` | read:content | ✅ |  | The lists a user owns (default: authenticated user). |
+| lists | `x_list_member_set` | write:content |  | ✅ | Add or remove one member from the authenticated user's own list — a reversible membership write. |
 | lists | `x_list_members` | read:content | ✅ |  | The members of a list. |
 | lists | `x_list_timeline` | read:content | ✅ |  | Posts from a list's timeline (recent posts by its members). |
-| lists | `x_list_follow_set` | write:engagement |  | ✅ | Follow a list as the authenticated user, or unfollow it. |
-| lists | `x_list_pin_set` | write:engagement |  | ✅ | Pin a list in the authenticated user's list view, or unpin it. |
+| lists | `x_list_follow_set` | write:engagement |  | ✅ | Follow a list as the authenticated user, or unfollow it — a reversible engagement write. |
+| lists | `x_list_pin_set` | write:engagement |  | ✅ | Pin a list in the authenticated user's list view, or unpin it — a reversible engagement write. |
 | media | `x_media_upload` | write:content |  | ✅ | Upload a local image, GIF, or video via the chunked v2 flow and return a `media_id` to attach with `x_post_create`. |
 | media | `x_media_status` | read:content | ✅ | ✅ | Check the async processing state of an uploaded media by `media_id`. |
 | dm | `x_dm_events_list` | read:dm | ✅ | ✅ | List all recent direct-message events across the authenticated X (Twitter) user's conversations, newest first. |
@@ -390,7 +392,8 @@ A summary; the full threat model and operator checklist live in
 
 - **Host-scoped auth.** The `Authorization` header is attached only for the configured API
   origin; redirects are never followed on token-bearing requests (confused-deputy defense).
-  Proxy environment variables are ignored.
+  Proxy environment variables are ignored; if Node's own env proxying is switched on, startup
+  warns unless `X_MCP_ALLOW_PROXY=1`.
 - **Token file hardening.** Written `0600` with `O_NOFOLLOW`/`O_EXCL`; refresh is
   single-flight with reload-under-lock and fails closed rather than racing.
 - **Untrusted content.** Post/user/DM text returned to the model is marked as untrusted.

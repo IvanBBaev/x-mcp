@@ -29,9 +29,9 @@ import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker, ToolOutput } from '../core/tooldef.js';
-import { validationError } from '../core/errors.js';
+import { validationError, XError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { renderDmPage } from '../core/render.js';
+import { billableUnits, renderDmPage } from '../core/render.js';
 import type { RawDmEvent, RawListResponse } from '../core/render.js';
 import type { CompactDm, Page } from '../core/render-shapes.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
@@ -168,6 +168,8 @@ function renderDmEvents(
   return {
     data: includeText ? page : minimizeDmPage(page),
     summary: `${page.result_count} DM event(s)${page.next_token !== undefined ? ', more available' : ''}.`,
+    // Billed per DM event returned (COST-3) — omitting the bodies does not make them free.
+    units: billableUnits(res),
   };
 }
 
@@ -177,11 +179,11 @@ const maxResultsField = z
   .number()
   .int()
   .optional()
-  .describe('Results per page (1-100); out-of-range values are clamped into the window.');
+  .describe('Results per page (1-100); out-of-range values are clamped.');
 const pageTokenField = z
   .string()
   .optional()
-  .describe('Opaque pagination cursor returned as next_token by a previous call.');
+  .describe('Pagination cursor: the next_token from a previous call.');
 const includeTextField = z
   .boolean()
   .optional()
@@ -321,7 +323,55 @@ const sendInput = z
       .optional()
       .describe('Target user for a 1:1 DM: numeric id, handle, or @handle.'),
   })
-  .strict();
+  .strict()
+  // Exactly-one-target, the conversation_id shape, and the participant "me" rejection, in
+  // the schema rather than the handler: schema validation is pipeline step 1 and the budget
+  // charge is step 4, so a locally refused send is never billed (delta audit 09 Finding 1
+  // class). Refinements do not reach the JSON Schema, so this costs no context bytes.
+  .superRefine((input, ctx) => {
+    if (input.conversation_id !== undefined && input.participant !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['conversation_id'],
+        message: 'x_dm_send takes exactly ONE target: conversation_id or participant, not both.',
+      });
+      return;
+    }
+    if (input.conversation_id !== undefined) {
+      try {
+        parseConversationId(input.conversation_id);
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: ['conversation_id'], message: err.message });
+      }
+    } else if (input.participant !== undefined) {
+      // REND-8: participant accepts a numeric id, handle, or @handle; classification is pure
+      // and synchronous. The network half of resolution (handle -> id lookup) cannot run in a
+      // schema refinement, so it stays in the handler; only the local classification and the
+      // "me" rejection run here.
+      try {
+        const ref = classifyUserRef(input.participant);
+        if (ref.kind === 'me') {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['participant'],
+            message:
+              'participant identifies the OTHER user in the conversation — "me" is not a ' +
+              'valid participant. Pass their numeric id or @handle.',
+          });
+        }
+      } catch (err) {
+        if (!(err instanceof XError)) throw err;
+        ctx.addIssue({ code: 'custom', path: ['participant'], message: err.message });
+      }
+    } else {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['conversation_id'],
+        message: 'x_dm_send needs a target: pass conversation_id or participant.',
+      });
+    }
+  });
 
 export const xDmSend = defineTool({
   name: 'x_dm_send',
@@ -348,12 +398,10 @@ export const xDmSend = defineTool({
   phase: 3,
   input: sendInput,
   handler: async (input, ctx) => {
-    if (input.conversation_id !== undefined && input.participant !== undefined) {
-      throw validationError(
-        'x_dm_send takes exactly ONE target: conversation_id or participant, not both.',
-      );
-    }
-
+    // Exactly-one-target, the conversation_id shape, and the participant "me" rejection were
+    // validated by the schema; parseConversationId only normalizes (trims) and
+    // resolveParticipantId only resolves a handle to its numeric id over the network (or
+    // passes an id through) — neither can throw for those reasons here.
     let res: RawSingleResponse<RawDmSendResult>;
     if (input.conversation_id !== undefined) {
       const conversationId = parseConversationId(input.conversation_id);
@@ -362,6 +410,8 @@ export const xDmSend = defineTool({
       const participantId = await resolveParticipantId(input.participant, ctx.http);
       res = await sendDmToParticipant(ctx.http, { participantId, text: input.text });
     } else {
+      // Unreachable via the registry (the schema guarantees exactly one target); kept as a
+      // defensive fallback for direct handler calls that bypass schema validation (e.g. tests).
       throw validationError('x_dm_send needs a target: pass conversation_id or participant.');
     }
 

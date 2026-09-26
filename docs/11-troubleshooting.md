@@ -12,10 +12,12 @@ There are exactly two failure surfaces, and they need different responses.
 | **Startup** | One line on **stderr**: `x-mcp-ai: fatal: <reason>`, then exit code 1. The client shows the server as failed/disconnected. | The operator, in the env. |
 | **A tool call** | A structured tool error (`isError: true`) carrying `kind`, `message`, `retryable`, `fix`. The server stays up. | `fix: "agent"` → the model retries or corrects arguments. `fix: "operator"` → you change config or credentials. |
 
-Non-fatal startup notices appear as `x-mcp-ai: warning: <text>` on stderr and are
-suppressed at `X_MCP_LOG_LEVEL=silent`. **stdout is JSON-RPC only** — if you see anything
-else there, something in your wrapper is polluting it and the client will fail to parse the
-stream.
+Non-fatal startup notices (CFG-5) appear on stderr as single-line JSON, one object per
+line, in the fixed key order `{"ts": "<ISO-8601>", "level": "warn", "msg": "<text>"}` — for
+example `{"ts":"2026-09-24T12:00:00.000Z","level":"warn","msg":"profiles file ... is
+readable by group or other ..."}`. They are suppressed at `X_MCP_LOG_LEVEL=silent`.
+**stdout is JSON-RPC only** — if you see anything else there, something in your wrapper is
+polluting it and the client will fail to parse the stream.
 
 The 11 error classes and their defaults:
 
@@ -155,9 +157,17 @@ context; `POST /2/tweets` additionally carries a 24-hour app-level cap surfaced 
   no credits are spent.
 - The error is `kind: "rate-limit"`, `retryable: true`, and carries `reset_at` plus
   `retry_after_seconds`. The correct response is to wait, not to re-run immediately.
+- A **read** that X answers with 429 while its window renews within 5 seconds is not
+  reported at all: the server waits for the reset and retries it once, so the call just
+  takes a few seconds longer. A reset further away, a second 429, or any **write** returns
+  the error immediately — writes are never retried.
 - `x_rate_limit_status` prints the known windows and costs nothing.
 - Rate limits are *not* the credit budget. A rate-limit refusal costs $0; a budget refusal
   means you hit **your** spend cap.
+- A 429 for X's **monthly usage cap** is not a rate limit: it comes back as `billing`
+  (`platform_title: "UsageCapExceeded"`), because no reset window lifts it — waiting and
+  retrying only repeats the refusal (COST-7). It clears when the monthly period renews or
+  the cap is raised on the developer account.
 
 ## 6. Budget refusals
 
