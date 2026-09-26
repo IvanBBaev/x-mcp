@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
 import { WRITE_AMBIGUITY, createHttpClient } from '../../src/api/http.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
 import {
   POLICY_PRESETS,
   classifyTool,
@@ -20,10 +20,12 @@ import {
   resolvePolicy,
   resolvePolicyStrings,
 } from '../../src/core/policy.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
 import type { CompactDm, Page } from '../../src/core/render-shapes.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import {
   DM_BODIES_OMITTED_NOTE,
   DM_RETENTION_NOTE,
@@ -78,6 +80,30 @@ function noHttpCtx(): ToolContext {
       send: () => Promise.reject(new Error('endpoint must not be called for invalid input')),
     },
   };
+}
+
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
 }
 
 // --- Contract axes ---------------------------------------------------------------
@@ -390,11 +416,20 @@ test('x_dm_send: a 2xx confirmation without the documented envelope still report
   await mock.close();
 });
 
-test('x_dm_send: both targets, no target, and a bad conversation_id all reject pre-network', async () => {
-  // Both targets.
+// These four checks are validated by sendInput's schema (superRefine), which runs at
+// pipeline step 1 — before the rate-limit preflight and the budget charge (step 4). Each
+// test goes through the registry, not the bare handler, so a passing test proves the
+// rejection happens before ANY budget check, not merely before any HTTP call.
+
+test('x_dm_send: both targets reject before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xDmSend);
   await assert.rejects(
     () =>
-      xDmSend.handler({ participant: '777', conversation_id: '9-777', text: 'hi' }, noHttpCtx()),
+      reg.call(
+        'x_dm_send',
+        { participant: '777', conversation_id: '9-777', text: 'hi' },
+        noHttpCtx(),
+      ),
     (err: unknown) => {
       assert.ok(XError.is(err));
       assert.equal(err.kind, 'validation');
@@ -402,9 +437,13 @@ test('x_dm_send: both targets, no target, and a bad conversation_id all reject p
       return true;
     },
   );
-  // No target.
+  assert.equal(budgetChecks(), 0);
+});
+
+test('x_dm_send: no target rejects before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xDmSend);
   await assert.rejects(
-    () => xDmSend.handler({ text: 'hi' }, noHttpCtx()),
+    () => reg.call('x_dm_send', { text: 'hi' }, noHttpCtx()),
     (err: unknown) => {
       assert.ok(XError.is(err));
       assert.equal(err.kind, 'validation');
@@ -412,15 +451,35 @@ test('x_dm_send: both targets, no target, and a bad conversation_id all reject p
       return true;
     },
   );
-  // Malformed conversation id.
+  assert.equal(budgetChecks(), 0);
+});
+
+test('x_dm_send: a malformed conversation_id rejects before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xDmSend);
   await assert.rejects(
-    () => xDmSend.handler({ conversation_id: 'nope', text: 'hi' }, noHttpCtx()),
+    () => reg.call('x_dm_send', { conversation_id: 'nope', text: 'hi' }, noHttpCtx()),
     (err: unknown) => {
       assert.ok(XError.is(err));
       assert.equal(err.kind, 'validation');
+      assert.match(err.message, /conversation_id must be a v2 DM conversation id/);
       return true;
     },
   );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('REND-8: x_dm_send rejects participant "me" before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xDmSend);
+  await assert.rejects(
+    () => reg.call('x_dm_send', { participant: 'me', text: 'hi' }, noHttpCtx()),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'validation');
+      assert.match(err.message, /OTHER user/);
+      return true;
+    },
+  );
+  assert.equal(budgetChecks(), 0);
 });
 
 test('DM-4: sending to a non-follower / DMs-closed target is a typed forbidden with the platform reason', async () => {
@@ -548,4 +607,48 @@ test('input schemas: empty/oversized text, unknown keys, and bad shapes all reje
     true,
   );
   assert.equal(xDmSend.input.safeParse({ conversation_id: '9-777', text: 'ok' }).success, true);
+});
+
+test('x_dm_send schema: exactly-one-target, conversation_id shape, and "me" all pre-validate', () => {
+  // Both targets: flagged on conversation_id, mirroring the handler's original priority.
+  const both = xDmSend.input.safeParse({
+    participant: '777',
+    conversation_id: '9-777',
+    text: 'hi',
+  });
+  assert.equal(both.success, false);
+  assert.match(both.error?.issues[0]?.message ?? '', /exactly ONE target/);
+  assert.deepEqual(both.error?.issues[0]?.path, ['conversation_id']);
+
+  // No target.
+  const none = xDmSend.input.safeParse({ text: 'hi' });
+  assert.equal(none.success, false);
+  assert.match(none.error?.issues[0]?.message ?? '', /needs a target: pass conversation_id/);
+  assert.deepEqual(none.error?.issues[0]?.path, ['conversation_id']);
+
+  // Malformed conversation_id.
+  const badId = xDmSend.input.safeParse({ conversation_id: 'nope', text: 'hi' });
+  assert.equal(badId.success, false);
+  assert.match(
+    badId.error?.issues[0]?.message ?? '',
+    /conversation_id must be a v2 DM conversation id/,
+  );
+  assert.deepEqual(badId.error?.issues[0]?.path, ['conversation_id']);
+
+  // A well-formed conversation_id still parses.
+  assert.equal(xDmSend.input.safeParse({ conversation_id: '9-777', text: 'hi' }).success, true);
+
+  // REND-8: participant "me" is rejected — a DM needs the OTHER user.
+  const me = xDmSend.input.safeParse({ participant: 'me', text: 'hi' });
+  assert.equal(me.success, false);
+  assert.match(me.error?.issues[0]?.message ?? '', /OTHER user/);
+  assert.deepEqual(me.error?.issues[0]?.path, ['participant']);
+
+  // A malformed (non-"me") participant still pre-validates via classifyUserRef.
+  const badHandle = xDmSend.input.safeParse({ participant: '@' /* empty handle */, text: 'hi' });
+  assert.equal(badHandle.success, false);
+  assert.deepEqual(badHandle.error?.issues[0]?.path, ['participant']);
+
+  // A well-formed participant still parses.
+  assert.equal(xDmSend.input.safeParse({ participant: '777', text: 'hi' }).success, true);
 });

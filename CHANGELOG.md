@@ -22,6 +22,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_dm_send` no longer charges the session budget for a DM it refuses locally. Passing
+  both `conversation_id` and `participant` (or neither), a malformed `conversation_id`,
+  and a `participant` of `"me"` are now rejected at input validation, before the budget
+  check, instead of after it. The refusal is still a `validation` error and still sends
+  nothing; its message still names the offending field.
+
 - `x_post_create` no longer charges the session budget for a post it refuses locally.
   Whitespace-only text, a poll combined with `media_ids`, and a malformed `reply_to_id`
   or `quote_id` are now rejected at input validation, before the budget check, instead
