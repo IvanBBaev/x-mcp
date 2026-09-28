@@ -145,6 +145,14 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > the catalogue and the registry are now the same set, which is exactly what the drift gate
 > asserts, so the gate is self-enforcing rather than prose. The remaining budget is 1,555 B;
 > a twelfth package is a Phase 4 question with a cap decision attached, not a P3 leftover.
+>
+> **Update (2026-09-26).** Phase 3's `x_thread_create` (a `posts`-package tool, landed
+> 2026-09-24) moved the surface to **42 tools in 12 packages** — the package count is
+> unaffected, it joins the existing `posts` package. The `tools/list` payload is now
+> 79,987 B of the 80,000 B budget (13 B of headroom left); see
+> [13-compatibility.md](13-compatibility.md) §4.5.1 for the re-probe. Tightening redundant
+> tool and parameter descriptions (no parameter, constraint or behaviour change) then
+> brought it down to **78,434 B** (1,566 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -170,7 +178,9 @@ above; this is the single list to walk before tagging:
       *`npm run docs:check` (`scripts/docs-gen.mjs`). Verified 2026-08-09: 41 tools
       in 12 packages, zero drift in either direction. The gate is proven non-vacuous
       — corrupting a count and a policy cell each made it fail with a file:line, and
-      it caught all 17 stale prose counts left by the decisions/0002 surface change.*
+      it caught all 17 stale prose counts left by the decisions/0002 surface change.
+      Re-verified 2026-09-26 after `x_thread_create` (Phase 3) landed: 42 tools in
+      12 packages, still zero drift in either direction.*
 - [x] Context-size gate green: `tools/list` serialization under the fixed cap.
       *`npm run gate:context` (`scripts/context-gate.mjs`). Measured on the wire, not
       on the client's parsed copy: worst case **78,445 B against an 80,000 B cap**
@@ -180,7 +190,13 @@ above; this is the single list to walk before tagging:
       of landing them. The baseline moved 74,422 → 78,445 B when `x_bookmarks_list`
       and `x_post_hide_reply` landed; the gate reports the delta per run so creep is
       visible per commit rather than only at the cap. Anything further needs
-      description trimming or an argued cap raise, not a quiet +2 kB.*
+      description trimming or an argued cap raise, not a quiet +2 kB.
+      Re-measured 2026-09-26 after `x_thread_create` landed: worst case **79,987 B
+      against the 80,000 B cap** (0.0% headroom — 13 B left). The surface cannot
+      absorb another tool without either a cap raise or cutting description bytes
+      elsewhere. Description tightening the same day (redundant restatements of
+      what the JSON Schema or a parameter's own description already says) moved
+      the baseline 79,987 → **78,434 B** (2.0% headroom).*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
       Audited the shipped code, not the design: 17 threats and 4 kill-chains walked
@@ -188,7 +204,8 @@ above; this is the single list to walk before tagging:
       all dispositioned in that document's §7 — 7 fixed in code, 2 closed as
       documentation corrections (the promise was wrong, not the implementation),
       2 accepted as documented residuals (F6 preemptive-refusal training, F9 budget
-      under-accounting). The blocking HIGH (F1: credentials followed
+      under-accounting; F6 was later closed on 2026-09-19 by the `onResponse` seam —
+      audit §7). The blocking HIGH (F1: credentials followed
       `X_MCP_BASE_URL` anywhere, so an operator-set or profile-set base URL could
       exfiltrate the token) is closed by an independent hardcoded egress allowlist in
       `src/core/egress.ts`, plus a startup refusal under `oauth2`. §1–§6 of the audit
@@ -196,14 +213,24 @@ above; this is the single list to walk before tagging:
       baseline — the two decisions/0002 tools (39 → 41) and the two later src/ commits —
       was audited 2026-08-30 in
       [reviews/08-delta-audit-2026-08-30.md](reviews/08-delta-audit-2026-08-30.md):
-      clean, no new findings at MEDIUM or above.*
+      clean, no new findings at MEDIUM or above. The next delta — the `x_thread_create`
+      tool (Phase 3) plus the COST-3/AUTH-11/12/14/16/CFG-5/REND-2/6/9 hardening —
+      was audited 2026-09-25 in
+      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md):
+      one new MEDIUM finding (`x_thread_create` charges its full aggregate cost
+      before validating post text, so a local whitespace rejection still burns the
+      charge). Fixed: `37d042d` moved the `x_thread_create` post-text validation into
+      the schema (pipeline step 1, ahead of the step-4 budget charge), and `075a35a`
+      did the same for `x_post_create` so its own locally-refused posts are never
+      charged either — see
+      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md) §6.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
-      probe-verified** — re-probed 2026-08-09 at the 41-tool surface (§4.5.1): 41 tools
-      all carrying `outputSchema` and `annotations`, 20 marked disabled under `read-only`,
+      probe-verified** — re-probed 2026-09-26 at the 42-tool surface (§4.5.1): 42 tools
+      all carrying `outputSchema` and `annotations`, 21 marked disabled under `read-only`,
       a `tools/call` denial that names the cell and no environment variable, and a
-      serialized payload byte-identical to what `gate:context` reports (78,445 B). The
+      serialized payload byte-identical to what `gate:context` reports (79,987 B). The
       other three rows need a GUI client a human has to drive; every one of them is
       labelled `unverified` on that page rather than assumed working.*
 - [ ] Scenario suite (walkthroughs A–C) green; ≥ 1 week dogfood without a P1 issue.

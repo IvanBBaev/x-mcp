@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import { createHttpClient } from '../../src/api/http.js';
 import { XError } from '../../src/core/errors.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
+import { ALL_MISSING_NOTE } from '../../src/core/render-shapes.js';
 import type {
   RawListResponse,
   RawSingleResponse,
@@ -113,6 +114,7 @@ test('x_timeline_home: resolves me then renders a compact page (REND-8/REND-6)',
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per post the timeline returned
   assert.equal(page.next_token, 'abc');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
   assert.ok(page.note);
@@ -377,6 +379,41 @@ test('REND-1/PAGE-4: an empty timeline page carries the zero-results note and no
   await http.close();
 });
 
+test('REND-2/REND-7: an errors-only 200 timeline page surfaces missing[], not zero results', async () => {
+  const http = mockHttp();
+  // A 200 with no `data` and only `errors[]` (a protected account's timeline): the agent
+  // must learn WHY nothing came back, and the platform `detail` prose must stay out.
+  http.pool
+    .intercept({
+      path: '/2/users/50393960/tweets',
+      method: 'GET',
+      query: TIMELINE_FIELD_PARAMS,
+    })
+    .reply(200, {
+      errors: [
+        {
+          title: 'Authorization Error',
+          type: 'https://api.twitter.com/2/problems/not-authorized-for-resource',
+          resource_id: '50393960',
+          detail: 'Sorry, you are not authorized to see the user with id: [50393960].',
+        },
+      ],
+    });
+
+  const out = await xTimelineUser.handler({ user: '50393960' }, makeCtx(http));
+  const page = out.data as CompactPageResult & {
+    readonly missing?: readonly { readonly id: string; readonly reason: string }[];
+  };
+
+  assert.equal(page.result_count, 0);
+  assert.equal(page.note, ALL_MISSING_NOTE);
+  assert.deepEqual(page.missing, [{ id: '50393960', reason: 'protected' }]);
+  assert.equal(JSON.stringify(out).includes('not authorized to see'), false);
+
+  http.assertDone();
+  await http.close();
+});
+
 test('REND-10: raw:true returns the exact API JSON and caps max_results at 25', async () => {
   const http = mockHttp();
   const fixture = loadFixture<RawListResponse<RawTweet>>('search/recent-page.json');
@@ -401,16 +438,16 @@ test('REND-10: raw:true returns the exact API JSON and caps max_results at 25', 
   await http.close();
 });
 
-test('REND-10: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('REND-10: raw without max_results sends the raw default (10); a data-less 200 counts as 0', async () => {
   const http = mockHttp();
-  // The intercept carries the field params ONLY — the raw cap applies just when the caller
-  // asked for a size. A degraded envelope with no `data` must still summarize (DRIFT-1).
+  // With no size asked for, the raw read sends the raw default (10) so the page stays under
+  // the 25-item cap. A degraded envelope with no `data` must still summarize (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   http.pool
     .intercept({
       path: '/2/users/50393960/tweets',
       method: 'GET',
-      query: TIMELINE_FIELD_PARAMS,
+      query: { ...TIMELINE_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, envelope);
 

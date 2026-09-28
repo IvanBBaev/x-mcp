@@ -1,4 +1,5 @@
 {
+  "_provenance": "Synthetic: hand-written to the documented X API v2 envelope for GET /2/lists/:id/members (docs.x.com/x-api/lists); fictional users, not a live capture. Authored 2026-08-09. Exercises: list-member page compaction.",
   "data": [
     {
       "id": "101",
