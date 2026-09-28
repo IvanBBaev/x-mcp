@@ -257,6 +257,21 @@ test('REND-5: a reply whose parent is absent from includes keeps the id and omit
   assert.equal(post.author, '');
 });
 
+test('a quote-tweet reference is compacted onto `quoted`, resolving the quoted author’s handle', () => {
+  const post = renderPost(
+    {
+      id: '31',
+      text: 'quoting',
+      referenced_tweets: [{ type: 'quoted', id: '88' }],
+    },
+    {
+      tweets: [{ id: '88', text: 'original', author_id: 'u2' }],
+      users: [{ id: 'u2', username: 'carol' }],
+    },
+  );
+  assert.deepEqual(post.quoted, { id: '88', author: '@carol' });
+});
+
 test('REND-5: an unknown media type is dropped without dropping the whole post', () => {
   const post = renderPost(
     { id: '1', author_id: 'u1', attachments: { media_keys: ['k1', 'k2'] } },
@@ -417,6 +432,14 @@ test('renderUser resolves @handle, maps metrics, and omits absent optionals', ()
   assert.deepEqual(user.metrics, { followers: 10, following: 5, posts: 100, listed: 2 });
   assert.equal(Object.hasOwn(user, 'description'), false);
   assert.equal(Object.hasOwn(user, 'verified'), false);
+});
+
+test('REND-6: a user’s free-text location is sanitized through and included when present', () => {
+  const user = renderUser({ id: 'u1', username: 'alice', location: 'San Francisco, CA' });
+  assert.equal(user.location, 'San Francisco, CA');
+
+  const noLocation = renderUser({ id: 'u2', username: 'bob' });
+  assert.equal(Object.hasOwn(noLocation, 'location'), false);
 });
 
 test('renderDm resolves sender handle and conversation/created fields', () => {

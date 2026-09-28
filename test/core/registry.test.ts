@@ -373,6 +373,17 @@ test('validation runs before any gate; an unknown tool name is a typed validatio
   assert.equal(unknown.kind, 'validation');
 });
 
+test('a zod issue with no field path (a whole-input failure) is reported as "(root)", not blank', async () => {
+  const tool = makeTool({ name: 'x_whole_input', policy: 'read:content', input: z.string() });
+  const reg = createRegistry([tool], deps());
+
+  // The raw input is an object, not a string: zod fails the whole value, so the issue's
+  // `path` is `[]` — the empty-path branch this test pins.
+  const err = await rejected(reg.call('x_whole_input', {}, callCtx()));
+  assert.equal(err.kind, 'validation');
+  assert.match(err.message, /\(root\):/);
+});
+
 test('budget: hard-mode pre-flight refuses (nothing reserved); warn-mode surfaces budget_warning', async () => {
   let handlerRan = false;
   let reserved = false;
@@ -661,6 +672,23 @@ test('MCP-7: a raw AbortError escaping a handler renders as the cancellation err
 
   assert.equal(err.kind, 'network');
   assert.equal(err.retryable, true); // a cancelled READ is safely re-issuable
+  assert.match(err.message, /cancelled by the MCP host/);
+  assert.doesNotMatch(err.message, /failed unexpectedly/);
+});
+
+test('MCP-7: an AbortError thrown WITHOUT the host signal being aborted is still recognized as a cancellation', async () => {
+  // Unlike the test above, the call signal here is never aborted — so the pipeline's
+  // `signal?.aborted === true` short-circuit is false and `isAbortError` itself must
+  // classify the thrown DOMException. That is the only path that exercises it.
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    handler: () => Promise.reject(new DOMException('The operation was aborted.', 'AbortError')),
+  });
+  const reg = createRegistry([tool], deps());
+  const err = await rejected(reg.call('x_post_get', {}, callCtx()));
+
+  assert.equal(err.kind, 'network');
   assert.match(err.message, /cancelled by the MCP host/);
   assert.doesNotMatch(err.message, /failed unexpectedly/);
 });
