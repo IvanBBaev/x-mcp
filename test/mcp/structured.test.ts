@@ -176,7 +176,7 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
   const names = composeServer(config)
     .registry.listForMcp()
     .map((tool) => tool.name);
-  assert.equal(names.length, 41, 'the Phase-1/2/3 catalog registers 41 tools');
+  assert.equal(names.length, 42, 'the Phase-1/2/3 catalog registers 42 tools');
   assertOutputSchemaCoverage(names); // must not throw
   for (const name of names) {
     const schema = toolOutputSchema(name);
@@ -257,6 +257,18 @@ test('REND-11/REND-5: real search pages (full and zero-result) conform to x_sear
   const empty = renderPostPage(loadFixture<RawListResponse<RawTweet>>('search/recent-empty.json'));
   assert.equal(empty.note, ZERO_RESULTS_NOTE);
   assertConforms('x_search_recent', empty);
+});
+
+test('REND-11/REND-2: a paged render carrying missing[] still conforms to the page schemas', () => {
+  const errorsOnly = {
+    errors: [{ title: 'Not Found Error', resource_id: '7', detail: 'gone' }],
+  };
+  const posts = renderPostPage(errorsOnly);
+  assert.equal(posts.missing?.length, 1, 'fixture must exercise missing[] on a page');
+  assertConforms('x_timeline_user', posts, '0 result(s).');
+  assertConforms('x_followers_list', renderUserPage(errorsOnly));
+  assertConforms('x_lists_owned', renderListPage(errorsOnly));
+  assertConforms('x_dm_events_list', renderDmPage(errorsOnly));
 });
 
 test('REND-11: the same page shape conforms to all three timeline schemas', () => {

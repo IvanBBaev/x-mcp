@@ -255,7 +255,7 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
           .optional()
           .describe(
             'Days of daily breakdown to return (1-90; the API defaults to 7). Out-of-range ' +
-              'values are clamped into the window.',
+              'values are clamped.',
           ),
         raw: z
           .boolean()
