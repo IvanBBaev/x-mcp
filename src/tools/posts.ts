@@ -19,6 +19,7 @@ import {
 } from '../api/endpoints/posts.js';
 import type { RawCreatedPost } from '../api/endpoints/posts.js';
 import { WRITE_AMBIGUITY } from '../api/http.js';
+import { CONTENT_MANAGE_USD, POST_DELETE_USD } from '../core/budget.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
 import {
   RAW_MAX_RESULTS,
@@ -468,7 +469,9 @@ export const xPostDelete = defineTool({
   policy: 'destructive:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
-  cost: 'w:action',
+  // No dedicated "Post: Delete" pricing-page row — priced at the conservative
+  // `POST_DELETE_USD` (docs/01 App. B; never under-count).
+  cost: () => ({ class: 'w:action', usd: POST_DELETE_USD }),
   annotations: {
     title: DELETE_TITLE,
     readOnlyHint: false,
@@ -552,7 +555,8 @@ export const xPostHideReply = defineTool({
   policy: 'write:moderation',
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.moderate.write', 'users.read'],
-  cost: 'w:action',
+  // "Content: Manage" — same rate both directions (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: CONTENT_MANAGE_USD }),
   annotations: {
     title: HIDE_TITLE,
     readOnlyHint: false,

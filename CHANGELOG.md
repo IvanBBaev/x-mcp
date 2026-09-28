@@ -22,6 +22,18 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- Engagement, social-graph, list, moderation and media-metadata writes
+  (`x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_follow_set`, `x_mute_set`,
+  `x_block_set`, `x_post_delete`, `x_post_hide_reply`, `x_list_update`,
+  `x_list_delete`, `x_list_member_set`, `x_list_follow_set`, `x_list_pin_set`,
+  `x_media_upload` with `alt_text`) and `x_post_counts_archive` now charge the
+  session budget at the platform's published per-operation rates ($0.005-$0.015)
+  instead of $0. Each call still reports its own `cost_usd`; a hard-mode budget may
+  now refuse sooner than before. See `docs/01-api-landscape.md` Appendix B for the
+  full per-tool price table, including which mappings are inferred conservatively
+  where the pricing page has no exact match (mute create, block/unblock, post
+  delete).
+
 - README no longer calls MCP resources and prompts "planned". Neither is a committed
   roadmap item — the server's declared capabilities are exactly `{"tools":{}}` (no
   `resources`, no `prompts`; see `docs/13-compatibility.md` §2), and both are at most
@@ -174,6 +186,14 @@ development chronology lives in `WORKLOG.md`.
   lookups and writes are unchanged. Expect the session total to be substantially higher
   than before for the same workload; it is closer to the real invoice, and a
   `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
+
+### Platform changes absorbed
+
+- (2026-09-28) X's pricing page now prices engagement, social-graph, list-management,
+  bookmark, delete and media-metadata writes individually (User Interaction: Create
+  $0.015, Interaction: Delete $0.010, Content: Manage $0.005, List: Manage $0.005,
+  Bookmark $0.005, Media Metadata $0.005, Counts: All $0.010), closing the gap noted
+  under 0.8.0. The monthly post-read cap rose from 2,000,000 to 3,000,000.
 
 ## [0.8.0] - 2026-08-25
 

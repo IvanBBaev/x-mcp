@@ -35,6 +35,7 @@ import {
 } from '../api/endpoints/lists.js';
 import type { ListPageParams } from '../api/endpoints/lists.js';
 import { createHandleLookup, getMe as getUsersMe } from '../api/endpoints/users.js';
+import { LIST_MANAGE_USD } from '../core/budget.js';
 import { XError, apiError, notFoundError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
@@ -304,7 +305,8 @@ export const xListUpdate = defineTool({
   policy: 'write:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'list.write'],
-  cost: 'w:action',
+  // "List: Manage" (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: LIST_MANAGE_USD }),
   annotations: {
     title: 'Update a list',
     readOnlyHint: false,
@@ -354,7 +356,8 @@ export const xListDelete = defineTool({
   policy: 'destructive:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'list.write'],
-  cost: 'w:action',
+  // "List: Manage" (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: LIST_MANAGE_USD }),
   annotations: {
     title: 'Delete a list',
     readOnlyHint: false,
@@ -481,7 +484,8 @@ export const xListMemberSet = defineTool({
   policy: 'write:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'list.write'],
-  cost: 'w:action',
+  // "List: Manage" (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: LIST_MANAGE_USD }),
   annotations: {
     title: 'Add / remove a list member',
     readOnlyHint: false,
@@ -601,7 +605,8 @@ export const xListFollowSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'list.write'],
-  cost: 'w:action',
+  // "List: Manage" (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: LIST_MANAGE_USD }),
   annotations: {
     title: 'Follow / unfollow a list',
     readOnlyHint: false,
@@ -645,7 +650,8 @@ export const xListPinSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'list.write'],
-  cost: 'w:action',
+  // "List: Manage" (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: LIST_MANAGE_USD }),
   annotations: {
     title: 'Pin / unpin a list',
     readOnlyHint: false,

@@ -8,8 +8,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { XError } from '../../src/core/errors.js';
-import { COST_TABLE, createSessionBudget, priceOf } from '../../src/core/budget.js';
-import type { ResultMeta } from '../../src/core/tooldef.js';
+import {
+  COST_TABLE,
+  USER_INTERACTION_CREATE_USD,
+  createSessionBudget,
+  priceOf,
+} from '../../src/core/budget.js';
+import type { AnyToolDef, ResultMeta } from '../../src/core/tooldef.js';
+import { archiveTools } from '../../src/tools/archive.js';
+import { dmTools } from '../../src/tools/dm.js';
+import { engagementTools } from '../../src/tools/engagement.js';
+import { graphTools } from '../../src/tools/graph.js';
+import { listsTools } from '../../src/tools/lists.js';
+import { mediaTools } from '../../src/tools/media.js';
+import { postsTools } from '../../src/tools/posts.js';
+import { searchTools } from '../../src/tools/search.js';
+import { timelinesTools } from '../../src/tools/timelines.js';
+import { usersTools } from '../../src/tools/users.js';
 
 test('COST_TABLE prices each class at the verified pay-per-use rate (docs/01 App. B)', () => {
   assert.deepEqual(COST_TABLE, {
@@ -24,8 +39,10 @@ test('COST_TABLE prices each class at the verified pay-per-use rate (docs/01 App
     'w:post': 0.015,
     'w:dm': 0.015,
     'w:list': 0.01,
-    // w:action (engagement/graph/moderation writes + deletes) is unpriced on X's page as of
-    // 2026-07-22; counted $0 locally until the Phase 1 live capture (COST-6).
+    // w:action (engagement/graph/moderation writes + deletes) prices per operation via a
+    // `cost` resolver on each tool (see the `*_USD` constants below COST_TABLE, verified
+    // 2026-09-28, docs/01 App. B) rather than this table lookup. $0 here is an unreachable
+    // defensive fallback, never a live price.
     'w:action': 0,
   });
 });
@@ -130,6 +147,23 @@ test('COST-1: hard-mode block is a typed budget error the model cannot override'
       return true;
     },
   );
+});
+
+test('a hard-mode budget accumulates a priced w:action write across repeated calls and blocks once the cap is crossed', () => {
+  // Simulates x_like_set's "like" resolver (User Interaction: Create, $0.015 — docs/01 App. B)
+  // reserving repeatedly, the way a real session would as an agent likes several posts.
+  const budget = createSessionBudget({ limit: 0.05, mode: 'hard' });
+  budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  const third = budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  assert.equal(third.session_total_usd, 0.045);
+  assert.match(third.budget_warning ?? '', /~90%/);
+  // A fourth like would push the total to $0.06, past the $0.05 cap — refused before spend.
+  assert.throws(
+    () => budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD }),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  assert.equal(budget.total(), 0.045);
 });
 
 test('COST-1: no cap set → hard mode never blocks (X_MCP_CREDIT_BUDGET unset = no cap)', () => {
@@ -318,4 +352,25 @@ test('a double settle of the same reservation cannot drive the ledger negative',
   const again = budget.settle(held, { class: 'r:post', units: 0 });
   assert.equal(again.session_total_usd, 0);
   assert.equal(budget.total(), 0);
+});
+
+test('no X-calling tool prices a w:action write through the $0 table fallback', () => {
+  // COST_TABLE['w:action'] is 0 by design: every w:action write has its own per-operation
+  // rate and must supply it through a `cost` resolver. A static `'w:action'` cost would bill
+  // $0 and silently under-count the advisory budget. (auth/usage are local/owned factories.)
+  const tools: AnyToolDef[] = [
+    ...postsTools,
+    ...usersTools,
+    ...searchTools,
+    ...engagementTools,
+    ...timelinesTools,
+    ...graphTools,
+    ...listsTools,
+    ...mediaTools,
+    ...dmTools,
+    ...archiveTools,
+  ];
+  assert.equal(tools.length, 39);
+  const staticActions = tools.filter((tool) => tool.cost === 'w:action').map((tool) => tool.name);
+  assert.deepEqual(staticActions, []);
 });

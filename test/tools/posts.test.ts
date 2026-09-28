@@ -16,6 +16,7 @@ import {
   xThreadCreate,
   postsTools,
 } from '../../src/tools/posts.js';
+import { CONTENT_MANAGE_USD, POST_DELETE_USD } from '../../src/core/budget.js';
 import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
 import type { Registry } from '../../src/core/registry.js';
@@ -420,7 +421,10 @@ test('x_post_create / x_post_delete declare the docs/03 axes', () => {
   assert.equal(xPostDelete.policy, 'destructive:content');
   assert.equal(xPostDelete.availability, 'user-only');
   assert.equal(xPostDelete.phase, 2);
-  assert.equal(xPostDelete.cost, 'w:action');
+  // "Interaction: Delete" — no dedicated delete-post row is published (docs/01 App. B).
+  const deleteCost = xPostDelete.cost;
+  assert.ok(typeof deleteCost === 'function', 'x_post_delete cost must be a resolver');
+  assert.deepEqual(deleteCost({ id: '1' }), { class: 'w:action', usd: POST_DELETE_USD });
   assert.deepEqual([...xPostDelete.scopes], ['tweet.read', 'tweet.write', 'users.read']);
   assert.match(xPostDelete.description, /^X \(Twitter\): /);
   // MCP-4: destructive & non-idempotent hints, matching deriveAnnotations.
@@ -873,7 +877,17 @@ test('x_post_hide_reply declares the docs/03 axes: reversible moderation write',
   assert.equal(xPostHideReply.name, 'x_post_hide_reply');
   assert.equal(xPostHideReply.policy, 'write:moderation');
   assert.equal(xPostHideReply.availability, 'user-only');
-  assert.equal(xPostHideReply.cost, 'w:action');
+  // "Content: Manage" — same rate both directions (docs/01 App. B).
+  const hideCost = xPostHideReply.cost;
+  assert.ok(typeof hideCost === 'function', 'x_post_hide_reply cost must be a resolver');
+  assert.deepEqual(hideCost({ reply_id: '1', action: 'hide' }), {
+    class: 'w:action',
+    usd: CONTENT_MANAGE_USD,
+  });
+  assert.deepEqual(hideCost({ reply_id: '1', action: 'unhide' }), {
+    class: 'w:action',
+    usd: CONTENT_MANAGE_USD,
+  });
   assert.equal(xPostHideReply.phase, 3);
   assert.equal(xPostHideReply.annotations.readOnlyHint, false);
   // Hiding is reversible and absolute (not a toggle), so it is neither destructive nor

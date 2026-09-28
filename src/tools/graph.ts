@@ -29,6 +29,12 @@ import {
   searchUsers,
 } from '../api/endpoints/graph.js';
 import { createHandleLookup } from '../api/endpoints/users.js';
+import {
+  BLOCK_CREATE_USD,
+  INTERACTION_DELETE_USD,
+  MUTE_DELETE_USD,
+  USER_INTERACTION_CREATE_USD,
+} from '../core/budget.js';
 import { apiError, validationError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, rawMaxResults, rawSummary, renderUserPage } from '../core/render.js';
@@ -204,7 +210,11 @@ export const xFollowSet = defineTool({
   policy: 'write:social-graph',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'follows.write'],
-  cost: 'w:action',
+  // "User Interaction: Create" to follow, "Interaction: Delete" to unfollow (docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'follow' ? USER_INTERACTION_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Follow / unfollow a user',
     readOnlyHint: false,
@@ -262,7 +272,12 @@ export const xMuteSet = defineTool({
   policy: 'write:social-graph',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'mute.write'],
-  cost: 'w:action',
+  // "Mute: Delete" ($0.005) is published for unmute; no "Mute: Create" row exists, so mute
+  // itself is inferred at the "User Interaction: Create" tier (conservative — docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'mute' ? USER_INTERACTION_CREATE_USD : MUTE_DELETE_USD,
+  }),
   annotations: {
     title: 'Mute / unmute a user',
     readOnlyHint: false,
@@ -310,7 +325,12 @@ export const xBlockSet = defineTool({
   policy: 'destructive:social-graph',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'block.write'],
-  cost: 'w:action',
+  // No "Block"/"Unblock" pricing-page rows — both inferred, conservative (docs/01 App. B):
+  // block at the create-interaction tier, unblock at the delete-interaction tier.
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'block' ? BLOCK_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Block / unblock a user',
     readOnlyHint: false,

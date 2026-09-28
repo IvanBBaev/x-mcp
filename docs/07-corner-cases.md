@@ -279,7 +279,7 @@ credits, not tiers, for post-2026-02-06 developers.)*
   **capturing the real body is a named Phase 1 live-test task**, after which the
   fixture and mapping are locked.
 
-- **COST-7 — 2M posts/month hard read cap** `P3` `[X-F1]`
+- **COST-7 — 3M posts/month hard read cap** `P3` `[X-F1]`
   The platform cap is documented in the operator docs and surfaced verbatim when
   hit (as `billing`); the server does not attempt to pre-track it (monthly state
   needs persistence the design deliberately omits).

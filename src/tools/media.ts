@@ -46,6 +46,7 @@ import {
   setAltText,
 } from '../api/endpoints/media.js';
 import type { MediaCategory } from '../api/endpoints/media.js';
+import { MEDIA_METADATA_USD } from '../core/budget.js';
 import { XError, apiError, networkError, validationError } from '../core/errors.js';
 import { formatLogLine } from '../core/log.js';
 import { defineTool } from '../core/tooldef.js';
@@ -547,7 +548,17 @@ function buildUploadTool(deps: MediaToolDeps) {
     policy: 'write:content',
     availability: 'user-only',
     scopes: ['media.write'],
-    cost: 'w:action',
+    // The upload itself has no pricing-page row (still $0); requesting `alt_text` attempts
+    // a "Media Metadata" call (priced regardless of whether that best-effort call later
+    // succeeds — the charge reflects the request the caller asked for, docs/01 App. B).
+    // EXCEPT when this instance is default-denied (MEDIA-5, no X_MCP_MEDIA_DIR configured):
+    // that refusal is local and never reaches the wire, so it must price at $0 like any
+    // other local refusal (mirrors the `mediaDir` check in `openMediaFile` above) — an
+    // advisory budget must never charge for a call the server itself never attempted.
+    cost: (input) =>
+      input.alt_text !== undefined && deps.mediaDir !== undefined && deps.mediaDir.trim() !== ''
+        ? { class: 'w:action', usd: MEDIA_METADATA_USD }
+        : { class: 'w:action', usd: 0 },
     annotations: {
       title: 'Upload media',
       readOnlyHint: false,

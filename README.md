@@ -228,10 +228,11 @@ Note that `manage` grants destructive **content** operations only — follow/mut
 > Since **2026-04-16**, a post whose text contains a **URL costs $0.20 instead of $0.015 —
 > 13×**. Set `X_MCP_CREDIT_BUDGET` before pointing an agent at a real account.
 
-Indicative rates (verified 2026-07-22): post reads ~$0.005 each, user lookups and
+Indicative rates (verified 2026-09-28): post reads ~$0.005 each, user lookups and
 follower/following reads ~$0.010, own-data reads ~$0.001, DM events ~$0.010, post create
-$0.015 (or $0.20 with a URL), DM send $0.015, list create $0.010, engagement writes
-currently $0. X also caps post reads at **2,000,000 per month**. The authoritative table is
+$0.015 (or $0.20 with a URL), DM send $0.015, list create $0.010, and engagement,
+social-graph, list-management, bookmark and delete writes $0.005–$0.015 per operation. X
+also caps post reads at **3,000,000 per month**. The authoritative table is
 [`docs/01-api-landscape.md`](docs/01-api-landscape.md) §3; the operator's view is
 [`docs/10-operator-guide.md`](docs/10-operator-guide.md) §5.
 

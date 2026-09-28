@@ -18,7 +18,7 @@ export type BudgetMode = 'warn' | 'hard';
 
 /**
  * The authoritative per-class USD price table. Values are the pay-per-use rates verified
- * 2026-07-22 (docs/01 §3.1 + Appendix B) and agree with docs/03's cost-class legend. These
+ * 2026-09-28 (docs/01 §3.1 + Appendix B) and agree with docs/03's cost-class legend. These
  * are UNIT prices: reads are billed per resource returned, writes per request. A
  * multi-resource read is priced by {@link priceOf} as `unit price × CostEstimate.units`,
  * where `units` is the count the response actually carried — the registry settles the
@@ -39,9 +39,17 @@ export type BudgetMode = 'warn' | 'hard';
  *                        the `CostEstimate.usd` override; the class base stays $0.015)
  *  - `w:dm`      $0.015  per DM sent
  *  - `w:list`    $0.010  per list created
- *  - `w:action`  $0      engagement / social-graph / moderation writes, deletes, media:
- *                        unpriced on the pricing page (2026-07-22); counted $0 locally until
- *                        the Phase 1 live capture confirms the real rate (docs/01 App. B, COST-6)
+ *  - `w:action`  $0 base engagement / social-graph / list / moderation writes, deletes,
+ *                        and media metadata. Verified 2026-09-28, the
+ *                        pricing page prices each of these operations separately (docs/01
+ *                        App. B) rather than as one flat rate, so every registered
+ *                        `w:action` tool now supplies a `cost` resolver that returns its
+ *                        own operation's rate via `CostEstimate.usd` (see the
+ *                        `*_USD` constants below) instead of relying on this table lookup.
+ *                        The $0 base here is an unreachable defensive fallback, not a live
+ *                        price — an advisory budget must never under-count, so a future
+ *                        `w:action` tool that forgets a resolver fails loud in
+ *                        `test/core/budget.test.ts` rather than silently billing $0.
  */
 export const COST_TABLE: Readonly<Record<CostClass, number>> = {
   local: 0,
@@ -57,6 +65,42 @@ export const COST_TABLE: Readonly<Record<CostClass, number>> = {
   'w:list': 0.01,
   'w:action': 0,
 };
+
+/**
+ * Per-operation `w:action` prices (verified 2026-09-28, docs/01 App. B), each cited to its
+ * pricing-page label. A `cost` resolver returns one of these via `CostEstimate.usd`, never a
+ * magic number inline — this is the ONE place a `w:action` rate is written down. Where the
+ * platform label is genuinely ambiguous for an operation (noted per constant below), the
+ * CONSERVATIVE (higher) plausible price is used, because an advisory budget must never
+ * under-count.
+ */
+/** "User Interaction: Create" — like, repost, follow, mute. */
+export const USER_INTERACTION_CREATE_USD = 0.015;
+/** "Interaction: Delete" — unlike, unrepost, unfollow. Also used, inferred, for unblock. */
+export const INTERACTION_DELETE_USD = 0.01;
+/** "Mute: Delete" — unmute. */
+export const MUTE_DELETE_USD = 0.005;
+/**
+ * No "Block: Create" row is published; blocking is inferred as the same tier as the other
+ * create-type interactions (conservative — see `USER_INTERACTION_CREATE_USD`).
+ */
+export const BLOCK_CREATE_USD = 0.015;
+/** "Content: Manage" — hide/unhide a reply, and (conservative floor) generic content edits. */
+export const CONTENT_MANAGE_USD = 0.005;
+/**
+ * No dedicated "Post: Delete" row is published. Conservative choice between "Content: Manage"
+ * ($0.005) and "Interaction: Delete" ($0.010) — the higher of the two, per the never-under-
+ * count rule.
+ */
+export const POST_DELETE_USD = 0.01;
+/** "List: Manage" — update, delete, member add/remove, list follow/unfollow, list pin/unpin. */
+export const LIST_MANAGE_USD = 0.005;
+/** "Bookmark" — add or remove, same rate both directions. */
+export const BOOKMARK_USD = 0.005;
+/** "Media Metadata" — only charged when `x_media_upload` is asked to set `alt_text`. */
+export const MEDIA_METADATA_USD = 0.005;
+/** "Counts: All" — `x_post_counts_archive` (full-archive counts), distinct from "Counts: Recent". */
+export const COUNTS_ARCHIVE_USD = 0.01;
 
 /** A per-call cost the registry hands the budget: a bare class, or a resolved estimate. */
 export type ResolvedCost = CostClass | CostEstimate;

@@ -34,6 +34,7 @@ import { basename, join, parse, sep } from 'node:path';
 import { MEDIA_SEGMENT_BYTES, MEDIA_SIZE_CAPS } from '../../src/api/endpoints/media.js';
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
+import { MEDIA_METADATA_USD } from '../../src/core/budget.js';
 import { XError, networkError } from '../../src/core/errors.js';
 import { withCallSignal } from '../../src/core/registry.js';
 import type { EndpointInvoker, ToolContext, XApiRequest } from '../../src/core/tooldef.js';
@@ -189,9 +190,11 @@ test('MEDIA-3: mediaTools exposes upload + status as SEPARATE tools with catalog
     assert.equal(tool.annotations.openWorldHint, true);
     assert.equal(tool.annotations.destructiveHint, false);
   }
-  // Upload is a paid content write; re-running it uploads (and bills) again.
+  // Upload is a paid content write; re-running it uploads (and bills) again. The upload
+  // itself is $0, but requesting `alt_text` prices a Media Metadata call (docs/01 App. B),
+  // so cost is a resolver rather than a flat class string.
   assert.equal(xMediaUpload.policy, 'write:content');
-  assert.equal(xMediaUpload.cost, 'w:action');
+  assert.equal(typeof xMediaUpload.cost, 'function');
   assert.equal(xMediaUpload.annotations.readOnlyHint, false);
   assert.equal(xMediaUpload.annotations.idempotentHint, false);
   // Status is a cheap read-only poll.
@@ -204,9 +207,48 @@ test('MEDIA-3: mediaTools exposes upload + status as SEPARATE tools with catalog
   assert.equal(boundStatus, xMediaStatus);
   assert.equal(boundUpload.name, xMediaUpload.name);
   assert.equal(boundUpload.policy, xMediaUpload.policy);
-  assert.equal(boundUpload.cost, xMediaUpload.cost);
+  // Each createMediaTools() call builds its own resolver closure, so the two `cost`
+  // functions are distinct references — assert behavioral equivalence instead, EXCEPT for
+  // alt_text: the unbound (default-deny) instance never reaches the wire, so it must always
+  // price $0 there, while the bound instance prices Media Metadata like a real attempt.
+  assert.equal(typeof boundUpload.cost, 'function');
+  const boundCost = boundUpload.cost;
+  const originalCost = xMediaUpload.cost;
+  assert.ok(typeof boundCost === 'function', 'bound x_media_upload cost must be a resolver');
+  assert.ok(typeof originalCost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(boundCost({ path: 'a.png' }), originalCost({ path: 'a.png' }));
+  assert.deepEqual(boundCost({ path: 'a.png', alt_text: 'a cat' }), {
+    class: 'w:action',
+    usd: MEDIA_METADATA_USD,
+  });
+  assert.deepEqual(originalCost({ path: 'a.png', alt_text: 'a cat' }), {
+    class: 'w:action',
+    usd: 0,
+  });
   assert.equal(boundUpload.availability, xMediaUpload.availability);
   assert.deepEqual(boundUpload.annotations, xMediaUpload.annotations);
+});
+
+test('x_media_upload prices $0 without alt_text, Media Metadata ($0.005) with it set (docs/01 App. B)', () => {
+  const [bound] = createMediaTools({ mediaDir: tmpRoot });
+  const cost = bound.cost;
+  assert.ok(typeof cost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(cost({ path: 'a.png' }), { class: 'w:action', usd: 0 });
+  assert.deepEqual(cost({ path: 'a.png', alt_text: 'a cat on a windowsill' }), {
+    class: 'w:action',
+    usd: MEDIA_METADATA_USD,
+  });
+});
+
+test('x_media_upload prices $0 even with alt_text when default-denied (MEDIA-5, no media dir bound)', () => {
+  // The unbound module-level instance never reaches the wire, so it must never charge —
+  // an advisory budget must never count a call the server itself refused locally.
+  const cost = xMediaUpload.cost;
+  assert.ok(typeof cost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(cost({ path: 'a.png', alt_text: 'a cat on a windowsill' }), {
+    class: 'w:action',
+    usd: 0,
+  });
 });
 
 // --- x_media_upload happy paths ---------------------------------------------------

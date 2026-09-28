@@ -15,6 +15,7 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
+import { COUNTS_ARCHIVE_USD } from '../core/budget.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
 import { normalizeTimeBounds } from '../core/timebounds.js';
@@ -209,7 +210,10 @@ export const xPostCountsArchive = defineTool({
   policy: 'read:content',
   availability: 'app+user',
   scopes: ['tweet.read'],
-  cost: 'r:post',
+  // "Counts: All" — distinct from `x_post_counts_recent`'s "Counts: Recent" $0.005 (docs/01
+  // App. B, verified 2026-09-28). No `units` multiplier: a counts call is billed once per
+  // request, not per bucket.
+  cost: () => ({ class: 'r:post', usd: COUNTS_ARCHIVE_USD }),
   annotations: { title: 'Count posts across the archive', readOnlyHint: true, openWorldHint: true },
   phase: 3,
   input: countsInput,

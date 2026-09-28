@@ -15,6 +15,12 @@ import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
+import {
+  BLOCK_CREATE_USD,
+  INTERACTION_DELETE_USD,
+  MUTE_DELETE_USD,
+  USER_INTERACTION_CREATE_USD,
+} from '../../src/core/budget.js';
 import { XError } from '../../src/core/errors.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawSingleResponse, RawUser } from '../../src/core/render.js';
@@ -119,7 +125,8 @@ test('graphTools exposes the six graph tools with the catalog axes (MCP-4/COST-3
   // cell, so follow/mute are non-destructive and block alone carries destructiveHint.
   for (const tool of [xFollowSet, xMuteSet, xBlockSet]) {
     assert.equal(tool.availability, 'user-only');
-    assert.equal(tool.cost, 'w:action');
+    // Priced per operation now (docs/01 App. B) — a resolver, not a flat class string.
+    assert.equal(typeof tool.cost, 'function');
     assert.equal(tool.annotations.readOnlyHint, false);
     assert.equal(tool.annotations.idempotentHint, true);
   }
@@ -151,6 +158,43 @@ test('graphTools exposes the six graph tools with the catalog axes (MCP-4/COST-3
   assert.equal(xUserSearch.policy, 'read:user');
   assert.equal(xUserSearch.cost, 'r:user');
   assert.deepEqual([...xUserSearch.scopes], ['tweet.read', 'users.read']);
+});
+
+test('x_follow_set / x_mute_set / x_block_set price each direction per docs/01 App. B', () => {
+  const followCost = xFollowSet.cost;
+  assert.ok(typeof followCost === 'function', 'x_follow_set cost must be a resolver');
+  assert.deepEqual(followCost({ user: '34', action: 'follow' }), {
+    class: 'w:action',
+    usd: USER_INTERACTION_CREATE_USD,
+  });
+  assert.deepEqual(followCost({ user: '34', action: 'unfollow' }), {
+    class: 'w:action',
+    usd: INTERACTION_DELETE_USD,
+  });
+
+  const muteCost = xMuteSet.cost;
+  assert.ok(typeof muteCost === 'function', 'x_mute_set cost must be a resolver');
+  // Mute has no dedicated pricing-page row — inferred conservatively at the create tier.
+  assert.deepEqual(muteCost({ user: '12', action: 'mute' }), {
+    class: 'w:action',
+    usd: USER_INTERACTION_CREATE_USD,
+  });
+  assert.deepEqual(muteCost({ user: '12', action: 'unmute' }), {
+    class: 'w:action',
+    usd: MUTE_DELETE_USD,
+  });
+
+  const blockCost = xBlockSet.cost;
+  assert.ok(typeof blockCost === 'function', 'x_block_set cost must be a resolver');
+  // Block/unblock have no dedicated pricing-page rows — both inferred, conservative.
+  assert.deepEqual(blockCost({ user: '12', action: 'block' }), {
+    class: 'w:action',
+    usd: BLOCK_CREATE_USD,
+  });
+  assert.deepEqual(blockCost({ user: '12', action: 'unblock' }), {
+    class: 'w:action',
+    usd: INTERACTION_DELETE_USD,
+  });
 });
 
 // --- x_follow_set -----------------------------------------------------------------

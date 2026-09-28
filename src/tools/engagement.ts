@@ -26,6 +26,11 @@ import {
   listBookmarks,
 } from '../api/endpoints/engagement.js';
 import type { BookmarkPageParams } from '../api/endpoints/engagement.js';
+import {
+  BOOKMARK_USD,
+  INTERACTION_DELETE_USD,
+  USER_INTERACTION_CREATE_USD,
+} from '../core/budget.js';
 import { apiError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import {
@@ -92,7 +97,11 @@ export const xLikeSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'like.write'],
-  cost: 'w:action',
+  // "User Interaction: Create" to like, "Interaction: Delete" to unlike (docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'like' ? USER_INTERACTION_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Like / unlike a post',
     readOnlyHint: false,
@@ -141,7 +150,11 @@ export const xRepostSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'tweet.write'],
-  cost: 'w:action',
+  // "User Interaction: Create" to repost, "Interaction: Delete" to unrepost (docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'repost' ? USER_INTERACTION_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Repost / un-repost a post',
     readOnlyHint: false,
@@ -190,7 +203,8 @@ export const xBookmarkSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'bookmark.write'],
-  cost: 'w:action',
+  // "Bookmark" — same rate both directions (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: BOOKMARK_USD }),
   annotations: {
     title: 'Bookmark / unbookmark a post',
     readOnlyHint: false,

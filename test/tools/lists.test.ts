@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
+import { LIST_MANAGE_USD } from '../../src/core/budget.js';
 import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
 import type { Registry } from '../../src/core/registry.js';
@@ -205,7 +206,8 @@ test('listsTools exposes the ten merged list tools with the docs/03 axes (MCP-4)
   assert.equal(xListMembers.cost, 'r:user');
   assert.equal(xListTimeline.cost, 'r:post');
   for (const tool of [xListUpdate, xListDelete, xListMemberSet, xListFollowSet, xListPinSet]) {
-    assert.equal(tool.cost, 'w:action');
+    // Priced flat at List: Manage ($0.005/op, docs/01 App. B) — a resolver, not a class string.
+    assert.equal(typeof tool.cost, 'function');
   }
 
   // Writes: user-only, list.write scope, non-read annotations (MCP-4).
@@ -230,6 +232,52 @@ test('listsTools exposes the ten merged list tools with the docs/03 axes (MCP-4)
   // Plain create: not destructive, and no idempotent claim (repeat calls create more lists).
   assert.equal(xListCreate.annotations.destructiveHint, false);
   assert.equal(xListCreate.annotations.idempotentHint, undefined);
+});
+
+test('x_list_update / delete / member_set / follow_set / pin_set price flat at List: Manage (docs/01 App. B)', () => {
+  const updateCost = xListUpdate.cost;
+  assert.ok(typeof updateCost === 'function', 'x_list_update cost must be a resolver');
+  assert.deepEqual(updateCost({ list_id: LIST_ID, private: true }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+
+  const deleteCost = xListDelete.cost;
+  assert.ok(typeof deleteCost === 'function', 'x_list_delete cost must be a resolver');
+  assert.deepEqual(deleteCost({ list_id: LIST_ID }), { class: 'w:action', usd: LIST_MANAGE_USD });
+
+  const memberCost = xListMemberSet.cost;
+  assert.ok(typeof memberCost === 'function', 'x_list_member_set cost must be a resolver');
+  assert.deepEqual(memberCost({ list_id: LIST_ID, user: '101', action: 'add' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+  assert.deepEqual(memberCost({ list_id: LIST_ID, user: '101', action: 'remove' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+
+  const followCost = xListFollowSet.cost;
+  assert.ok(typeof followCost === 'function', 'x_list_follow_set cost must be a resolver');
+  assert.deepEqual(followCost({ list_id: LIST_ID, action: 'follow' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+  assert.deepEqual(followCost({ list_id: LIST_ID, action: 'unfollow' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+
+  const pinCost = xListPinSet.cost;
+  assert.ok(typeof pinCost === 'function', 'x_list_pin_set cost must be a resolver');
+  assert.deepEqual(pinCost({ list_id: LIST_ID, action: 'pin' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
+  assert.deepEqual(pinCost({ list_id: LIST_ID, action: 'unpin' }), {
+    class: 'w:action',
+    usd: LIST_MANAGE_USD,
+  });
 });
 
 test('POL-5: x_list_delete is standalone destructive:content — never behind an action enum', () => {

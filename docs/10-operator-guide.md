@@ -254,7 +254,7 @@ npx @modelcontextprotocol/inspector node /abs/path/to/x-mcp/build/src/index.js
 > credits — there is no free allowance to fall back on. An unattended agent left on a broad
 > preset can spend real money quickly. Set a budget.
 
-Indicative per-call prices (rates verified 2026-07-22; the authoritative table is
+Indicative per-call prices (rates verified 2026-09-28; the authoritative table is
 [01-api-landscape.md](01-api-landscape.md) §3):
 
 | Cost class | Price | Typical tools |
@@ -269,14 +269,14 @@ Indicative per-call prices (rates verified 2026-07-22; the authoritative table i
 | `w:post` | **$0.015 — $0.20** | `x_post_create` |
 | `w:dm` | $0.015 | `x_dm_send` |
 | `w:list` | $0.010 | `x_list_create` |
-| `w:action` | $0 (carried locally) | likes, reposts, bookmarks, follows, deletes — not separately priced on X's pricing page as of 2026-07-22 |
+| `w:action` | $0.005 — $0.015 (per operation) | likes, reposts, bookmarks, follows, mutes, blocks, list writes, post delete/hide-reply, archive counts, media alt-text — each priced individually; see [01-api-landscape.md](01-api-landscape.md) Appendix B for the full per-tool table |
 
 **The URL multiplier.** Since **2026-04-16** a post whose text contains a URL costs
 **$0.20** instead of $0.015 — **13×**. `x_post_create` resolves this dynamically and warns
 distinctly when the text carries a URL. A loop that posts links is the most expensive thing
 this server can do.
 
-**The platform read cap.** X caps post reads at **2,000,000 per month**, independent of
+**The platform read cap.** X caps post reads at **3,000,000 per month**, independent of
 credit balance. Hitting it returns a `billing` error with `platform_title:
 "UsageCapExceeded"` — not a rate limit, so no retry helps until the month renews.
 

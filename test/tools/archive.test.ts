@@ -14,6 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createHttpClient } from '../../src/api/http.js';
+import { COUNTS_ARCHIVE_USD } from '../../src/core/budget.js';
 import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
 import type { Registry } from '../../src/core/registry.js';
@@ -76,13 +77,22 @@ test('archiveTools exposes both P3 read:content tools with the expected axes (re
     // availability gate (pilot/premium-user/enterprise only) can never exclude them;
     // COST-1 (session credit budget) + COST-3 (per-call r:post cost) are the guard rails.
     assert.equal(tool.availability, 'app+user');
-    assert.equal(tool.cost, 'r:post');
     assert.equal(tool.phase, 3);
     assert.equal(tool.annotations.readOnlyHint, true);
     assert.equal(tool.annotations.openWorldHint, true);
   }
+  // x_search_archive stays a flat r:post class; x_post_counts_archive now prices per call
+  // (Counts: All, $0.010 — docs/01 App. B), so its cost is a resolver instead.
+  assert.equal(xSearchArchive.cost, 'r:post');
+  assert.equal(typeof xPostCountsArchive.cost, 'function');
   assert.deepEqual([...xSearchArchive.scopes], ['tweet.read', 'users.read']);
   assert.deepEqual([...xPostCountsArchive.scopes], ['tweet.read']);
+});
+
+test('x_post_counts_archive prices at Counts: All ($0.010/call, docs/01 App. B)', () => {
+  const cost = xPostCountsArchive.cost;
+  assert.ok(typeof cost === 'function', 'x_post_counts_archive cost must be a resolver');
+  assert.deepEqual(cost({ query: 'x' }), { class: 'r:post', usd: COUNTS_ARCHIVE_USD });
 });
 
 test('x_search_archive: happy path renders a compact page with @handles and next_token', async () => {
