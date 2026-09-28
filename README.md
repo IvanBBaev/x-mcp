@@ -358,13 +358,16 @@ DM reads return ids, timestamps and participants only; message bodies require an
 
 ## Resources
 
-MCP resources are **planned** — a read-only exposure of the resolved auth context and live
-rate-limit table as addressable resources. Not shipped.
+Not part of 1.0, and not a committed roadmap item. The server's declared capabilities are
+exactly `{"tools":{}}` — no `resources` (see [`docs/13-compatibility.md`](docs/13-compatibility.md)
+§2). Exposing read-only state (e.g. auth context, rate-limit table) as addressable resources
+is at most a post-1.0 exploratory idea, evaluated only if a real use case emerges.
 
 ## Prompts
 
-MCP prompts are **planned** — guided templates for common workflows (e.g. cost-aware
-posting, audience research). Not shipped.
+Not part of 1.0. MCP prompts are an unordered, post-1.0 exploratory candidate — packaged
+templates for common workflows (e.g. draft-thread-from-notes, daily mentions triage) — that
+enters the roadmap only with a real use case, not on a schedule.
 
 ## Project structure
 

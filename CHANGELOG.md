@@ -22,6 +22,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- README no longer calls MCP resources and prompts "planned". Neither is a committed
+  roadmap item — the server's declared capabilities are exactly `{"tools":{}}` (no
+  `resources`, no `prompts`; see `docs/13-compatibility.md` §2), and both are at most
+  unordered, post-1.0 exploratory candidates (`docs/08-implementation-roadmap.md`
+  Phase 4) that enter only with a real use case, not on a schedule.
+
 - `tools/list` is about 1.5 KB smaller. Redundant wording in tool and parameter
   descriptions — restatements of limits the schema already carries, and of what a
   parameter's own description already says — was tightened. No tool, parameter,
