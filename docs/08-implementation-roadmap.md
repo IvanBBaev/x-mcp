@@ -235,12 +235,16 @@ above; this is the single list to walk before tagging:
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
-      probe-verified** — re-probed 2026-09-26 at the 42-tool surface (§4.5.1): 42 tools
+      probe-verified** — re-probed 2026-10-01 at the 42-tool surface (§4.5.1): 42 tools
       all carrying `outputSchema` and `annotations`, 21 marked disabled under `read-only`,
       a `tools/call` denial that names the cell and no environment variable, and a
-      serialized payload byte-identical to what `gate:context` reports (79,987 B). The
-      other three rows need a GUI client a human has to drive; every one of them is
-      labelled `unverified` on that page rather than assumed working.*
+      serialized payload byte-identical to what `gate:context` reports (78,434 B).
+      **Claude Code is probe-verified headlessly** — `claude -p --strict-mcp-config
+      --mcp-config` on 2.1.285, 2026-10-01 (§4.2.1): all 42 tools registered, env arrived,
+      `x_post_create` refused with the typed `policy` error; `structuredContent`,
+      cancellation and the interactive client stay expectations. Claude Desktop and every
+      third-party client remain `unverified` — they need a GUI a human has to drive, and
+      no headless third-party MCP host was installed on the authoring machine.*
 - [ ] Scenario suite (walkthroughs A–C) green; ≥ 1 week dogfood without a P1 issue.
       *Scenario half first verified 2026-08-08; re-run 2026-08-30 as part of the delta
       audit — `node --test "build/test/scenarios/*.test.js"` → **13 tests, 13 pass,
