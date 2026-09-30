@@ -460,7 +460,13 @@ X-F4; cases COST-1…7):
   failure — **stays charged**, which is the honest accounting for requests the platform
   already served. A call the local rate-limit preflight refuses (RATE-2) never reaches the
   API and is **never charged**: the preflight runs before the budget check, in the same
-  synchronous stretch, so CONC-2's no-await window is unchanged. The post-handler step is then a *settlement*: it moves the ledger by the
+  synchronous stretch, so CONC-2's no-await window is unchanged. Nor is a handler that
+  refuses locally before sending its first request — `x_media_upload`'s path-security
+  battery (MEDIA-5) needs the filesystem, so it cannot move into the schema: the registry
+  tracks whether the handler ever handed a request to its invoker and, if it did not,
+  releases the reservation (the gate settles it to $0). The full price was held for the
+  whole handler run, so a `hard` budget still never under-counts; once any request has
+  been handed off, the call stays charged. The post-handler step is then a *settlement*: it moves the ledger by the
   difference between the one resource held at check time and what the response actually
   carried. Settlement never throws, in either mode — the resources have been delivered and
   cannot be un-returned, so a `hard`-mode settle past the cap attaches a warning saying so

@@ -91,3 +91,25 @@ test('the settled call stays charged even when the handler later fails (INT-2)',
   // …handler throws; the registry never reaches step 6.
   assert.equal(budget.total(), 0.005);
 });
+
+test('RATE-2/CONC-2: release hands back exactly the held reservation, by the difference', () => {
+  // The registry calls `release` when a handler refused before sending any request. The
+  // ledger moves by minus what THIS call held, so a reservation another call took in
+  // between is untouched (CONC-2).
+  const budget = createSessionBudget({ limit: 1, mode: 'hard' });
+  const gate = createBudgetGate(budget);
+  const refused: CostEstimate = { class: 'w:action', usd: 0.005 };
+  const other: CostEstimate = { class: 'r:user' };
+
+  gate.check(refused);
+  gate.check(other);
+  assert.equal(budget.total(), 0.015);
+
+  gate.release(refused);
+  assert.equal(budget.total(), 0.01); // only the refused call's hold came back
+
+  // A second release, or a release of an estimate never checked, moves nothing.
+  gate.release(refused);
+  gate.release({ class: 'r:post' });
+  assert.equal(budget.total(), 0.01);
+});

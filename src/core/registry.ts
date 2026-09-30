@@ -86,6 +86,15 @@ export interface BudgetReservation {
 export interface BudgetGate {
   check(estimate: CostEstimate): void;
   reserve(estimate: CostEstimate, units?: number): BudgetReservation;
+  /**
+   * Hand back the reservation `check` took for a call whose handler failed BEFORE it sent a
+   * single request through its invoker — a local refusal the platform never saw (a media
+   * path outside the media directory, a symlink, an oversized file, a cancellation before
+   * the first request). The registry calls it instead of step 6, never in addition to it.
+   * Optional: a gate that charges at `reserve` took nothing at `check`, so it has nothing
+   * to hand back.
+   */
+  release?(estimate: CostEstimate): void;
 }
 
 /**
@@ -265,7 +274,25 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     deps.budget.check(estimate);
 
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
-    const output = await invokeHandler(tool, input, buildToolContext(ctx), ctx.signal);
+    //     A handler that throws BEFORE its first request left through the invoker refused
+    //     the call locally, after step 4 had already charged it. Schema refinements cover
+    //     every refusal that is a pure function of the input, but some are not: media's
+    //     path-security battery (MEDIA-5) has to realpath/open/stat the file. So the
+    //     reservation is handed back here, which keeps "a local refusal is never charged"
+    //     true for those too (as for RATE-2). This cannot under-count, even in `hard`
+    //     mode: the full reservation was held for the whole handler run (CONC-2), and a
+    //     call that sent nothing cost nothing on the platform. Once any request has been
+    //     handed to the invoker the call stays charged, whatever fails afterwards —
+    //     whether it reached X is then unknowable from here, and over-counting is the safe
+    //     side of an advisory budget.
+    const invoker = trackSends(ctx.http);
+    let output: ToolOutput;
+    try {
+      output = await invokeHandler(tool, input, buildToolContext(ctx, invoker.http), ctx.signal);
+    } catch (err) {
+      if (!invoker.sent()) deps.budget.release?.(estimate);
+      throw err;
+    }
 
     // (6) settle the credit cost against what the response actually carried (COST-3).
     //     WHO CHARGES, AND WHEN: the shipped gate takes the money at step 4's `check`
@@ -323,11 +350,29 @@ export function withCallSignal(inner: EndpointInvoker, signal: AbortSignal): End
   };
 }
 
+/**
+ * Wrap the call's invoker so the pipeline can tell whether the handler sent ANY request.
+ * The flag flips when `send` is entered, before the request is built or awaited, so a
+ * request that fails in transport (or is cancelled mid-flight) still counts as sent.
+ */
+function trackSends(inner: EndpointInvoker): { http: EndpointInvoker; sent: () => boolean } {
+  let sent = false;
+  return {
+    http: {
+      send<T>(req: XApiRequest): Promise<T> {
+        sent = true;
+        return inner.send<T>(req);
+      },
+    },
+    sent: () => sent,
+  };
+}
+
 /** Thread ports + the (cancellation-bound) invoker + the signal itself into a ToolContext. */
-function buildToolContext(ctx: CallContext): ToolContext {
+function buildToolContext(ctx: CallContext, http: EndpointInvoker): ToolContext {
   return ctx.signal === undefined
-    ? { ports: ctx.ports, http: ctx.http }
-    : { ports: ctx.ports, http: withCallSignal(ctx.http, ctx.signal), signal: ctx.signal };
+    ? { ports: ctx.ports, http }
+    : { ports: ctx.ports, http: withCallSignal(http, ctx.signal), signal: ctx.signal };
 }
 
 /**

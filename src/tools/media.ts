@@ -555,6 +555,11 @@ function buildUploadTool(deps: MediaToolDeps) {
     // that refusal is local and never reaches the wire, so it must price at $0 like any
     // other local refusal (mirrors the `mediaDir` check in `openMediaFile` above) — an
     // advisory budget must never charge for a call the server itself never attempted.
+    // The rest of the local refusals (unsupported extension, a path outside the media
+    // directory, a symlink, an empty/oversized/mislabelled file) need the filesystem, so they
+    // cannot move into the schema and cannot price the check at $0 up front. The full price
+    // is reserved instead — an upper bound, so a `hard` budget can never under-count — and
+    // the registry hands it back when the handler throws before its first request (MEDIA-5).
     cost: (input) =>
       input.alt_text !== undefined && deps.mediaDir !== undefined && deps.mediaDir.trim() !== ''
         ? { class: 'w:action', usd: MEDIA_METADATA_USD }

@@ -36,7 +36,9 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  * Consequence (mandated by INT-2): a call that fails AFTER the check (handler error, a 429
  * from X) stays charged — the API attempt was paid for, so charge-at-check is the honest
  * accounting. A local rate-limit refusal (RATE-2) is NOT charged: the registry runs that
- * preflight before `check`, and no request leaves the process. The registry's post-handler `reserve` becomes a read-back here.
+ * preflight before `check`, and no request leaves the process. Nor is a handler that
+ * refuses locally before sending its first request (MEDIA-5's path battery): the registry
+ * calls `release`, which settles the held reservation to $0. The registry's post-handler `reserve` becomes a read-back here.
  *
  * SETTLEMENT (COST-3): the check-time reservation prices ONE resource, because how many
  * the response will carry is unknowable before it arrives. When the handler reports a real
@@ -45,7 +47,9 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  * budget that the settled price pushes past the cap reports a warning rather than failing a
  * call whose resources the platform has already delivered (the money is spent either way).
  */
-export function createBudgetGate(budget: SessionBudget): BudgetGate {
+export function createBudgetGate(
+  budget: SessionBudget,
+): BudgetGate & { release(estimate: CostEstimate): void } {
   const reserved = new WeakMap<CostEstimate, BudgetReservation>();
   return {
     check(estimate) {
@@ -61,6 +65,14 @@ export function createBudgetGate(budget: SessionBudget): BudgetGate {
       // Defensive: unreachable through the registry pipeline (check always precedes
       // reserve); if a future caller skips check, charge now so nothing rides free.
       return budget.reserve(units === undefined ? estimate : { ...estimate, units });
+    },
+    release(estimate) {
+      const meta = reserved.get(estimate);
+      if (meta === undefined) return;
+      reserved.delete(estimate);
+      // Settle to the $0 `local` price: the ledger moves by minus exactly what this call
+      // held, never by overwriting a total another call moved in between (CONC-2).
+      budget.settle(meta, 'local');
     },
   };
 }

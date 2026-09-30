@@ -19,7 +19,13 @@ import type {
   RateLimitGate,
   RegistryDeps,
 } from '../../src/core/registry.js';
-import { XError, budgetError, policyError, rateLimitError } from '../../src/core/errors.js';
+import {
+  XError,
+  budgetError,
+  policyError,
+  rateLimitError,
+  validationError,
+} from '../../src/core/errors.js';
 import type {
   AnyToolDef,
   CostEstimate,
@@ -561,15 +567,16 @@ test('MCP-7: the call signal is bound to the invoker — EVERY request a handler
   assert.deepEqual(sent[3]?.scopes, ['media.write']);
 });
 
-test('MCP-7: a call with no host signal gets the raw invoker back — zero wrapping, no signal on the wire', async () => {
+test('MCP-7: a call with no host signal passes its requests through unchanged — no signal on the wire', async () => {
+  // The handler's invoker is a thin send-tracking wrapper (so a refusal before the first
+  // request can hand its reservation back), never a signal binding: with no host signal
+  // the request reaches the transport exactly as the handler built it.
   const sent: XApiRequest[] = [];
   const raw = recordingHttp(sent);
-  let seenHttp: EndpointInvoker | undefined;
   const tool = makeTool({
     name: 'x_post_get',
     policy: 'read:content',
     handler: async (_input, ctx) => {
-      seenHttp = ctx.http;
       await ctx.http.send({ method: 'GET', path: '/2/tweets/1' });
       return { data: { ok: true } };
     },
@@ -578,7 +585,7 @@ test('MCP-7: a call with no host signal gets the raw invoker back — zero wrapp
   const reg = createRegistry([tool], deps());
   await reg.call('x_post_get', {}, callCtx({ http: raw }));
 
-  assert.equal(seenHttp, raw); // identity: nothing to bind, so nothing is wrapped
+  assert.deepEqual(sent, [{ method: 'GET', path: '/2/tweets/1' }]);
   assert.equal(sent[0]?.signal, undefined);
 });
 
@@ -784,4 +791,72 @@ test('COST-3: a zero count is forwarded verbatim, so an empty page bills nothing
   const reg = createRegistry([tool], deps({ budget }));
   await reg.call('x_post_search', {}, callCtx());
   assert.equal(seen, 0);
+});
+
+test('RATE-2/COST-3: a handler that refuses before its first request has its reservation released', async () => {
+  // The shipped gate charges at `check` (step 4). A handler refusal that needs the
+  // filesystem (MEDIA-5) cannot move into the schema, so the pipeline hands the
+  // reservation back when no request ever left through the invoker.
+  const seen: string[] = [];
+  const tool = makeTool({
+    name: 'x_media_upload',
+    policy: 'write:content',
+    handler: () => Promise.reject(validationError('Path outside the media directory.')),
+  });
+  const budget: BudgetGate = {
+    check: () => {
+      seen.push('check');
+    },
+    reserve: () => {
+      seen.push('reserve');
+      return { cost_usd: 0.005, session_total_usd: 0.005 };
+    },
+    release: () => {
+      seen.push('release');
+    },
+  };
+
+  const reg = createRegistry([tool], deps({ budget }));
+  const err = await rejected(reg.call('x_media_upload', {}, callCtx()));
+  assert.equal(err.kind, 'validation'); // the handler's own error, unchanged
+  assert.deepEqual(seen, ['check', 'release']); // released instead of settled, never both
+});
+
+test('RATE-2/COST-3: once a request was handed to the invoker, a failing call stays charged', async () => {
+  // `fakeHttp` rejects every send: the request "left" and failed in transport, so whether
+  // it reached X is unknowable here — the reservation is kept (over-count, never under).
+  const seen: string[] = [];
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    handler: async (_input, ctx) => {
+      await ctx.http.send({ method: 'GET', path: '/2/tweets' });
+      return { data: {} };
+    },
+  });
+  const budget: BudgetGate = {
+    check: () => {
+      seen.push('check');
+    },
+    reserve: () => ({ cost_usd: 0.005, session_total_usd: 0.005 }),
+    release: () => {
+      seen.push('release');
+    },
+  };
+
+  const reg = createRegistry([tool], deps({ budget }));
+  await rejected(reg.call('x_post_get', {}, callCtx()));
+  assert.deepEqual(seen, ['check']);
+});
+
+test('RATE-2/COST-3: a gate without `release` still surfaces a local handler refusal unchanged', async () => {
+  // `release` is optional: a gate that charges at `reserve` took nothing to hand back.
+  const tool = makeTool({
+    name: 'x_post_get',
+    policy: 'read:content',
+    handler: () => Promise.reject(validationError('Refused locally.')),
+  });
+  const reg = createRegistry([tool], deps());
+  const err = await rejected(reg.call('x_post_get', {}, callCtx()));
+  assert.equal(err.kind, 'validation');
 });
