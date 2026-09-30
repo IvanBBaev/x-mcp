@@ -34,8 +34,11 @@ import { basename, join, parse, sep } from 'node:path';
 import { MEDIA_SEGMENT_BYTES, MEDIA_SIZE_CAPS } from '../../src/api/endpoints/media.js';
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
-import { XError, networkError } from '../../src/core/errors.js';
-import { withCallSignal } from '../../src/core/registry.js';
+import { MEDIA_METADATA_USD, createSessionBudget } from '../../src/core/budget.js';
+import type { SessionBudget } from '../../src/core/budget.js';
+import { XError, apiError, networkError } from '../../src/core/errors.js';
+import { createRegistry, withCallSignal } from '../../src/core/registry.js';
+import type { CallContext, Registry } from '../../src/core/registry.js';
 import type { EndpointInvoker, ToolContext, XApiRequest } from '../../src/core/tooldef.js';
 import {
   createMediaTools,
@@ -45,6 +48,7 @@ import {
   xMediaStatus,
   xMediaUpload,
 } from '../../src/tools/media.js';
+import { createBudgetGate } from '../../src/mcp/gates.js';
 import type { MediaUploadProgress } from '../../src/tools/media.js';
 
 import { loadFixture, makePorts, mockHttp } from '../helpers/index.js';
@@ -189,9 +193,11 @@ test('MEDIA-3: mediaTools exposes upload + status as SEPARATE tools with catalog
     assert.equal(tool.annotations.openWorldHint, true);
     assert.equal(tool.annotations.destructiveHint, false);
   }
-  // Upload is a paid content write; re-running it uploads (and bills) again.
+  // Upload is a paid content write; re-running it uploads (and bills) again. The upload
+  // itself is $0, but requesting `alt_text` prices a Media Metadata call (docs/01 App. B),
+  // so cost is a resolver rather than a flat class string.
   assert.equal(xMediaUpload.policy, 'write:content');
-  assert.equal(xMediaUpload.cost, 'w:action');
+  assert.equal(typeof xMediaUpload.cost, 'function');
   assert.equal(xMediaUpload.annotations.readOnlyHint, false);
   assert.equal(xMediaUpload.annotations.idempotentHint, false);
   // Status is a cheap read-only poll.
@@ -204,9 +210,48 @@ test('MEDIA-3: mediaTools exposes upload + status as SEPARATE tools with catalog
   assert.equal(boundStatus, xMediaStatus);
   assert.equal(boundUpload.name, xMediaUpload.name);
   assert.equal(boundUpload.policy, xMediaUpload.policy);
-  assert.equal(boundUpload.cost, xMediaUpload.cost);
+  // Each createMediaTools() call builds its own resolver closure, so the two `cost`
+  // functions are distinct references — assert behavioral equivalence instead, EXCEPT for
+  // alt_text: the unbound (default-deny) instance never reaches the wire, so it must always
+  // price $0 there, while the bound instance prices Media Metadata like a real attempt.
+  assert.equal(typeof boundUpload.cost, 'function');
+  const boundCost = boundUpload.cost;
+  const originalCost = xMediaUpload.cost;
+  assert.ok(typeof boundCost === 'function', 'bound x_media_upload cost must be a resolver');
+  assert.ok(typeof originalCost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(boundCost({ path: 'a.png' }), originalCost({ path: 'a.png' }));
+  assert.deepEqual(boundCost({ path: 'a.png', alt_text: 'a cat' }), {
+    class: 'w:action',
+    usd: MEDIA_METADATA_USD,
+  });
+  assert.deepEqual(originalCost({ path: 'a.png', alt_text: 'a cat' }), {
+    class: 'w:action',
+    usd: 0,
+  });
   assert.equal(boundUpload.availability, xMediaUpload.availability);
   assert.deepEqual(boundUpload.annotations, xMediaUpload.annotations);
+});
+
+test('x_media_upload prices $0 without alt_text, Media Metadata ($0.005) with it set (docs/01 App. B)', () => {
+  const [bound] = createMediaTools({ mediaDir: tmpRoot });
+  const cost = bound.cost;
+  assert.ok(typeof cost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(cost({ path: 'a.png' }), { class: 'w:action', usd: 0 });
+  assert.deepEqual(cost({ path: 'a.png', alt_text: 'a cat on a windowsill' }), {
+    class: 'w:action',
+    usd: MEDIA_METADATA_USD,
+  });
+});
+
+test('x_media_upload prices $0 even with alt_text when default-denied (MEDIA-5, no media dir bound)', () => {
+  // The unbound module-level instance never reaches the wire, so it must never charge —
+  // an advisory budget must never count a call the server itself refused locally.
+  const cost = xMediaUpload.cost;
+  assert.ok(typeof cost === 'function', 'x_media_upload cost must be a resolver');
+  assert.deepEqual(cost({ path: 'a.png', alt_text: 'a cat on a windowsill' }), {
+    class: 'w:action',
+    usd: 0,
+  });
 });
 
 // --- x_media_upload happy paths ---------------------------------------------------
@@ -862,7 +907,9 @@ test(
     assert.ok(warnings.length <= 1, `expected at most one warning, got ${String(warnings.length)}`);
     if (process.platform !== 'win32') {
       assert.equal(warnings.length, 1);
-      assert.match(warnings[0] ?? '', /O_NOFOLLOW is unavailable/);
+      // This test injects its own `warn` port, so it captures the raw message text —
+      // JSON-wrapping happens only at the DEFAULT sink (media-nofollow.test.ts covers that).
+      assert.match(warnings[0] ?? '', /^O_NOFOLLOW is unavailable/);
       assert.match(warnings[0] ?? '', /PLAT-2/);
     }
     // A regular file still opens through the same fallback path.
@@ -1756,6 +1803,152 @@ test('status: an in-progress state WITHOUT check_after_secs states the state and
     progress_percent: 10,
   });
   assert.equal(out.summary, 'Media 7203 processing state: in_progress.');
+  mock.assertDone();
+  await mock.close();
+});
+
+// --- Budget: a local refusal is never charged (MEDIA-5, COST-3) -----------------------
+
+/**
+ * The bound upload tool behind the REAL pipeline and the REAL shipped budget gate (charge
+ * at check, settle/release afterwards), under a `hard` session budget. Policy and the
+ * rate-limit preflight are permissive; only the budget is under test.
+ */
+function budgetedUpload(limit = 1): { reg: Registry; budget: SessionBudget } {
+  const budget = createSessionBudget({ limit, mode: 'hard' });
+  const reg = createRegistry([upload], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: createBudgetGate(budget),
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budget };
+}
+
+/** A call context whose invoker fails loudly — no refusal below may reach the network. */
+function noHttpCall(): CallContext {
+  return {
+    ports: makePorts(),
+    http: { send: () => Promise.reject(new Error('a local refusal must not reach the network')) },
+  };
+}
+
+test('MEDIA-5/COST-3: an upload with alt_text refused locally leaves the session total unchanged', async () => {
+  // Every one of these is refused by the handler's filesystem battery, AFTER step 4 has
+  // reserved the $0.005 Media Metadata price and BEFORE the first request. The registry
+  // hands the reservation back, so none of them is charged.
+  const outsidePath = join(outsideRoot, 'budget-secret.png');
+  writeFileSync(outsidePath, mediaBytes('png', 12));
+  const refusals: readonly [string, RegExp][] = [
+    [outsidePath, /resolves outside the configured media directory/],
+    [join('..', basename(outsideRoot), 'budget-secret.png'), /resolves outside/],
+    [tempFile('budget-notes.txt', 'not media'), /Unsupported media file extension/],
+    [join(tmpRoot, 'budget-missing.png'), /Cannot open media file/],
+    [tempFile('budget-empty.png', Buffer.alloc(0)), /empty \(0 bytes\)/],
+    [tempFile('budget-fake.png', mediaBytes('jpeg', 12)), /its content is image\/jpeg/],
+    [sparseFile('budget-huge.png', 'png', MEDIA_SIZE_CAPS.tweet_image + 1), /cap/],
+  ];
+  const { reg, budget } = budgetedUpload();
+  for (const [path, message] of refusals) {
+    await assert.rejects(
+      () => reg.call('x_media_upload', { path, alt_text: 'A red panda.' }, noHttpCall()),
+      (err: unknown) => {
+        assert.ok(XError.is(err));
+        assert.equal(err.kind, 'validation');
+        assert.match(err.message, message);
+        return true;
+      },
+    );
+    assert.equal(budget.total(), 0, `refusing ${path} must not be charged`);
+  }
+  rmSync(join(tmpRoot, 'budget-huge.png'), { force: true });
+});
+
+test(
+  'MEDIA-5/COST-3: a symlink escape with alt_text is refused and not charged',
+  { skip: symlinkSkip },
+  async () => {
+    const outsidePath = join(outsideRoot, 'budget-linked.png');
+    writeFileSync(outsidePath, mediaBytes('png', 12));
+    const link = join(tmpRoot, 'budget-escape.png');
+    symlinkSync(outsidePath, link);
+    const { reg, budget } = budgetedUpload();
+    await assert.rejects(
+      () => reg.call('x_media_upload', { path: link, alt_text: 'A red panda.' }, noHttpCall()),
+      (err: unknown) => {
+        assert.ok(XError.is(err));
+        assert.equal(err.kind, 'validation');
+        assert.match(err.message, /symlink/);
+        return true;
+      },
+    );
+    assert.equal(budget.total(), 0);
+  },
+);
+
+test('MEDIA-7/COST-3: an alt_text upload cancelled between the file open and INIT is not charged', async () => {
+  // The pipeline runs synchronously up to the handler's first await (the file open), so an
+  // abort issued right after the call starts lands in the handler's pre-INIT check: the
+  // call is refused before any request and the reservation comes back.
+  const path = tempFile('budget-cancel.png', mediaBytes('png', 12));
+  const controller = new AbortController();
+  const { reg, budget } = budgetedUpload();
+  const call = reg.call(
+    'x_media_upload',
+    { path, alt_text: 'A red panda.' },
+    { ...noHttpCall(), signal: controller.signal },
+  );
+  controller.abort();
+  await assert.rejects(call, (err: unknown) => {
+    assert.ok(XError.is(err));
+    assert.equal(err.kind, 'network');
+    assert.match(err.message, /No upload session had been opened yet/);
+    return true;
+  });
+  assert.equal(budget.total(), 0);
+});
+
+test('COST-1/MEDIA-5: a hard budget still holds the full alt_text price while the upload runs', async () => {
+  // The refund comes only AFTER the handler: during the call the reservation is the full
+  // $0.005 upper bound, so a hard budget below it refuses up front and never under-counts.
+  const path = tempFile('budget-tight.png', mediaBytes('png', 12));
+  const { reg, budget } = budgetedUpload(MEDIA_METADATA_USD / 2);
+  await assert.rejects(
+    () => reg.call('x_media_upload', { path, alt_text: 'A red panda.' }, noHttpCall()),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'budget');
+      return true;
+    },
+  );
+  assert.equal(budget.total(), 0);
+});
+
+test('COST-3: an alt_text upload that reached X stays charged even when X refuses it', async () => {
+  // The boundary of the refund: once INIT was sent, the call reached the platform and
+  // keeps its Media Metadata reservation, as any failed-but-attempted call does.
+  const path = tempFile('budget-limited.png', mediaBytes('png', 12));
+  const fx = loadFixture<ErrorFixture>('errors/429-rate-limit.json');
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/media/upload/initialize', method: 'POST' })
+    .reply(fx.status, fx.body as Record<string, unknown>, { headers: fx.headers });
+  const { reg, budget } = budgetedUpload();
+  const { ports, http } = contextFor(mock);
+
+  await assert.rejects(
+    () => reg.call('x_media_upload', { path, alt_text: 'A red panda.' }, { ports, http }),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'rate-limit');
+      return true;
+    },
+  );
+  assert.equal(budget.total(), MEDIA_METADATA_USD);
   mock.assertDone();
   await mock.close();
 });

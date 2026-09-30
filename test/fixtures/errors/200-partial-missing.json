@@ -1,5 +1,5 @@
 {
-  "_provenance": "X API v2 HTTP-200 batch lookup (GET /2/tweets?ids=...) that partially failed: one found post in `data`, and an `errors[]` array carrying a deleted/not-found post, a suspended author, and a protected (not-authorized) post. One `detail` is seeded with a fake secret sentinel to prove `collectMissing` never surfaces raw platform prose (REND-7). Source: docs.x.com/x-api/fundamentals/errors partial-response shape. Captured 2026-07-23. Exercises: REND-2 partial-failure missing[] contract (found items + reasons, NOT a thrown error), REND-7.",
+  "_provenance": "X API v2 HTTP-200 batch lookup (GET /2/tweets?ids=...) that partially failed: one found post in `data`, and an `errors[]` array carrying a deleted/not-found post, a suspended author, and a protected (not-authorized) post. One `detail` is seeded with a fake secret sentinel to prove `renderMissing` never surfaces raw platform prose (REND-7). Source: docs.x.com/x-api/fundamentals/errors partial-response shape. Captured 2026-07-23. Exercises: REND-2 partial-failure missing[] contract (found items + reasons, NOT a thrown error), REND-7.",
   "status": 200,
   "headers": { "content-type": "application/json; charset=utf-8" },
   "body": {

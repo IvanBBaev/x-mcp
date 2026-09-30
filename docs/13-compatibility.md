@@ -12,9 +12,9 @@ kind of document that gets an operator stuck at 2 a.m. Companion pages:
 > Desktop, VS Code, Cursor, Zed and Continue.dev were **not** run against this server. The
 > rows for those clients describe an expectation derived from the protocol surface plus
 > each client's published configuration format — nothing more. The one exception is
-> Claude Code: its **headless CLI** (`claude -p`, 2.1.251) was run against the built
-> server on 2026-08-31 — see §4.2.1 — but its interactive client was not; the cells only
-> a GUI can show stay expectations. Section 7 is the checklist that turns the remaining
+> Claude Code: its **headless CLI** (`claude -p`) was run against the built server on
+> 2026-08-31 (2.1.251) and again on 2026-10-01 (2.1.285) — see §4.2.1 — but its
+> interactive client was not; the cells only a GUI can show stay expectations. Section 7 is the checklist that turns the remaining
 > rows into observations.
 
 ## 1. Evidence vocabulary
@@ -48,7 +48,7 @@ independently of any client.
 | Protocol version | Echoes the client's request when it is one of `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`, `2024-10-07`. An unrecognised version falls back to `2025-11-25`. | `probe-verified` (§7.1 reproduces it) |
 | Capabilities | Exactly `{"tools":{}}`. No `listChanged`, no resources, prompts, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts:61`](../src/mcp/server.ts), [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
 | `instructions` | 944 characters returned on `initialize`. | `protocol-verified` — [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
-| `tools/list` | 41 tools, delivered in one response (~78 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:123`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
+| `tools/list` | 42 tools, delivered in one response (78,434 B), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:129`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
 | `tools/call` success | `content[0]` is a JSON text block **and** `structuredContent` is the same object. | `protocol-verified` — [`test/mcp/structured.test.ts:134`](../test/mcp/structured.test.ts) |
 | `tools/call` failure | Text-only result with `isError: true`. No `structuredContent` — deliberate, since the spec exempts error results from `outputSchema` conformance. | `protocol-verified` — [`test/mcp/server.test.ts:300`](../test/mcp/server.test.ts) |
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
@@ -71,10 +71,10 @@ is fixed at startup.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|---|
 | **Reference SDK `Client`** (`@modelcontextprotocol/sdk` 1.30.0) | yes | yes | yes | yes | yes | yes | yes | `protocol-verified` | The baseline the test suite speaks. If something breaks here, CI is red. |
 | **Raw stdio JSON-RPC host** (hand-written frames) | yes | yes | yes | yes | yes | exp | yes | `probe-verified` | Lowest common denominator. See the stdin caveat in §7.4. |
-| **MCP Inspector 2.1.0 — `--cli`** | yes | yes | yes | yes | yes | exp | n/a | `probe-verified` | Returned 41 tools, 41 with `outputSchema`, 41 with `annotations`; rendered a policy refusal for `x_post_create` under `read-only`. CLI mode does not display `instructions`. Re-probed 2026-08-09 at the 41-tool surface — see §4.5.1. |
+| **MCP Inspector 2.1.0 — `--cli`** | yes | yes | yes | yes | yes | exp | n/a | `probe-verified` | Returned 42 tools, 42 with `outputSchema`, 42 with `annotations`; rendered a policy refusal for `x_post_create` under `read-only`. CLI mode does not display `instructions`. Re-probed 2026-10-01 at the 78,434 B surface — see §4.5.1. |
 | **MCP Inspector 2.1.0 — GUI** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Same binary as the row above, different front end. Not launched — no browser in this environment. |
 | **Claude Desktop** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Config format matches [10-operator-guide §4.1](10-operator-guide.md). Not launched. |
-| **Claude Code 2.1.251** | yes | yes | yes | yes | exp | exp | yes | `probe-verified` (headless CLI) | Probed 2026-08-31 on macOS via `claude -p --mcp-config --strict-mcp-config` — see §4.2.1. Env arrived (`x_auth_status` echoed `app-only` + `read-only`); 41 `mcp__x__*` tools registered; `x_rate_limit_status` succeeded; `x_post_create` refused with the typed `policy` error and no post; `instructions` surfaced without a tool call. 2.1.251 defers MCP tool schemas behind an in-client ToolSearch step. `structuredContent` and cancellation are not observable headlessly — those cells stay `exp`, and the interactive client was not run. |
+| **Claude Code 2.1.285** | yes | yes | yes | yes | exp | exp | yes | `probe-verified` (headless CLI) | Probed 2026-08-31 (2.1.251) and re-probed 2026-10-01 (2.1.285) on macOS via `claude -p --mcp-config --strict-mcp-config` — see §4.2.1. Env arrived (`x_auth_status` echoed `app-only` + `read-only`); all 42 `mcp__x__*` tools registered (41 at the 2026-08-31 probe, before `x_thread_create`); `x_rate_limit_status` succeeded; `x_post_create` refused with the typed `policy` error and no post; `instructions` surfaced without a tool call. Both versions defer MCP tool schemas behind an in-client ToolSearch step. `structuredContent` and cancellation are not observable headlessly — those cells stay `exp`, and the interactive client was not run. |
 | **VS Code** (Copilot agent mode) | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Needs `"type": "stdio"`; supports `inputs` prompts for secrets — see [10-operator-guide §4.3](10-operator-guide.md). Not launched. |
 | **Cursor** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Claude Desktop config shape — see [10-operator-guide §4.4](10-operator-guide.md). Not launched. |
 | **Zed** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Zed calls stdio MCP servers "context servers" and configures them under `context_servers` in `settings.json`. Format not confirmed against a running Zed. |
@@ -83,6 +83,15 @@ is fixed at startup.
 **Six rows are `unverified`.** They are, in matrix order: Inspector GUI, Claude Desktop,
 VS Code, Cursor, Zed, Continue.dev. Nothing on this page should be read as a statement
 that this server has been seen working inside any of them.
+
+**No third-party client is verified yet.** On 2026-10-01 the authoring machine was checked
+for a non-Anthropic MCP-capable CLI that could be pointed at a throwaway config without
+touching the operator's own configuration: `codex`, `goose`, `gemini`, `opencode`,
+`cursor-agent`, `mcphost`, `amp`, `aider`, `crush`, `qwen` and `cn` were all absent from
+`PATH`. Cursor and VS Code were installed only as GUI editors (their `cursor`/`code`
+launchers open a window; neither is a headless agent host). Nothing was installed to fill the
+gap, so the third-party rows stay `unverified` until someone drives one of those GUIs through
+§7.2.
 
 ## 4. Configuration snippets
 
@@ -186,6 +195,49 @@ tool-panel count. Those are the steps §7.2 still leaves to a human in interacti
 Code. The `claude mcp add` command in §4.2 was likewise not exercised — the probes passed
 the same JSON shape via `--mcp-config` instead.
 
+##### Re-probe at the 42-tool, 78,434 B surface (2026-10-01, Claude Code 2.1.285, macOS)
+
+Repeated after the description tightening cut `tools/list` to 78,434 B, with the same env
+(`app-only`, dummy `X_MCP_BEARER_TOKEN=AAAA`, `read-only`, `1.00`/`hard`, `silent`) in a
+throwaway `mcp-config.json` outside the repository — no `claude mcp add`, nothing written to
+the operator's Claude configuration — and the command run from that scratch directory. Two
+invocations:
+
+```bash
+claude -p "List the names of all tools from the x MCP server, one per line, and nothing else." \
+  --mcp-config mcp-config.json --strict-mcp-config \
+  --output-format stream-json --verbose
+
+claude -p "First call the x_auth_status tool and report the auth mode and policy preset. Then call x_post_create with text 'probe' exactly once and report the exact error kind, cell and message you get back. Do not retry." \
+  --mcp-config mcp-config.json --strict-mcp-config \
+  --allowedTools "mcp__x__x_auth_status" "mcp__x__x_post_create" \
+  --output-format stream-json --verbose
+```
+
+Observed:
+
+- **Tool exposure.** Both `init` events: `claude_code_version` `2.1.285`, the server as
+  `{"name":"x","status":"connected"}`, and exactly **42** `mcp__x__*` tools. The first run
+  answered with exactly 42 lines, `mcp__x__x_auth_status` through `mcp__x__x_user_search`,
+  without calling any tool — including `mcp__x__x_thread_create`, which the 2026-08-31 probe
+  predates. With `X_MCP_HIDE_DENIED` unset, the 21 tools the preset denies stayed registered.
+- **Env arrived.** `x_auth_status` → `"auth_mode":"app-only"`, `"token_store":"env"`,
+  `"policy":{"preset":"read-only", ...}` with exactly the `read:content`, `read:user`,
+  `read:account` and `read:social-graph` cells enabled.
+- **Policy refusal.** `x_post_create {"text":"probe"}` → a tool result with
+  `is_error: true` carrying
+  `{"kind":"policy","retryable":false,"fix":"operator","cell":"write:content"}` and the
+  message *"This operation is disabled by the active `read-only` policy (blocked cell
+  `write:content`). Enabling it is an operator decision made outside this session; see the
+  operator guide."* — no environment variable named, no post created. The model relayed the
+  kind, cell and message verbatim and did not retry.
+- **Deferred schemas, still.** Before calling either tool the model issued the client's own
+  `ToolSearch` (`select:mcp__x__x_auth_status,mcp__x__x_post_create`) to load their schemas —
+  the same deferral 2.1.251 showed.
+
+`structuredContent`, cancellation and the interactive tool-panel count remain unobservable
+headlessly; those cells are unchanged.
+
 ### 4.3 VS Code
 
 `.vscode/mcp.json` — note the `servers` map (not `mcpServers`) and the explicit `type`:
@@ -235,18 +287,20 @@ config-file selection and exits with `No servers found in config file` if the `-
 first. Put the `node <entry>` command immediately after `--cli`, then the `-e` pairs, then
 `--method`.
 
-#### 4.5.1 Re-probe at the 41-tool surface (2026-08-09, SDK 1.30.0)
+#### 4.5.1 Re-probe at the 42-tool surface (2026-09-26 and 2026-10-01, SDK 1.30.0, Inspector 2.1.0)
 
 The CLI probe is repeated whenever the tool surface or the SDK moves — most recently for the
-1.29.0 → 1.30.0 dependency-advisory bump (see §6) and again after `x_bookmarks_list` and
-`x_post_hide_reply` landed. Three calls: `tools/list`, `tools/call` on a denied tool, and
-`tools/call` on one of the new tools. All three held:
+1.29.0 → 1.30.0 dependency-advisory bump (see §6), again after `x_bookmarks_list` and
+`x_post_hide_reply` landed, and again after `x_thread_create` (Phase 3) landed and both it and
+`x_post_create` gained schema-level input validation ([reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md)
+§6). Three calls: `tools/list`, `tools/call` on a denied tool, and `tools/call` on one of the
+existing tools with a malformed argument. All three held:
 
-- `tools/list` → **41 tools, 41 with `outputSchema`, 41 with `annotations`**, and **20 with
+- `tools/list` → **42 tools, 42 with `outputSchema`, 42 with `annotations`**, and **21 with
   "(disabled by policy `read-only`)"** appended to the description — the exact complement of
   the 21 cells `read-only` allows, which is the denied-tools-stay-registered rule (§3.3 of
   [04-security.md](04-security.md)) observable from outside the process.
-- The serialized `tools/list` result measured **78,445 bytes** — byte-identical to what
+- The serialized `tools/list` result measured **79,987 bytes** — byte-identical to what
   `npm run gate:context` reports. Worth recording: it means the context gate measures the
   real wire payload rather than an approximation of it, so its 80 kB budget is a claim about
   what a client actually pays.
@@ -254,12 +308,38 @@ The CLI probe is repeated whenever the tool surface or the SDK moves — most re
   `{"kind":"policy","retryable":false,"fix":"operator","cell":"write:content"}` and the
   message *"…(blocked cell `write:content`). Enabling it is an operator decision made outside
   this session; see the operator guide."* **No environment variable is named** — the T-320 F2
-  contract confirmed end to end through a third-party client, not just in unit tests.
+  contract confirmed end to end through a third-party client, not just in unit tests. The probe
+  text (`text=probe`) passes the tool's own schema validation cleanly, so this is the policy
+  gate (pipeline step 2) denying an otherwise-valid call, not a validation error in disguise.
 - `tools/call x_post_hide_reply` with `--tool-arg reply_id=1` (a JSON number, not a string) →
-  a typed `validation` result naming the field: *"reply\_id: Expected string, received
-  number"*. Recorded because it is the failure mode a client most often produces by itself:
-  Inspector coerces bare digits to numbers, and the server rejects the coercion instead of
-  accepting it. An agent gets a `fix: "agent"` error it can act on, not a silent id mangle.
+  a typed `validation` result naming the field: *"reply_id: Invalid input: expected string,
+  received number"*. Recorded because it is the failure mode a client most often produces by
+  itself: Inspector coerces bare digits to numbers, and the server rejects the coercion instead
+  of accepting it. An agent gets a `fix: "agent"` error it can act on, not a silent id mangle.
+  (The exact wording tracks the installed Zod version — 4.5.4 at this probe, phrased as "Invalid
+  input: expected X, received Y" rather than the earlier "Expected X, received Y"; the field name
+  and the fact that it is a `validation` result, not a silent coercion, are the load-bearing part.)
+
+**2026-10-01 re-probe at 78,434 B.** Tightening redundant tool and parameter descriptions (no
+parameter, constraint or behaviour change) cut the payload from 79,987 B, so the same three
+calls were repeated against a fresh `npm run build`, with `-e X_MCP_POLICY=read-only` added to
+the §4.5 recipe to pin the preset explicitly:
+
+- `tools/list` → **42 tools, 42 with `outputSchema`, 42 with `annotations`, 21 with
+  "(disabled by policy `read-only`)"**, `nextCursor` absent — unchanged by the tightening.
+- The compact serialization of the result (`JSON.stringify`) measured **78,434 bytes**, again
+  byte-identical to `npm run gate:context` (`context-gate: PASS — 42 tools, 78434 B / 80000 B
+  budget`). The Inspector prints the result pretty-printed (156,750 B on stdout); the gate
+  figure is the compact wire form, which is what a client receives.
+- `tools/call x_post_create --tool-arg text=probe` → the identical `policy` result and
+  wording recorded above, `cell` `write:content`, no environment variable named.
+- `tools/call x_post_hide_reply --tool-arg reply_id=1 --tool-arg action=hide` → *"Invalid input
+  for "x_post_hide_reply": reply_id: Invalid input: expected string, received number"*,
+  `kind` `validation`, `fix` `agent`. (`action` is required as well; omitting it adds an
+  `action` issue to the same message.)
+- The Inspector CLI exits with status **5** whenever the tool result carries `isError: true`
+  — worth knowing before wiring these commands into a script that treats non-zero as a crash;
+  the JSON on stdout is still complete.
 
 ### 4.6 Zed and Continue.dev — `unverified`
 
@@ -303,7 +383,7 @@ likely to be mistaken for a server bug.
   what tells the model about presets, budgets and confirmation tokens. If a client ignores
   it, the model may attempt denied tools and get policy refusals it does not understand —
   a UX problem, not a correctness one.
-- **A large `tools/list` costs context.** 41 tools with descriptions is ~78 KB of JSON.
+- **A large `tools/list` costs context.** 42 tools with descriptions is ~78 KB of JSON.
   Clients that inject the whole tool list into the prompt will feel it. Use
   `X_MCP_HIDE_DENIED=1` with a narrow preset to shrink the list to the callable set.
 
@@ -347,7 +427,7 @@ console.log("tools",t.length,
 "| annotations",t.filter(x=>x.annotations).length);});'
 ```
 
-**Expected output, exactly:** `tools 41 | outputSchema 41 | annotations 41`.
+**Expected output, exactly:** `tools 42 | outputSchema 42 | annotations 42`.
 
 The `2>/dev/null` is required — npm deprecation warnings otherwise mix into the JSON.
 
@@ -369,7 +449,7 @@ auth error much later.
    to start with `X_MCP_AUTH_MODE must be set`, the client is not passing `env` — record
    **env passing: no** and stop for that client.
 3. **Prove `tools/list`.** Open the client's tool/MCP panel and count the tools it shows.
-   Expected: **41** (with `X_MCP_HIDE_DENIED` unset). Fewer means the client paginates,
+   Expected: **42** (with `X_MCP_HIDE_DENIED` unset). Fewer means the client paginates,
    caps, or filters the list — record the number in the Notes column; it is a real
    compatibility limit worth documenting.
 4. **Prove `tools/call`.** Ask for `x_rate_limit_status`. Expected: a successful result. No
@@ -391,7 +471,7 @@ auth error much later.
    `x_search_recent` with a broad query and a large `max_results` — and press the client's
    stop/interrupt control. Expected: the call rejects promptly (well under a second in the
    in-repo probe, versus a 60 s upstream delay) and **the session remains usable** — the
-   next `tools/list` still returns 41. A client that has no stop control is **exp**, not
+   next `tools/list` still returns 42. A client that has no stop control is **exp**, not
    **no**.
 9. **Record the result** by editing the matrix row: change `unverified` to
    `protocol-verified` only if you add a test, otherwise `probe-verified`, and put the

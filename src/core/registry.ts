@@ -72,17 +72,34 @@ export interface BudgetReservation {
 
 /**
  * Session credit budget (real impl: core/budget, T-112). `check` is the pre-flight gate
- * (pipeline step 3): in `hard` mode it throws the typed `budget` XError when reserving
- * `estimate` would cross the cap; in `warn` mode it never throws. `reserve` is the atomic
- * post-response accounting (step 6, COST-5 / CONC-2) that yields the per-call + session cost.
+ * (pipeline step 4): in `hard` mode it throws the typed `budget` XError when reserving
+ * `estimate` would cross the cap; in `warn` mode it never throws. `reserve` is the
+ * post-response accounting (step 6, COST-5 / CONC-2) that yields the per-call + session
+ * cost, given the number of billable resources the response actually carried.
+ *
+ * The seam does not say WHICH of the two steps moves the counter, and the shipped gate
+ * chooses `check` (INT-2, `mcp/gates`) so that a call which reaches the API and then fails
+ * stays charged; `reserve` then settles that reservation to `units`. An implementation that
+ * charges at `reserve` instead is still a valid gate — the registry only requires that one
+ * tool call produce exactly one charge.
  */
 export interface BudgetGate {
   check(estimate: CostEstimate): void;
-  reserve(estimate: CostEstimate): BudgetReservation;
+  reserve(estimate: CostEstimate, units?: number): BudgetReservation;
+  /**
+   * Hand back the reservation `check` took for a call whose handler failed BEFORE it sent a
+   * single request through its invoker — a local refusal the platform never saw (a media
+   * path outside the media directory, a symlink, an oversized file, a cancellation before
+   * the first request). The registry calls it instead of step 6, never in addition to it.
+   * Optional: a gate that charges at `reserve` took nothing at `check`, so it has nothing
+   * to hand back.
+   */
+  release?(estimate: CostEstimate): void;
 }
 
 /**
- * Rate-limit preflight (real impl: api/ratelimit, T-115). Pipeline step 4: throws the typed
+ * Rate-limit preflight (real impl: api/ratelimit, T-115). Pipeline step 3 — ahead of the
+ * budget, so a local refusal is never charged: throws the typed
  * `rate-limit` XError when the tracked window for this tool's endpoint class is known to be
  * exhausted (RATE-2); a no-op otherwise. Header-driven table updates happen inside the
  * EndpointInvoker, out of the registry's sight.
@@ -246,23 +263,47 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
       throw deps.policy.denyError(tool);
     }
 
-    // (3) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
+    // (3) rate-limit preflight — a known-exhausted window -> typed `rate-limit` error. It runs
+    //     BEFORE the budget because a call refused here never reaches X (RATE-2), so it must
+    //     not be charged; the shipped budget gate charges at `check` (INT-2).
+    deps.rateLimit.preflight(tool);
+
+    // (4) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
+    //     Synchronous with step 3, so no await separates the two (CONC-2 still holds).
     const estimate = resolveCost(tool, input);
     deps.budget.check(estimate);
 
-    // (4) rate-limit preflight — a known-exhausted window -> typed `rate-limit` error.
-    deps.rateLimit.preflight(tool);
-
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
-    const output = await invokeHandler(tool, input, buildToolContext(ctx), ctx.signal);
+    //     A handler that throws BEFORE its first request left through the invoker refused
+    //     the call locally, after step 4 had already charged it. Schema refinements cover
+    //     every refusal that is a pure function of the input, but some are not: media's
+    //     path-security battery (MEDIA-5) has to realpath/open/stat the file. So the
+    //     reservation is handed back here, which keeps "a local refusal is never charged"
+    //     true for those too (as for RATE-2). This cannot under-count, even in `hard`
+    //     mode: the full reservation was held for the whole handler run (CONC-2), and a
+    //     call that sent nothing cost nothing on the platform. Once any request has been
+    //     handed to the invoker the call stays charged, whatever fails afterwards —
+    //     whether it reached X is then unknowable from here, and over-counting is the safe
+    //     side of an advisory budget.
+    const invoker = trackSends(ctx.http);
+    let output: ToolOutput;
+    try {
+      output = await invokeHandler(tool, input, buildToolContext(ctx, invoker.http), ctx.signal);
+    } catch (err) {
+      if (!invoker.sent()) deps.budget.release?.(estimate);
+      throw err;
+    }
 
-    // (6) reserve the credit cost (atomic in the gate — COST-5 / CONC-2). Only successful
-    //     calls are charged; a handler throw above short-circuits before this point.
-    //     The unit is ONE TOOL CALL, not one HTTP request: a handler that sends several
-    //     (media's chunked INIT/APPEND×N/FINALIZE) is charged one estimate, and a call that
-    //     fails part-way is charged nothing despite the requests it already sent. Advisory
-    //     accounting by design — the gap is documented in docs/02 §7 (T-320 F9).
-    const reservation = deps.budget.reserve(estimate);
+    // (6) settle the credit cost against what the response actually carried (COST-3).
+    //     WHO CHARGES, AND WHEN: the shipped gate takes the money at step 4's `check`
+    //     (INT-2, `mcp/gates`), NOT here — so a call that reaches the API and then fails
+    //     stays charged, which is the honest accounting for a request the platform already
+    //     served. This step hands that reservation the real resource count, so a read of
+    //     100 posts is priced as 100 unit prices instead of one (docs/01 §3.1); a handler
+    //     that reports no count settles at one and nothing changes.
+    //     Still ONE TOOL CALL, not one HTTP request: `x_media_upload`'s chunked
+    //     INIT/APPEND×N/FINALIZE is a single `w:action` estimate (docs/02 §7, T-320 F9).
+    const reservation = deps.budget.reserve(estimate, output.units);
 
     // (7) attach ResultMeta (COST-3). Compaction/sanitization already happened inside the
     //     handler (core/render + sanitize, T-117); the registry only envelopes payload + cost.
@@ -309,11 +350,29 @@ export function withCallSignal(inner: EndpointInvoker, signal: AbortSignal): End
   };
 }
 
+/**
+ * Wrap the call's invoker so the pipeline can tell whether the handler sent ANY request.
+ * The flag flips when `send` is entered, before the request is built or awaited, so a
+ * request that fails in transport (or is cancelled mid-flight) still counts as sent.
+ */
+function trackSends(inner: EndpointInvoker): { http: EndpointInvoker; sent: () => boolean } {
+  let sent = false;
+  return {
+    http: {
+      send<T>(req: XApiRequest): Promise<T> {
+        sent = true;
+        return inner.send<T>(req);
+      },
+    },
+    sent: () => sent,
+  };
+}
+
 /** Thread ports + the (cancellation-bound) invoker + the signal itself into a ToolContext. */
-function buildToolContext(ctx: CallContext): ToolContext {
+function buildToolContext(ctx: CallContext, http: EndpointInvoker): ToolContext {
   return ctx.signal === undefined
-    ? { ports: ctx.ports, http: ctx.http }
-    : { ports: ctx.ports, http: withCallSignal(ctx.http, ctx.signal), signal: ctx.signal };
+    ? { ports: ctx.ports, http }
+    : { ports: ctx.ports, http: withCallSignal(http, ctx.signal), signal: ctx.signal };
 }
 
 /**
