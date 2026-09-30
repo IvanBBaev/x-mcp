@@ -324,6 +324,7 @@ export const xListUpdate = defineTool({
       input.private === undefined
     ) {
       // Validation BEFORE any HTTP: an empty update would spend a write doing nothing.
+      // Nothing was sent, so the registry hands the budget reservation back too.
       throw validationError(
         'Provide at least one of name, description, or private to update the list.',
       );

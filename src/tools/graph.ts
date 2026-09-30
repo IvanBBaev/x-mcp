@@ -66,10 +66,12 @@ async function selfUserId(ctx: ToolContext): Promise<string> {
 
 /**
  * Resolve a write TARGET to a numeric id (REND-8). Classification is sync and runs before
- * any network: malformed input is a `validation` error and nothing is spent. `"me"` is
- * rejected — follow/mute/block act on ANOTHER account, and silently self-targeting a write
+ * any network: malformed input is a `validation` error and nothing is spent (no request is
+ * sent, so the registry hands the write's budget reservation back). `"me"` is rejected the
+ * same way — follow/mute/block act on ANOTHER account, and silently self-targeting a write
  * would be a policy hole. Handles resolve via `GET /2/users/by/username/:username`; an
- * unknown handle is a `not-found` and neither the self-lookup nor the write is ever sent.
+ * unknown handle is a `not-found` and neither the self-lookup nor the write is ever sent
+ * (the call stays charged: the lookup reached X).
  */
 async function resolveTargetUser(refInput: string, ctx: ToolContext): Promise<string> {
   const ref = classifyUserRef(refInput);

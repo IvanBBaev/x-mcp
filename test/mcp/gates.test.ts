@@ -2,13 +2,23 @@
 // end to end by test/mcp/server.test.ts; what cannot be reached through it is the gate's
 // own defensive posture when a caller SKIPS `check` — the pipeline always checks first, so
 // pinning that arm means driving the gate directly, outside the registry. Hence this file.
+// Its tail composes the real registry with this gate to pin which local refusals are charged.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createSessionBudget } from '../../src/core/budget.js';
+import { USER_INTERACTION_CREATE_USD, createSessionBudget } from '../../src/core/budget.js';
+import type { SessionBudget } from '../../src/core/budget.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { CallContext, Registry } from '../../src/core/registry.js';
+import type { AnyToolDef, CostEstimate, XApiRequest } from '../../src/core/tooldef.js';
 import { createBudgetGate } from '../../src/mcp/gates.js';
-import type { CostEstimate } from '../../src/core/tooldef.js';
+import { xLikeSet } from '../../src/tools/engagement.js';
+import { xFollowSet } from '../../src/tools/graph.js';
+import { xListUpdate } from '../../src/tools/lists.js';
+
+import { loadFixture, makePorts } from '../helpers/index.js';
 
 test('INT-2: check reserves atomically; the paired reserve is a read-back, not a second charge', () => {
   const budget = createSessionBudget();
@@ -112,4 +122,84 @@ test('RATE-2/CONC-2: release hands back exactly the held reservation, by the dif
   gate.release(refused);
   gate.release({ class: 'r:post' });
   assert.equal(budget.total(), 0.01);
+});
+
+// --- Local refusals of priced w:action writes, through the real registry + real gate ----
+//
+// These writes refuse some inputs inside the handler — after step 4 has reserved the
+// write's price, before the first request. The registry hands the reservation back when
+// nothing was sent, so the session total is unchanged; once a request has left (a handle
+// lookup), the call stays charged.
+
+/** The real registry wired to the real budget gate over a hard-mode session budget. */
+function budgetedRegistry(tools: readonly AnyToolDef[]): {
+  reg: Registry;
+  budget: SessionBudget;
+} {
+  const budget = createSessionBudget({ limit: 1, mode: 'hard' });
+  const reg = createRegistry(tools, {
+    policy: {
+      preset: 'full',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: createBudgetGate(budget),
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budget };
+}
+
+/** A call context whose invoker records every request and answers with `reply`. */
+function recordingCall(reply: (req: XApiRequest) => unknown = () => ({})): {
+  ctx: CallContext;
+  sent: XApiRequest[];
+} {
+  const sent: XApiRequest[] = [];
+  const ctx: CallContext = {
+    ports: makePorts(),
+    http: {
+      send<T>(req: XApiRequest): Promise<T> {
+        sent.push(req);
+        return Promise.resolve(reply(req) as T);
+      },
+    },
+  };
+  return { ctx, sent };
+}
+
+function isValidation(err: unknown): boolean {
+  assert.ok(XError.is(err));
+  assert.equal(err.kind, 'validation');
+  return true;
+}
+
+test('RATE-2/COST-3: a w:action write refused locally before any request is not charged', async () => {
+  const { reg, budget } = budgetedRegistry([xFollowSet, xListUpdate, xLikeSet]);
+  const refusals: readonly [string, Record<string, unknown>][] = [
+    ['x_follow_set', { user: 'me', action: 'follow' }],
+    ['x_list_update', { list_id: '1234567890' }],
+    ['x_like_set', { post: 'not-a-post-id', action: 'like' }],
+  ];
+  for (const [name, input] of refusals) {
+    const { ctx, sent } = recordingCall();
+    await assert.rejects(() => reg.call(name, input, ctx), isValidation);
+    assert.equal(sent.length, 0, `${name} must refuse before any request`);
+    assert.equal(budget.total(), 0, `${name}'s local refusal must not be charged`);
+  }
+});
+
+test('COST-3: an unknown follow target stays charged — the handle lookup reached X', async () => {
+  const { reg, budget } = budgetedRegistry([xFollowSet]);
+  const { ctx, sent } = recordingCall(() => loadFixture('users/handle-lookup-miss.json'));
+  await assert.rejects(
+    () => reg.call('x_follow_set', { user: '@ghost', action: 'follow' }, ctx),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'not-found');
+      return true;
+    },
+  );
+  assert.equal(sent.length, 1); // the lookup only — the write was never sent
+  assert.equal(budget.total(), USER_INTERACTION_CREATE_USD);
 });

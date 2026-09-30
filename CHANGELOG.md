@@ -28,7 +28,14 @@ development chronology lives in `WORKLOG.md`.
   cancellation before INIT. The $0.005 Media Metadata price is still reserved while the
   call runs (so a hard-mode budget never under-counts) and handed back on such a refusal;
   once the upload has sent its first request, a failure stays charged as before. The
-  same release applies to any tool whose handler refuses before sending a request.
+  same release applies to any tool whose handler refuses before sending a request —
+  notably the priced writes `x_like_set`, `x_repost_set`, `x_bookmark_set`,
+  `x_follow_set`, `x_mute_set`, `x_block_set`, `x_post_delete`, `x_post_hide_reply`,
+  `x_list_update`, `x_list_delete`, `x_list_member_set`, `x_list_follow_set` and
+  `x_list_pin_set`, which no longer charge for a malformed post or list id or handle, a
+  `"me"` target, or an empty `x_list_update`. An unknown handle stays charged, since its
+  lookup reached X.
+
 - Engagement, social-graph, list, moderation and media-metadata writes
   (`x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_follow_set`, `x_mute_set`,
   `x_block_set`, `x_post_delete`, `x_post_hide_reply`, `x_list_update`,
