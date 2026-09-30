@@ -223,7 +223,15 @@ above; this is the single list to walk before tagging:
       the schema (pipeline step 1, ahead of the step-4 budget charge), and `075a35a`
       did the same for `x_post_create` so its own locally-refused posts are never
       charged either — see
-      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md) §6.*
+      [reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md) §6.
+      The next delta — the 09 §6 schema moves, the description tightening and the
+      per-operation `w:action` pricing (`2613478`) — was audited 2026-09-30 in
+      [reviews/10-delta-audit-2026-09-30.md](reviews/10-delta-audit-2026-09-30.md):
+      no new finding at MEDIUM or above, one LOW (thirteen newly priced `w:action`
+      writes charged for handler-level local refusals). Fixed with the `x_media_upload`
+      path-refusal residual by `50b2183`/`594281f`: the registry releases the
+      reservation when a handler refuses before sending any request — see
+      [reviews/10-delta-audit-2026-09-30.md](reviews/10-delta-audit-2026-09-30.md) §6.*
 - [ ] Client compatibility matrix: MCP Inspector, Claude Desktop, Claude Code,
       ≥ 1 third-party client. *Matrix documented in
       [13-compatibility.md](13-compatibility.md). **MCP Inspector is genuinely
