@@ -1,7 +1,7 @@
 // Platform usage + session-spend tool (docs/03 `x_usage_get`). Owned by the T-317 usage slice
 // (WP-3.11), whose go/no-go the T-010 fact-check resolved GO-scoped: docs/01 §3.5 verified
 // (2026-07-22) that `GET /2/usage/tweets` still exists under pay-per-use, is gated only on an
-// approved developer account (no tier), and reports POST-READ COUNTS against the 2 M/month
+// approved developer account (no tier), and reports POST-READ COUNTS against the 3 M/month
 // project cap — never dollar or credit spend. So this tool ships as a read-cap reporter, not
 // as a credit-spend mirror.
 //
@@ -17,7 +17,7 @@
 //  - COST-2: the local session estimate is never seeded from a usage API. These platform
 //    counts are rendered ALONGSIDE the estimate, never folded into it — the handler calls
 //    `budget.total()` and nothing else; there is no write path from the response to the counter.
-//  - COST-7: the 2 M posts/month cap is surfaced as the platform states it (and verbatim as a
+//  - COST-7: the 3 M posts/month cap is surfaced as the platform states it (and verbatim as a
 //    `billing` error when actually hit). The server does not pre-track it between sessions,
 //    which is exactly why an on-demand read of the platform's own number is useful.
 //  - DRIFT-1: every response field is optional and the counters come back as JSON strings on
@@ -255,7 +255,7 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
           .optional()
           .describe(
             'Days of daily breakdown to return (1-90; the API defaults to 7). Out-of-range ' +
-              'values are clamped into the window.',
+              'values are clamped.',
           ),
         raw: z
           .boolean()

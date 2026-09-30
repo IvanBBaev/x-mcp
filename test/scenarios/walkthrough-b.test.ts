@@ -282,9 +282,10 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   // One page, no cursor: the fixture's meta carries no next_token.
   assert.equal(mentions.data.next_token, undefined);
   assert.equal(mentions.summary, '3 result(s).');
-  // COST-3: the `owned` mentions read is $0.001 and it is the first spend of the session.
-  assert.equal(mentions.meta.cost_usd, 0.001);
-  assert.equal(mentions.meta.session_total_usd, 0.001);
+  // COST-3: the `owned` rate is $0.001 PER POST RETURNED, so this three-mention page costs
+  // $0.003 — not one flat $0.001 for the call. It is the first spend of the session.
+  assert.equal(mentions.meta.cost_usd, 0.003);
+  assert.equal(mentions.meta.session_total_usd, 0.003);
 
   // --- Step 2a: pull the thread root the ambiguous mentions point at --------------
   const parentResult = await call(client, 'x_post_get', { ids: [PARENT_ID] });
@@ -296,9 +297,10 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   assert.equal(parent.data.items[0]?.author, '@self_bot');
   assert.equal(parent.data.items[0]?.url, `https://x.com/i/status/${PARENT_ID}`);
   assert.equal(parent.data.missing, undefined);
-  // COST-3: $0.005 for a post read, accumulating onto the session total.
+  // COST-3: $0.005 per post returned — one post here, so one unit, accumulating onto
+  // the session total.
   assert.equal(parent.meta.cost_usd, 0.005);
-  assert.equal(parent.meta.session_total_usd, 0.006);
+  assert.equal(parent.meta.session_total_usd, 0.008);
 
   // --- Step 2b: the rest of the conversation --------------------------------------
   const threadResult = await call(client, 'x_search_recent', {
@@ -315,21 +317,32 @@ test('walkthrough B: mentions -> parent post -> conversation search, all under r
   );
   // The reply chain is walkable from the compact page alone.
   assert.deepEqual(thread.data.items[1]?.reply_to, { id: '1900000000000000001' });
-  assert.equal(thread.meta.cost_usd, 0.005);
-  assert.equal(thread.meta.session_total_usd, 0.011);
+  // Two posts came back, so the search costs 2 x $0.005 (COST-3).
+  assert.equal(thread.meta.cost_usd, 0.01);
+  assert.equal(thread.meta.session_total_usd, 0.018);
 
   // Step 3 (summarize + draft) is in-model: no further tool call, no further spend.
-  assert.equal(composition.budget.total(), 0.011);
+  assert.equal(composition.budget.total(), 0.018);
 
-  // INT-3: the table is trained by the error mapper, and api/http exposes no success-path
-  // header hook — so an all-2xx journey like this one leaves it empty. The operator sees
-  // an honest "nothing observed yet", not a stale or invented window.
+  // RATE-1/INT-3: an all-2xx journey now leaves a real table behind (T-320 F6, closed) —
+  // every reply passed through its tool's bucket observer. The two step-1 requests share
+  // the mentions tool's bucket and settle on the lower remaining; the parent read and the
+  // conversation search each trained their own. The operator sees where the session
+  // actually stands, not "nothing observed yet" after four successful calls.
   const table = textPayload<Rendered<RateLimitStatus>>(
     await call(client, 'x_rate_limit_status', {}),
   );
-  assert.deepEqual(table.data.buckets, []);
+  assert.deepEqual(
+    table.data.buckets.map((b) => [b.key, b.windows.map((w) => w.remaining)]),
+    [
+      ['timeline-mentions#app', [178]],
+      ['tweets#app', [14]],
+      ['search#app', [59]],
+    ],
+  );
+  assert.ok(table.data.buckets.every((b) => b.windows.every((w) => !w.exhausted)));
   assert.equal(table.meta.cost_usd, 0); // `local` meta tool: free, and it adds no spend
-  assert.equal(table.meta.session_total_usd, 0.011);
+  assert.equal(table.meta.session_total_usd, 0.018);
 
   mock.assertDone();
   await client.close();
@@ -362,6 +375,58 @@ test('REND-6: the untrusted-content note is one field per RESULT, not one per it
   for (const item of page.items) {
     assert.ok(!('note' in item), 'a compact item must not repeat the guard note');
   }
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('RATE-2/INT-3: a SUCCESSFUL read that spends the last unit refuses the next call before HTTP', async () => {
+  const mock = mockHttp();
+  // The look-ahead the preflight gate promises (RATE-2): a 200 whose headers say the window
+  // is spent trains the bucket exactly as the 429 after it would — so the second call is
+  // refused locally, before the origin ever gets to answer it with a 429 (T-320 F6).
+  mock.pool
+    .intercept({ path: '/2/users/me', method: 'GET', query: USERS_PROJECTION })
+    .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/me.json'), {
+      headers: {
+        'x-rate-limit-limit': '25',
+        'x-rate-limit-remaining': '0',
+        'x-rate-limit-reset': String(Math.floor(Date.now() / 1000) + 900),
+      },
+    });
+
+  const client = await connect(composeFor(mock));
+
+  const first = await call(client, 'x_user_get', { users: ['me'] });
+  assert.notEqual(first.isError, true);
+  assert.deepEqual(
+    textPayload<Rendered<{ items: Array<{ id: string }> }>>(first).data.items.map((u) => u.id),
+    [ME_ID],
+  );
+
+  const table = textPayload<Rendered<RateLimitStatus>>(
+    await call(client, 'x_rate_limit_status', {}),
+  ).data;
+  assert.deepEqual(
+    table.buckets.map((b) => b.key),
+    ['users#app'],
+  );
+  const bucket = table.buckets[0];
+  assert.deepEqual(
+    bucket?.windows.map((w) => ({
+      limit: w.limit,
+      remaining: w.remaining,
+      exhausted: w.exhausted,
+    })),
+    [{ limit: 25, remaining: 0, exhausted: true }],
+  );
+
+  // No interceptor is registered for a second `me` read: reaching the network would fail
+  // the mock, so a `rate-limit` error here can only have come from the local preflight.
+  const refused = await call(client, 'x_user_get', { users: ['me'] });
+  assert.equal(refused.isError, true);
+  assert.equal(textPayload<RenderedError>(refused).error.kind, 'rate-limit');
 
   mock.assertDone();
   await client.close();

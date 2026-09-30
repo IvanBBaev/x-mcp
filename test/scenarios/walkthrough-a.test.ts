@@ -231,8 +231,9 @@ test('walkthrough A steps 1-2 (MEDIA-1/MEDIA-3): one upload call does INIT -> AP
     );
     assert.equal(payload.data.media_id, MEDIA_ID);
     assert.equal(payload.data.alt_text_set, true);
-    // An upload is priced `w:action` ($0): the thread's cost starts accruing at step 3.
-    assert.equal(composition.budget.total(), 0);
+    // The upload itself is still $0; requesting `alt_text` prices a Media Metadata call
+    // ($0.005 — docs/01 App. B), so step 1 is the first charge, not step 3.
+    assert.equal(composition.budget.total(), 0.005);
     mock.assertDone();
   } finally {
     await client.close();

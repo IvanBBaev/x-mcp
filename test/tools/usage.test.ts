@@ -190,7 +190,7 @@ test('COST-3: the session block carries spend, mode, remaining and percent of th
   await http.close();
 });
 
-test('COST-7: the monthly 2 M read cap is reported as the platform states it, and stated to be untracked between sessions', async () => {
+test('COST-7: the monthly read cap is reported as the platform states it, and stated to be untracked between sessions', async () => {
   const http = mockHttp();
   http.pool
     .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })

@@ -24,10 +24,19 @@ import { createKeychainTokenStore } from './keychain.js';
  * profiles on one machine cannot overwrite each other's token — the same separation the
  * file backend gets from distinct `token_file` paths.
  */
+/**
+ * AUTH-12 — lets a caller that already reported the token file's permission finding at
+ * startup (the entrypoint) tell the file backend not to report it again on first `load()`.
+ */
+export interface ConfiguredTokenStoreOptions {
+  readonly permissionWarningAlreadyReported?: boolean;
+}
+
 export function createConfiguredTokenStore(
   config: Config,
   clock: Clock,
   sleep: Sleep,
+  options: ConfiguredTokenStoreOptions = {},
 ): TokenStore | undefined {
   if (config.authMode !== 'oauth2') return undefined;
   if (config.tokenKeychain) {
@@ -36,7 +45,14 @@ export function createConfiguredTokenStore(
     );
   }
   if (config.tokenFile !== undefined) {
-    return createFileTokenStore({ path: config.tokenFile, clock, sleep });
+    return createFileTokenStore({
+      path: config.tokenFile,
+      clock,
+      sleep,
+      ...(options.permissionWarningAlreadyReported !== undefined
+        ? { permissionWarningAlreadyReported: options.permissionWarningAlreadyReported }
+        : {}),
+    });
   }
   return undefined;
 }

@@ -18,11 +18,14 @@ export type BudgetMode = 'warn' | 'hard';
 
 /**
  * The authoritative per-class USD price table. Values are the pay-per-use rates verified
- * 2026-07-22 (docs/01 §3.1 + Appendix B) and agree with docs/03's cost-class legend. These
- * are UNIT prices: reads are billed per resource returned, writes per request. For a
- * multi-resource read the registry multiplies the unit price by the response count and hands
- * the product to `reserve` as a `CostEstimate.usd` override (same mechanism as the URL-post
- * $0.20 line, COST-4) — so this table only ever holds the single-unit price.
+ * 2026-09-28 (docs/01 §3.1 + Appendix B) and agree with docs/03's cost-class legend. These
+ * are UNIT prices: reads are billed per resource returned, writes per request. A
+ * multi-resource read is priced by {@link priceOf} as `unit price × CostEstimate.units`,
+ * where `units` is the count the response actually carried — the registry settles the
+ * reservation with it once the handler returns (pipeline step 6, COST-3). So this table
+ * only ever holds the single-unit price. (Through 0.8.0 nothing supplied that multiplier
+ * and every read was charged one unit however many resources came back; the comment here
+ * claimed the registry did the multiplication, which it did not.)
  *
  *  - `local`     $0      in-process only, no X API spend
  *  - `owned`     $0.001  own-data read ("Owned Reads" discount)
@@ -36,9 +39,17 @@ export type BudgetMode = 'warn' | 'hard';
  *                        the `CostEstimate.usd` override; the class base stays $0.015)
  *  - `w:dm`      $0.015  per DM sent
  *  - `w:list`    $0.010  per list created
- *  - `w:action`  $0      engagement / social-graph / moderation writes, deletes, media:
- *                        unpriced on the pricing page (2026-07-22); counted $0 locally until
- *                        the Phase 1 live capture confirms the real rate (docs/01 App. B, COST-6)
+ *  - `w:action`  $0 base engagement / social-graph / list / moderation writes, deletes,
+ *                        and media metadata. Verified 2026-09-28, the
+ *                        pricing page prices each of these operations separately (docs/01
+ *                        App. B) rather than as one flat rate, so every registered
+ *                        `w:action` tool now supplies a `cost` resolver that returns its
+ *                        own operation's rate via `CostEstimate.usd` (see the
+ *                        `*_USD` constants below) instead of relying on this table lookup.
+ *                        The $0 base here is an unreachable defensive fallback, not a live
+ *                        price — an advisory budget must never under-count, so a future
+ *                        `w:action` tool that forgets a resolver fails loud in
+ *                        `test/core/budget.test.ts` rather than silently billing $0.
  */
 export const COST_TABLE: Readonly<Record<CostClass, number>> = {
   local: 0,
@@ -54,6 +65,42 @@ export const COST_TABLE: Readonly<Record<CostClass, number>> = {
   'w:list': 0.01,
   'w:action': 0,
 };
+
+/**
+ * Per-operation `w:action` prices (verified 2026-09-28, docs/01 App. B), each cited to its
+ * pricing-page label. A `cost` resolver returns one of these via `CostEstimate.usd`, never a
+ * magic number inline — this is the ONE place a `w:action` rate is written down. Where the
+ * platform label is genuinely ambiguous for an operation (noted per constant below), the
+ * CONSERVATIVE (higher) plausible price is used, because an advisory budget must never
+ * under-count.
+ */
+/** "User Interaction: Create" — like, repost, follow, mute. */
+export const USER_INTERACTION_CREATE_USD = 0.015;
+/** "Interaction: Delete" — unlike, unrepost, unfollow. Also used, inferred, for unblock. */
+export const INTERACTION_DELETE_USD = 0.01;
+/** "Mute: Delete" — unmute. */
+export const MUTE_DELETE_USD = 0.005;
+/**
+ * No "Block: Create" row is published; blocking is inferred as the same tier as the other
+ * create-type interactions (conservative — see `USER_INTERACTION_CREATE_USD`).
+ */
+export const BLOCK_CREATE_USD = 0.015;
+/** "Content: Manage" — hide/unhide a reply, and (conservative floor) generic content edits. */
+export const CONTENT_MANAGE_USD = 0.005;
+/**
+ * No dedicated "Post: Delete" row is published. Conservative choice between "Content: Manage"
+ * ($0.005) and "Interaction: Delete" ($0.010) — the higher of the two, per the never-under-
+ * count rule.
+ */
+export const POST_DELETE_USD = 0.01;
+/** "List: Manage" — update, delete, member add/remove, list follow/unfollow, list pin/unpin. */
+export const LIST_MANAGE_USD = 0.005;
+/** "Bookmark" — add or remove, same rate both directions. */
+export const BOOKMARK_USD = 0.005;
+/** "Media Metadata" — only charged when `x_media_upload` is asked to set `alt_text`. */
+export const MEDIA_METADATA_USD = 0.005;
+/** "Counts: All" — `x_post_counts_archive` (full-archive counts), distinct from "Counts: Recent". */
+export const COUNTS_ARCHIVE_USD = 0.01;
 
 /** A per-call cost the registry hands the budget: a bare class, or a resolved estimate. */
 export type ResolvedCost = CostClass | CostEstimate;
@@ -80,9 +127,20 @@ function formatUsd(n: number): string {
  */
 export function priceOf(cost: ResolvedCost): number {
   if (typeof cost === 'string') return COST_TABLE[cost];
-  const { class: cls, usd } = cost;
+  const { class: cls, usd, units } = cost;
   if (usd !== undefined && Number.isFinite(usd) && usd >= 0) return usd;
-  return COST_TABLE[cls];
+  return COST_TABLE[cls] * unitsOf(units);
+}
+
+/**
+ * The resource multiplier, defended against nonsense. `undefined` (no count supplied) and
+ * any non-finite or negative value fall back to ONE — the pre-`units` behaviour — so a
+ * miswired handler can never make a call free. ZERO is honoured: a page that returned no
+ * resources was billed for none (REND-1, docs/01 §3.1).
+ */
+function unitsOf(units: number | undefined): number {
+  if (units === undefined || !Number.isFinite(units) || units < 0) return 1;
+  return units;
 }
 
 /** Options for {@link createSessionBudget}. */
@@ -109,6 +167,21 @@ export interface SessionBudget {
    * proceed. The counter is only mutated when the reservation is accepted.
    */
   reserve(cost: ResolvedCost): ResultMeta;
+  /**
+   * Adjust an already-taken reservation to what the response actually carried (COST-3).
+   * The gate charges at CHECK time (INT-2, `mcp/gates`), before the handler runs and long
+   * before anyone knows how many resources a read will return; this is the second half of
+   * that bargain — the registry calls it at pipeline step 6 with the real count and the
+   * ledger moves by the DIFFERENCE, not by a second full charge.
+   *
+   * It NEVER throws, in either mode: the resources have already been returned, so refusing
+   * them after the fact would bill the operator for a call it could not have prevented.
+   * A settle that crosses the cap in `hard` mode instead carries a `budget_warning` saying
+   * so — the NEXT call is the one that gets refused. Moving by the difference is also what
+   * keeps this correct under interleaving (CONC-2): a settle never overwrites a total that
+   * another call incremented in between.
+   */
+  settle(held: ResultMeta, actual: ResolvedCost): ResultMeta;
   /** The current running session total in USD. */
   total(): number;
 }
@@ -118,7 +191,7 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
   const mode: BudgetMode = options.mode ?? 'warn';
   let spent = 0;
 
-  function warningFor(next: number): string | undefined {
+  function warningFor(next: number, settled = false): string | undefined {
     if (limit === undefined || next <= 0) return undefined;
     const threshold = limit > 0 ? WARN_FRACTION * limit : 0;
     if (next < threshold - EPSILON) return undefined;
@@ -128,7 +201,14 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
         limit,
       )}.`;
     }
-    // Over the cap: only reachable in `warn` mode — `hard` would already have thrown.
+    // Over the cap. In `warn` mode this is the ordinary past-cap notice. In `hard` mode a
+    // RESERVATION would already have thrown, so the only way here is a settle: the response
+    // carried more resources than the reservation priced, and they were already returned.
+    if (settled && mode === 'hard') {
+      return `Session spend ${formatUsd(next)} has exceeded the operator-set credit budget of ${formatUsd(
+        limit,
+      )} — the resources this call returned were already delivered when its reservation was settled, so it was not blocked; the next call is.`;
+    }
     return `Session spend ${formatUsd(next)} has exceeded the operator-set credit budget of ${formatUsd(
       limit,
     )} (warn mode — call not blocked).`;
@@ -143,12 +223,13 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
       if (mode === 'hard' && limit !== undefined && next > limit + EPSILON) {
         // COST-1/COST-5: refuse BEFORE mutating the counter, so a blocked reservation
         // spends nothing and the boundary stays exact under interleaving (CONC-2).
+        const why = typeof cost === 'object' && cost.note !== undefined ? ` ${cost.note}` : '';
         throw budgetError(
           `This call (${formatUsd(price)}) would bring session spend to ${formatUsd(
             next,
           )}, over the credit budget of ${formatUsd(
             limit,
-          )}. This is an operator-set limit; cannot be changed from within this session.`,
+          )}.${why} This is an operator-set limit; cannot be changed from within this session.`,
         );
       }
       spent = next; // atomic increment — same synchronous tick as the check above (CONC-2)
@@ -156,6 +237,18 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
       return warning === undefined
         ? { cost_usd: price, session_total_usd: next }
         : { cost_usd: price, session_total_usd: next, budget_warning: warning };
+    },
+    settle(held, actual) {
+      const price = round6(priceOf(actual));
+      // Move by the DIFFERENCE against the live counter, never by overwriting it: another
+      // call may have reserved in between (CONC-2). `max(0, …)` is defensive only — a
+      // double settle of the same reservation must not drive the ledger negative.
+      const delta = round6(price - held.cost_usd);
+      if (delta !== 0) spent = round6(Math.max(0, spent + delta));
+      const warning = warningFor(spent, true);
+      return warning === undefined
+        ? { cost_usd: price, session_total_usd: spent }
+        : { cost_usd: price, session_total_usd: spent, budget_warning: warning };
     },
     total() {
       return spent;
