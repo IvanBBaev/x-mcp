@@ -46,7 +46,9 @@ import {
   setAltText,
 } from '../api/endpoints/media.js';
 import type { MediaCategory } from '../api/endpoints/media.js';
+import { MEDIA_METADATA_USD } from '../core/budget.js';
 import { XError, apiError, networkError, validationError } from '../core/errors.js';
+import { formatLogLine } from '../core/log.js';
 import { defineTool } from '../core/tooldef.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 
@@ -257,11 +259,11 @@ export async function openNoFollow(
       const warn =
         deps.warn ??
         ((message: string): void => {
-          process.stderr.write(message + '\n');
+          process.stderr.write(`${formatLogLine('warn', message, new Date().toISOString())}\n`);
         });
       warn(
-        'x-mcp: O_NOFOLLOW is unavailable on this platform (win32); the final media path ' +
-          'component is checked with a non-atomic lstat instead (PLAT-2).',
+        'O_NOFOLLOW is unavailable on this platform (win32); the final media path component ' +
+          'is checked with a non-atomic lstat instead (PLAT-2).',
       );
     }
     const link = await lstat(target).catch(() => undefined);
@@ -546,7 +548,22 @@ function buildUploadTool(deps: MediaToolDeps) {
     policy: 'write:content',
     availability: 'user-only',
     scopes: ['media.write'],
-    cost: 'w:action',
+    // The upload itself has no pricing-page row (still $0); requesting `alt_text` attempts
+    // a "Media Metadata" call (priced regardless of whether that best-effort call later
+    // succeeds — the charge reflects the request the caller asked for, docs/01 App. B).
+    // EXCEPT when this instance is default-denied (MEDIA-5, no X_MCP_MEDIA_DIR configured):
+    // that refusal is local and never reaches the wire, so it must price at $0 like any
+    // other local refusal (mirrors the `mediaDir` check in `openMediaFile` above) — an
+    // advisory budget must never charge for a call the server itself never attempted.
+    // The rest of the local refusals (unsupported extension, a path outside the media
+    // directory, a symlink, an empty/oversized/mislabelled file) need the filesystem, so they
+    // cannot move into the schema and cannot price the check at $0 up front. The full price
+    // is reserved instead — an upper bound, so a `hard` budget can never under-count — and
+    // the registry hands it back when the handler throws before its first request (MEDIA-5).
+    cost: (input) =>
+      input.alt_text !== undefined && deps.mediaDir !== undefined && deps.mediaDir.trim() !== ''
+        ? { class: 'w:action', usd: MEDIA_METADATA_USD }
+        : { class: 'w:action', usd: 0 },
     annotations: {
       title: 'Upload media',
       readOnlyHint: false,

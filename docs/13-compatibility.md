@@ -48,7 +48,7 @@ independently of any client.
 | Protocol version | Echoes the client's request when it is one of `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`, `2024-10-07`. An unrecognised version falls back to `2025-11-25`. | `probe-verified` (§7.1 reproduces it) |
 | Capabilities | Exactly `{"tools":{}}`. No `listChanged`, no resources, prompts, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts:61`](../src/mcp/server.ts), [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
 | `instructions` | 944 characters returned on `initialize`. | `protocol-verified` — [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
-| `tools/list` | 41 tools, delivered in one response (~78 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:123`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
+| `tools/list` | 42 tools, delivered in one response (~80 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:129`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
 | `tools/call` success | `content[0]` is a JSON text block **and** `structuredContent` is the same object. | `protocol-verified` — [`test/mcp/structured.test.ts:134`](../test/mcp/structured.test.ts) |
 | `tools/call` failure | Text-only result with `isError: true`. No `structuredContent` — deliberate, since the spec exempts error results from `outputSchema` conformance. | `protocol-verified` — [`test/mcp/server.test.ts:300`](../test/mcp/server.test.ts) |
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
@@ -71,7 +71,7 @@ is fixed at startup.
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|---|
 | **Reference SDK `Client`** (`@modelcontextprotocol/sdk` 1.30.0) | yes | yes | yes | yes | yes | yes | yes | `protocol-verified` | The baseline the test suite speaks. If something breaks here, CI is red. |
 | **Raw stdio JSON-RPC host** (hand-written frames) | yes | yes | yes | yes | yes | exp | yes | `probe-verified` | Lowest common denominator. See the stdin caveat in §7.4. |
-| **MCP Inspector 2.1.0 — `--cli`** | yes | yes | yes | yes | yes | exp | n/a | `probe-verified` | Returned 41 tools, 41 with `outputSchema`, 41 with `annotations`; rendered a policy refusal for `x_post_create` under `read-only`. CLI mode does not display `instructions`. Re-probed 2026-08-09 at the 41-tool surface — see §4.5.1. |
+| **MCP Inspector 2.1.0 — `--cli`** | yes | yes | yes | yes | yes | exp | n/a | `probe-verified` | Returned 42 tools, 42 with `outputSchema`, 42 with `annotations`; rendered a policy refusal for `x_post_create` under `read-only`. CLI mode does not display `instructions`. Re-probed 2026-09-26 at the 42-tool surface — see §4.5.1. |
 | **MCP Inspector 2.1.0 — GUI** | exp | exp | exp | exp | exp | exp | exp | `unverified` | Same binary as the row above, different front end. Not launched — no browser in this environment. |
 | **Claude Desktop** | exp | exp | exp | exp | exp | exp | exp | `unverified` (config shape `spec-derived`) | Config format matches [10-operator-guide §4.1](10-operator-guide.md). Not launched. |
 | **Claude Code 2.1.251** | yes | yes | yes | yes | exp | exp | yes | `probe-verified` (headless CLI) | Probed 2026-08-31 on macOS via `claude -p --mcp-config --strict-mcp-config` — see §4.2.1. Env arrived (`x_auth_status` echoed `app-only` + `read-only`); 41 `mcp__x__*` tools registered; `x_rate_limit_status` succeeded; `x_post_create` refused with the typed `policy` error and no post; `instructions` surfaced without a tool call. 2.1.251 defers MCP tool schemas behind an in-client ToolSearch step. `structuredContent` and cancellation are not observable headlessly — those cells stay `exp`, and the interactive client was not run. |
@@ -235,18 +235,20 @@ config-file selection and exits with `No servers found in config file` if the `-
 first. Put the `node <entry>` command immediately after `--cli`, then the `-e` pairs, then
 `--method`.
 
-#### 4.5.1 Re-probe at the 41-tool surface (2026-08-09, SDK 1.30.0)
+#### 4.5.1 Re-probe at the 42-tool surface (2026-09-26, SDK 1.30.0, Inspector 2.1.0)
 
 The CLI probe is repeated whenever the tool surface or the SDK moves — most recently for the
-1.29.0 → 1.30.0 dependency-advisory bump (see §6) and again after `x_bookmarks_list` and
-`x_post_hide_reply` landed. Three calls: `tools/list`, `tools/call` on a denied tool, and
-`tools/call` on one of the new tools. All three held:
+1.29.0 → 1.30.0 dependency-advisory bump (see §6), again after `x_bookmarks_list` and
+`x_post_hide_reply` landed, and again after `x_thread_create` (Phase 3) landed and both it and
+`x_post_create` gained schema-level input validation ([reviews/09-delta-audit-2026-09-25.md](reviews/09-delta-audit-2026-09-25.md)
+§6). Three calls: `tools/list`, `tools/call` on a denied tool, and `tools/call` on one of the
+existing tools with a malformed argument. All three held:
 
-- `tools/list` → **41 tools, 41 with `outputSchema`, 41 with `annotations`**, and **20 with
+- `tools/list` → **42 tools, 42 with `outputSchema`, 42 with `annotations`**, and **21 with
   "(disabled by policy `read-only`)"** appended to the description — the exact complement of
   the 21 cells `read-only` allows, which is the denied-tools-stay-registered rule (§3.3 of
   [04-security.md](04-security.md)) observable from outside the process.
-- The serialized `tools/list` result measured **78,445 bytes** — byte-identical to what
+- The serialized `tools/list` result measured **79,987 bytes** — byte-identical to what
   `npm run gate:context` reports. Worth recording: it means the context gate measures the
   real wire payload rather than an approximation of it, so its 80 kB budget is a claim about
   what a client actually pays.
@@ -254,12 +256,17 @@ The CLI probe is repeated whenever the tool surface or the SDK moves — most re
   `{"kind":"policy","retryable":false,"fix":"operator","cell":"write:content"}` and the
   message *"…(blocked cell `write:content`). Enabling it is an operator decision made outside
   this session; see the operator guide."* **No environment variable is named** — the T-320 F2
-  contract confirmed end to end through a third-party client, not just in unit tests.
+  contract confirmed end to end through a third-party client, not just in unit tests. The probe
+  text (`text=probe`) passes the tool's own schema validation cleanly, so this is the policy
+  gate (pipeline step 2) denying an otherwise-valid call, not a validation error in disguise.
 - `tools/call x_post_hide_reply` with `--tool-arg reply_id=1` (a JSON number, not a string) →
-  a typed `validation` result naming the field: *"reply\_id: Expected string, received
-  number"*. Recorded because it is the failure mode a client most often produces by itself:
-  Inspector coerces bare digits to numbers, and the server rejects the coercion instead of
-  accepting it. An agent gets a `fix: "agent"` error it can act on, not a silent id mangle.
+  a typed `validation` result naming the field: *"reply_id: Invalid input: expected string,
+  received number"*. Recorded because it is the failure mode a client most often produces by
+  itself: Inspector coerces bare digits to numbers, and the server rejects the coercion instead
+  of accepting it. An agent gets a `fix: "agent"` error it can act on, not a silent id mangle.
+  (The exact wording tracks the installed Zod version — 4.5.4 at this probe, phrased as "Invalid
+  input: expected X, received Y" rather than the earlier "Expected X, received Y"; the field name
+  and the fact that it is a `validation` result, not a silent coercion, are the load-bearing part.)
 
 ### 4.6 Zed and Continue.dev — `unverified`
 
@@ -303,7 +310,7 @@ likely to be mistaken for a server bug.
   what tells the model about presets, budgets and confirmation tokens. If a client ignores
   it, the model may attempt denied tools and get policy refusals it does not understand —
   a UX problem, not a correctness one.
-- **A large `tools/list` costs context.** 41 tools with descriptions is ~78 KB of JSON.
+- **A large `tools/list` costs context.** 42 tools with descriptions is ~80 KB of JSON.
   Clients that inject the whole tool list into the prompt will feel it. Use
   `X_MCP_HIDE_DENIED=1` with a narrow preset to shrink the list to the callable set.
 
@@ -347,7 +354,7 @@ console.log("tools",t.length,
 "| annotations",t.filter(x=>x.annotations).length);});'
 ```
 
-**Expected output, exactly:** `tools 41 | outputSchema 41 | annotations 41`.
+**Expected output, exactly:** `tools 42 | outputSchema 42 | annotations 42`.
 
 The `2>/dev/null` is required — npm deprecation warnings otherwise mix into the JSON.
 
