@@ -26,9 +26,13 @@ export const MEDIA_SEGMENT_BYTES = 4 * 1024 * 1024;
 /**
  * Per-type upload size caps, in bytes (MEDIA-2; docs/04 §7 "per-type size caps are
  * enforced locally with the cap stated in the error" — the concrete numbers are carried
- * by the media package). These are the X composer limits: 5 MiB for a still image,
- * 15 MiB for a GIF, 512 MiB for a video. The tool layer refuses an over-cap file LOCALLY,
- * before INIT, so an upload that the platform would reject at FINALIZE never spends a
+ * by the media package). The image (5 MiB) and GIF (15 MiB) caps match X's limits. The
+ * 512 MiB video cap is the pre-2026-09-01 limit and is now deliberately stricter than the
+ * platform: since 2026-09-01 X accepts a Post video (`tweet_video`) of up to 8 GB and
+ * 20 min on a default account, 16 GB and 125 min with X Premium (docs.x.com changelog and
+ * media introduction; platform fact-check 2026-10-01). Raising it is an open product
+ * decision (a multi-GB upload holds one tool call for its whole duration). The tool layer
+ * refuses an over-cap file LOCALLY, before INIT, so a refused upload never spends a
  * single segment.
  */
 export const MEDIA_SIZE_CAPS: Readonly<Record<MediaCategory, number>> = {

@@ -14,6 +14,10 @@ deltas, [08-delta-audit-2026-08-30.md](08-delta-audit-2026-08-30.md),
 [../08-implementation-roadmap.md](../08-implementation-roadmap.md)'s "Security
 re-audit of the implementation" entry for the running status of that series.
 
+Platform fact-checks against the live X documentation, outside both series:
+[11-platform-fact-check-2026-10-01.md](11-platform-fact-check-2026-10-01.md), the
+release-week pre-run of the 1.0 checklist's final platform fact-check.
+
 ## Verdicts
 
 | # | Review | Role | Verdict | Highlights |

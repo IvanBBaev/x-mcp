@@ -257,16 +257,16 @@ function noHttpCtx(): ToolContext {
   return {
     ports: makePorts(),
     http: {
-      send: () => Promise.reject(new Error('endpoint must not be called for a removed operator')),
+      send: () => Promise.reject(new Error('endpoint must not be called for an invalid operator')),
     },
   };
 }
 
 /** Assert the rejection is the typed DRIFT-3 `validation` error, not the stub's Error. */
-function isRemovedOperatorError(err: unknown): boolean {
+function isInvalidOperatorError(err: unknown): boolean {
   assert.ok(XError.is(err), 'expected an XError');
   assert.equal(err.kind, 'validation');
-  assert.match(err.message, /operator removed by X/);
+  assert.match(err.message, /web-search operator the X API rejects/);
   return true;
 }
 
@@ -296,12 +296,12 @@ function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks
   return { reg, budgetChecks: () => checks };
 }
 
-test('DRIFT-3: x_search_archive rejects each removed engagement operator before the budget charge or any request', async () => {
-  for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+test('DRIFT-3: x_search_archive rejects each invalid web-search engagement operator before the budget charge or any request', async () => {
+  for (const op of ['min_faves', 'min_retweets']) {
     const { reg, budgetChecks } = chargeCountingRegistry(xSearchArchive);
     await assert.rejects(
       () => reg.call('x_search_archive', { query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
-      isRemovedOperatorError,
+      isInvalidOperatorError,
     );
     assert.equal(budgetChecks(), 0);
   }
@@ -310,45 +310,54 @@ test('DRIFT-3: x_search_archive rejects each removed engagement operator before 
 test('DRIFT-3: x_post_counts_archive applies the same pre-validation before the budget charge', async () => {
   const { reg, budgetChecks } = chargeCountingRegistry(xPostCountsArchive);
   await assert.rejects(
-    () => reg.call('x_post_counts_archive', { query: 'ai min_replies:100' }, noHttpCtx()),
-    isRemovedOperatorError,
+    () => reg.call('x_post_counts_archive', { query: 'ai min_retweets:100' }, noHttpCtx()),
+    isInvalidOperatorError,
   );
   assert.equal(budgetChecks(), 0);
 });
 
-test('DRIFT-3: x_search_archive.input.safeParse rejects a removed operator, naming the field', () => {
-  const rejected = xSearchArchive.input.safeParse({ query: 'from:xdevelopers min_likes:5' });
+test('DRIFT-3: x_search_archive.input.safeParse rejects an invalid operator, naming the field', () => {
+  const rejected = xSearchArchive.input.safeParse({ query: 'from:xdevelopers min_faves:5' });
   assert.equal(rejected.success, false);
   if (!rejected.success) {
     const issue = rejected.error.issues[0];
     assert.deepEqual(issue?.path, ['query']);
-    assert.match(issue?.message ?? '', /operator removed by X/);
+    assert.match(issue?.message ?? '', /web-search operator the X API rejects/);
   }
 });
 
-test('DRIFT-3: x_post_counts_archive.input.safeParse rejects a removed operator, naming the field', () => {
-  const rejected = xPostCountsArchive.input.safeParse({ query: 'ai min_reposts:10' });
+test('DRIFT-3: x_post_counts_archive.input.safeParse rejects an invalid operator, naming the field', () => {
+  const rejected = xPostCountsArchive.input.safeParse({ query: 'ai min_retweets:10' });
   assert.equal(rejected.success, false);
   if (!rejected.success) {
     const issue = rejected.error.issues[0];
     assert.deepEqual(issue?.path, ['query']);
-    assert.match(issue?.message ?? '', /operator removed by X/);
+    assert.match(issue?.message ?? '', /web-search operator the X API rejects/);
+  }
+});
+
+test('DRIFT-3: the engagement operators X restored on 2026-05-04 pass pre-validation', () => {
+  // min_likes:/min_replies:/min_reposts: were removed 2026-01-19 and restored 2026-05-04
+  // (platform fact-check 2026-10-01), so the schemas must no longer refuse them.
+  for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+    assert.equal(xSearchArchive.input.safeParse({ query: `ai ${op}:10` }).success, true, op);
+    assert.equal(xPostCountsArchive.input.safeParse({ query: `ai ${op}:10` }).success, true, op);
   }
 });
 
 test('DRIFT-3: an operator name as a plain word is not a false positive', async () => {
-  // Only the `operator:` form is the removed syntax; the bare word must still search.
+  // Only the `operator:` form is the refused syntax; the bare word must still search.
   const http = mockHttp();
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
       method: 'GET',
-      query: { query: 'discussing min_reposts removal', ...ARCHIVE_FIELD_PARAMS },
+      query: { query: 'discussing min_retweets removal', ...ARCHIVE_FIELD_PARAMS },
     })
     .reply(200, loadFixture<RawListResponse<RawTweet>>('archive/archive-empty.json'));
 
   const out = await xSearchArchive.handler(
-    { query: 'discussing min_reposts removal' },
+    { query: 'discussing min_retweets removal' },
     makeCtx(http),
   );
   const page = out.data as CompactPageResult;

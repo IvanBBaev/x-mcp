@@ -22,6 +22,13 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_search_recent`, `x_search_archive`, `x_post_counts_recent` and
+  `x_post_counts_archive` accept the `min_likes:`, `min_replies:` and `min_reposts:`
+  operators again. X removed them on 2026-01-19 and restored them on 2026-05-04, but
+  the tools still refused them locally. The check now refuses the X web-search spellings
+  `min_faves:` and `min_retweets:` instead, which the X API rejects with a 400; the
+  error names the valid operator to use, and nothing is sent or charged.
+
 - `x_media_upload` no longer charges the session budget for an upload with `alt_text`
   that is refused locally before any request reaches X — a path outside the media
   directory, a symlink, an unsupported, empty, oversized or mislabelled file, or a
@@ -61,7 +68,7 @@ development chronology lives in `WORKLOG.md`.
 
 - `x_search_recent`, `x_search_archive`, `x_post_counts_recent`, `x_post_counts_archive`,
   `x_post_get`, `x_list_get`, `x_list_members`, and `x_list_timeline` no longer charge the
-  session budget for a call they refuse locally. A query using a removed engagement
+  session budget for a call they refuse locally. A query using an invalid engagement
   operator (DRIFT-3), a malformed post reference in `x_post_get`'s `ids`, and a malformed
   `list_id` are now rejected at input validation, before the budget check, instead of
   after it. The refusal is still a `validation` error and still sends nothing; its
@@ -202,6 +209,15 @@ development chronology lives in `WORKLOG.md`.
   `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
 
 ### Platform changes absorbed
+
+- (2026-10-01) Release-week platform fact-check pre-run
+  ([docs/reviews/11](docs/reviews/11-platform-fact-check-2026-10-01.md)). X restored
+  the `min_likes:`/`min_replies:`/`min_reposts:` search operators on 2026-05-04 (see
+  Changed). Since 2026-09-01 X accepts Post videos up to 8 GB / 20 min (16 GB / 125 min
+  with X Premium); `x_media_upload` keeps its 512 MiB local video cap for now. Encrypted
+  DMs (XChat) use a separate Chat API; the DM tools reach only the legacy, unencrypted
+  DM endpoints, which are unchanged. All pay-per-use rates and the 3,000,000 monthly
+  post-read cap verified on 2026-09-28 are unchanged.
 
 - (2026-09-28) X's pricing page now prices engagement, social-graph, list-management,
   bookmark, delete and media-metadata writes individually (User Interaction: Create

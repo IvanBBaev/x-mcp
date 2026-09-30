@@ -7,7 +7,7 @@ so treat every number as perishable: re-verify against
 [`https://docs.x.com/x-api/llms.txt`](https://docs.x.com/x-api/llms.txt) and the
 [X API changelog](https://docs.x.com/changelog) at every phase boundary (standing rule 2
 of [08-implementation-roadmap.md](08-implementation-roadmap.md)). **Last fact-checked:
-2026-09-28.**
+2026-10-01** (release-week pre-run, [review 11](reviews/11-platform-fact-check-2026-10-01.md)).
 
 ## 1. API generations
 
@@ -116,7 +116,13 @@ post delete (no delete-post row — priced at Interaction: Delete, $0.010).
   credits.
 - **Owned Reads** ($0.001/resource) make own-data tools (`timeline_mentions`,
   `bookmarks_list`, `liked_posts_list`, own `timeline_user`, `auth_status`, `usage_get`)
-  an order of magnitude cheaper — worth surfacing in the per-call cost estimate.
+  an order of magnitude cheaper — worth surfacing in the per-call cost estimate. The
+  pricing page's qualifying list is the `GET /2/users/{id}/…` family (posts, mentions,
+  liked posts, bookmarks, followers, following, blocking, muting, owned/followed/pinned
+  lists, list memberships), and only when `{id}` is the authenticated user **and** that
+  user owns the developer app. `GET /2/users/me` (`auth_status`) and `GET /2/usage/tweets`
+  (`usage_get`) are not on that list, so their local `owned` class is an estimate, not a
+  published rate (fact-check 2026-10-01, review 11 F-4).
 
 **Design consequences.** Every write costs real money; a link-bearing post costs **13×**
 a plain post. So (a) each result surfaces its estimated `cost_usd`
@@ -276,13 +282,20 @@ Availability classes in parentheses are from §3.2; everything unmarked is `app+
   /2/dm_conversations/:id/messages` and `POST /2/dm_conversations/with/:user_id/messages`;
   create group conv `POST /2/dm_conversations`; `DELETE /2/dm_events/:id`. **DM events
   are retained only 30 days** via the API (surfaced per [07](07-corner-cases.md) DM-2).
+  These are the platform's **legacy (unencrypted)** DM endpoints. Encrypted
+  conversations (XChat) live on a separate Chat API (`/2/chat/…`, client-side
+  encryption through the Chat XDK) that no x-mcp tool calls, so encrypted
+  conversations are invisible to the DM tools (fact-check 2026-10-01, review 11 F-6).
 - **Lists**: full CRUD `POST/PUT/DELETE /2/lists*`, members, pins, follows, `GET
   /2/lists/:id/tweets`
 - **Media** *(dedicated v2 paths — primary)*: `POST /2/media/upload/initialize` →
   `POST /2/media/upload/{id}/append` (segments < 5 MB) → `POST
   /2/media/upload/{id}/finalize`; `GET /2/media/upload` (STATUS); `POST /2/media/metadata`
   (alt text). The one-shot `POST /2/media/upload` remains a small-file fast path. v1.1
-  paths (retired 2025-06-09) never appear.
+  paths (retired 2025-06-09) never appear. Since 2026-09-01 X accepts Post videos up to
+  8 GB / 20 min (16 GB / 125 min with X Premium) and DM videos up to 512 MB / 140 s; image
+  (5 MB) and GIF (15 MB) limits are unchanged. `x_media_upload` still caps video at
+  512 MiB locally (review 11 F-3).
 - **Spaces**: `GET /2/spaces/:id`, `GET /2/spaces/search`
 - **Trends**: `GET /2/trends/by/woeid/:id`; personalized trends
   (`GET /2/users/personalized_trends` — `premium-user`: requires X Premium on the
@@ -325,7 +338,9 @@ within the six months before this rewrite):
 2. Which surfaces the legacy tiers still include, and when grandfathered accounts are
    migrated to pay-per-use ([Appendix A](#appendix-a--legacy-tiers-grandfathered)).
 3. Media upload path details (v1.1 → v2 dedicated-endpoint migration tail).
-4. DM endpoint surface and the 30-day retention window (XChat may shift the basis again).
+4. DM endpoint surface and the 30-day retention window. As of 2026-10-01 XChat
+   (encrypted DMs) ships as a separate Chat API while the legacy DM endpoints stay
+   unchanged (§5).
 5. Trends and Spaces endpoints (newest surface, still evolving); personalized-trends
    `premium-user` gating.
 

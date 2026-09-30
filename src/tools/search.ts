@@ -14,29 +14,33 @@ import { normalizeTimeBounds } from '../core/timebounds.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
 
-// DRIFT-3: engagement-threshold operators X removed from the v2 syntax on 2026-01-19.
-// A query using one would be rejected server-side AFTER the paid read was already
+// DRIFT-3: engagement-threshold operators under their X web-search names. X removed
+// `min_likes:`/`min_replies:`/`min_reposts:` from the v2 syntax on 2026-01-19 and restored
+// them on 2026-05-04 (search moved to a new index — docs.x.com changelog, platform
+// fact-check 2026-10-01), so those are accepted again. The web-search spellings
+// `min_faves:`/`min_retweets:` were never valid v2 operators: X rejects them with a 400.
+// A query using one would fail server-side AFTER the paid read was already
 // spent, so both search-slice schemas pre-validate and refuse before any HTTP — and, since
 // schema validation is registry pipeline step 1 and the budget charge is step 4, before that
 // charge too, via `.superRefine` (schema-level, not the handler) so a locally-refused query
 // is never billed (delta audit 09 Finding 1 residual, same fix as `x_post_create`).
-const REMOVED_OPERATORS = ['min_likes', 'min_replies', 'min_reposts'] as const;
+const INVALID_OPERATORS = ['min_faves', 'min_retweets'] as const;
 
-/** DRIFT-3: which removed operators (if any) a query uses. */
-function findRemovedOperators(query: string): readonly string[] {
-  return REMOVED_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
+/** DRIFT-3: which invalid (web-search-only) operators, if any, a query uses. */
+function findInvalidOperators(query: string): readonly string[] {
+  return INVALID_OPERATORS.filter((op) => new RegExp(`\\b${op}:`).test(query));
 }
 
 /** DRIFT-3 pre-validation, attached to a schema's `query` field via `.superRefine`. */
-function checkRemovedOperators(query: string, ctx: z.RefinementCtx): void {
-  const found = findRemovedOperators(query);
+function checkInvalidOperators(query: string, ctx: z.RefinementCtx): void {
+  const found = findInvalidOperators(query);
   if (found.length > 0) {
     ctx.addIssue({
       code: 'custom',
       path: ['query'],
       message:
-        `Query uses ${found.join(', ')} — operator removed by X on 2026-01-19; ` +
-        'remove it from the query (the request was not sent, so no read was spent).',
+        `Query uses ${found.join(', ')} — an X web-search operator the X API rejects; ` +
+        'use min_likes: or min_reposts: instead (the request was not sent, so no read was spent).',
     });
   }
 }
@@ -75,7 +79,7 @@ const searchInput = z
       .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.'),
   })
   .strict()
-  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
+  .superRefine((value, ctx) => checkInvalidOperators(value.query, ctx));
 
 export const xSearchRecent = defineTool({
   name: 'x_search_recent',
@@ -92,8 +96,8 @@ export const xSearchRecent = defineTool({
   phase: 1,
   input: searchInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: removed operators are refused by `searchInput`'s `.superRefine` before the
-    // registry's budget charge (delta audit 09 Finding 1 residual) — nothing left to check here.
+    // DRIFT-3: invalid web-search operators are refused by `searchInput`'s `.superRefine`
+    // before the registry's budget charge (delta audit 09 Finding 1 residual) — nothing left to check here.
     // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
     const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const clamp =
@@ -172,7 +176,7 @@ const countsInput = z
       .describe('Return the exact API JSON instead of the compact histogram.'),
   })
   .strict()
-  .superRefine((value, ctx) => checkRemovedOperators(value.query, ctx));
+  .superRefine((value, ctx) => checkInvalidOperators(value.query, ctx));
 
 /** One compact histogram bucket: numbers + ISO timestamps only, never third-party text. */
 interface CountBucket {
@@ -201,8 +205,8 @@ export const xPostCountsRecent = defineTool({
   phase: 1,
   input: countsInput,
   handler: async (input, ctx) => {
-    // DRIFT-3: counts hit the same query parser; `countsInput`'s `.superRefine` refuses a
-    // removed operator before the registry's budget charge (delta audit 09 Finding 1 residual).
+    // DRIFT-3: counts hit the same query parser; `countsInput`'s `.superRefine` refuses an
+    // invalid operator before the registry's budget charge (delta audit 09 Finding 1 residual).
     // REND-9: validate + normalize the time bounds (clamping a too-recent end_time) before HTTP.
     const bounds = normalizeTimeBounds(input, ctx.ports.clock.now());
     const nextToken = toCursor(input.page_token);

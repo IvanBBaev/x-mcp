@@ -639,9 +639,13 @@ credits, not tiers, for post-2026-02-06 developers.)*
   the `forbidden` class carries platform-refusal semantics distinct from
   unexpected `api`.
 
-- **DRIFT-3 — Deprecated operators are pre-flagged** `P1` `[X fact-check]`
-  `min_likes`/`min_replies`/`min_reposts` (removed 2026-01-19) are rejected by
-  query pre-validation with "operator removed by X" — not sent to burn a paid read.
+- **DRIFT-3 — Invalid operators are pre-flagged** `P1` `[X fact-check]`
+  The X web-search spellings `min_faves`/`min_retweets` are not valid X API operators
+  (X answers 400); query pre-validation rejects them with "web-search operator the X API
+  rejects" and points to `min_likes`/`min_reposts` — not sent to burn a paid read.
+  `min_likes`/`min_replies`/`min_reposts` were removed on 2026-01-19 and restored on
+  2026-05-04 (search moved to a new index), so they are accepted again (platform
+  fact-check 2026-10-01, [review 11](reviews/11-platform-fact-check-2026-10-01.md)).
 
 - **DRIFT-4 — Fixtures carry provenance and are re-fact-checked** `P1` `[QA-F5]`
   Every fixture records source + capture date; a scheduled monthly refresh runs
