@@ -5,6 +5,14 @@ Six independent senior role reviews of the x-mcp design corpus, run 2026-07-21
 the X-platform reviewer additionally fact-checked claims against live X developer
 documentation.
 
+This index covers only the Phase 0 design-corpus reviews (01-06) below. The
+implementation-security-audit series (audited against the shipped code, not the
+design) lives in [07-implementation-audit.md](07-implementation-audit.md) and its
+deltas, [08-delta-audit-2026-08-30.md](08-delta-audit-2026-08-30.md) and
+[09-delta-audit-2026-09-25.md](09-delta-audit-2026-09-25.md); see
+[../08-implementation-roadmap.md](../08-implementation-roadmap.md)'s "Security
+re-audit of the implementation" entry for the running status of that series.
+
 ## Verdicts
 
 | # | Review | Role | Verdict | Highlights |

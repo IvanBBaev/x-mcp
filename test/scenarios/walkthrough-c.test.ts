@@ -228,8 +228,10 @@ test('walkthrough C under read-only: steps 1-3 run, step 4 is refused at the pol
   // PAGE-1/PAGE-5: exactly ONE request was made and the cursor comes back opaque for the
   // model to pass as `page_token` — the tool never auto-paginates behind its back.
   assert.equal(page.data.next_token, 'abc');
-  assert.equal(page.meta.cost_usd, 0.005);
-  assert.equal(page.meta.session_total_usd, 0.01);
+  // COST-3: $0.005 PER POST the page returned — three posts, so $0.015, not a flat $0.005
+  // for the call. (The counts read above stays one unit: its buckets are not posts.)
+  assert.equal(page.meta.cost_usd, 0.015);
+  assert.equal(page.meta.session_total_usd, 0.02);
 
   // --- Step 3: rank client-side (in-model, no tool call, no spend) ----------------
   const ranked = rankByEngagement(page.data.items);
@@ -253,7 +255,7 @@ test('walkthrough C under read-only: steps 1-3 run, step 4 is refused at the pol
 
   // The deny runs BEFORE the budget gate: the refused step charges nothing, so the
   // session total is still exactly steps 1 + 2.
-  assert.equal(composition.budget.total(), 0.01);
+  assert.equal(composition.budget.total(), 0.02);
 
   mock.assertDone(); // step 4 never reached the network
   await client.close();
@@ -310,9 +312,10 @@ test('walkthrough C under publish: counts -> search -> client-side ranking -> qu
   // COST-4: this text carries no URL, so the base price applies and no price note appears.
   assert.equal(created.data.note, undefined);
   assert.equal(created.meta.cost_usd, 0.015);
-  // COST-3: $0.005 counts + $0.005 search + $0.015 create, accumulated across the journey.
-  assert.equal(created.meta.session_total_usd, 0.025);
-  assert.equal(composition.budget.total(), 0.025);
+  // COST-3: $0.005 counts + $0.015 search (3 posts x $0.005) + $0.015 create, accumulated
+  // across the journey. The write is priced per REQUEST, so it stays one unit.
+  assert.equal(created.meta.session_total_usd, 0.035);
+  assert.equal(composition.budget.total(), 0.035);
 
   mock.assertDone();
   await client.close();
@@ -343,7 +346,7 @@ test('COST-4/COST-5: a URL in the quote text raises the price to $0.20 and hard 
     }),
   );
   assert.equal(rankByEngagement(page.data.items)[0]?.id, WINNER_ID);
-  assert.equal(composition.budget.total(), 0.01);
+  assert.equal(composition.budget.total(), 0.02);
 
   const refusedResult = await call(client, 'x_post_create', {
     text: `Best breakdown of the topic this week: https://x.com/i/status/${WINNER_ID}`,
@@ -359,7 +362,7 @@ test('COST-4/COST-5: a URL in the quote text raises the price to $0.20 and hard 
   assert.equal(refusal.error.retryable, false);
 
   // COST-5: a refused reservation mutates nothing — the counter is still steps 1 + 2.
-  assert.equal(composition.budget.total(), 0.01);
+  assert.equal(composition.budget.total(), 0.02);
 
   mock.assertDone(); // the create never reached the network
   await client.close();

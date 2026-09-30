@@ -166,6 +166,21 @@ export interface ToolOutput {
   readonly data: unknown;
   /** Optional one-line human summary; the adapter still renders `data`. */
   readonly summary?: string;
+  /**
+   * How many billable platform resources this response actually carried. The platform
+   * bills reads PER RESOURCE RETURNED and writes PER REQUEST (docs/01 §3.1), so a page of
+   * 100 posts costs 100 unit prices while a lookup of one post, or any write
+   * acknowledgement, costs one. Omitting it means ONE — the pre-1.0 behaviour, which is
+   * still right for every single-resource tool.
+   *
+   * The registry hands it to the budget's settle step (pipeline step 6), which adjusts the
+   * reservation the gate already took at check time (INT-2) to what the response really
+   * carried. `0` is a legitimate value: an empty page returned no resources, so it bills
+   * nothing. The count is the tool's own primary resources; secondary expansions
+   * (`includes`-style authors, list owners) are not counted twice — the platform prices
+   * what the endpoint is a read OF.
+   */
+  readonly units?: number;
 }
 
 /** The per-result cost meta the pipeline attaches to EVERY tool result (docs/02 §5.2). */
@@ -184,6 +199,19 @@ export type ToolHandler<I> = (input: I, ctx: ToolContext) => Promise<ToolOutput>
 export interface CostEstimate {
   readonly class: CostClass;
   readonly usd?: number;
+  /**
+   * Resource multiplier for the class price (default 1). The registry sets it from
+   * {@link ToolOutput.units} when it settles the reservation; a pre-call estimate leaves it
+   * unset, because how many resources a read will return is not knowable before the
+   * response. A `usd` override is an ABSOLUTE per-call price (COST-4) and is therefore
+   * never multiplied.
+   */
+  readonly units?: number;
+  /**
+   * Why this call is priced off the table (COST-4), in our own prose. A hard-mode refusal
+   * appends it, so the agent sees why a call near the cap costs more than the base price.
+   */
+  readonly note?: string;
 }
 
 /** A tool's cost: a static class, or an input-dependent resolver (for the URL-post case). */

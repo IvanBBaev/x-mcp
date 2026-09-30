@@ -26,9 +26,20 @@ import {
   listBookmarks,
 } from '../api/endpoints/engagement.js';
 import type { BookmarkPageParams } from '../api/endpoints/engagement.js';
+import {
+  BOOKMARK_USD,
+  INTERACTION_DELETE_USD,
+  USER_INTERACTION_CREATE_USD,
+} from '../core/budget.js';
 import { apiError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
-import { capRawMaxResults, postUrl, rawSummary, renderPostPage } from '../core/render.js';
+import {
+  billableUnits,
+  rawMaxResults,
+  postUrl,
+  rawSummary,
+  renderPostPage,
+} from '../core/render.js';
 import type { RawListResponse } from '../core/render.js';
 import type { Page } from '../core/render-shapes.js';
 import { parsePostId } from '../core/resolve.js';
@@ -86,7 +97,11 @@ export const xLikeSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'like.write'],
-  cost: 'w:action',
+  // "User Interaction: Create" to like, "Interaction: Delete" to unlike (docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'like' ? USER_INTERACTION_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Like / unlike a post',
     readOnlyHint: false,
@@ -135,7 +150,11 @@ export const xRepostSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'tweet.write'],
-  cost: 'w:action',
+  // "User Interaction: Create" to repost, "Interaction: Delete" to unrepost (docs/01 App. B).
+  cost: (input) => ({
+    class: 'w:action',
+    usd: input.action === 'repost' ? USER_INTERACTION_CREATE_USD : INTERACTION_DELETE_USD,
+  }),
   annotations: {
     title: 'Repost / un-repost a post',
     readOnlyHint: false,
@@ -184,7 +203,8 @@ export const xBookmarkSet = defineTool({
   policy: 'write:engagement',
   availability: 'user-only',
   scopes: ['tweet.read', 'users.read', 'bookmark.write'],
-  cost: 'w:action',
+  // "Bookmark" — same rate both directions (docs/01 App. B).
+  cost: () => ({ class: 'w:action', usd: BOOKMARK_USD }),
   annotations: {
     title: 'Bookmark / unbookmark a post',
     readOnlyHint: false,
@@ -220,11 +240,11 @@ const bookmarksListInput = z
       .number()
       .int()
       .optional()
-      .describe('Results per page (1-100); out-of-range values are clamped into the window.'),
+      .describe('Results per page (1-100); out-of-range values are clamped.'),
     page_token: z
       .string()
       .optional()
-      .describe('Opaque pagination cursor returned as next_token by a previous call.'),
+      .describe('Pagination cursor: the next_token from a previous call.'),
     raw: z
       .boolean()
       .optional()
@@ -249,12 +269,7 @@ function preparePage(input: z.infer<typeof bookmarksListInput>): PreparedPage {
     input.max_results !== undefined
       ? clampMaxResults(input.max_results, PAGE_BOUNDS.engagementList)
       : undefined;
-  const maxResults =
-    input.raw === true
-      ? input.max_results !== undefined
-        ? capRawMaxResults(input.max_results)
-        : undefined
-      : clamp?.value;
+  const maxResults = input.raw === true ? rawMaxResults(clamp?.value) : clamp?.value;
   const paginationToken = toCursor(input.page_token);
 
   const notes: string[] = [];
@@ -269,13 +284,24 @@ function preparePage(input: z.infer<typeof bookmarksListInput>): PreparedPage {
   };
 }
 
-/** `raw: true` output: the exact API JSON, size-capped upstream (REND-10). */
+/**
+ * `raw: true` output: the exact API JSON, size-capped upstream (REND-10). Billed per
+ * resource the page returned, not per call (COST-3).
+ */
 function rawOutput<T>(res: RawListResponse<T>): ToolOutput {
-  return { data: res, summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`) };
+  return {
+    data: res,
+    summary: rawSummary(`${res.data?.length ?? 0} raw result(s).`),
+    units: billableUnits(res),
+  };
 }
 
-/** Compact-page output with the normalization notes prefixed onto the page note. */
-function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
+/**
+ * Compact-page output with the normalization notes prefixed onto the page note. `units` is
+ * the billable count, which the caller takes from the RAW envelope rather than from the
+ * rendered page: what X charges for is what it sent, whatever rendering then drops (COST-3).
+ */
+function pageOutput<T>(page: Page<T>, notes: readonly string[], units: number): ToolOutput {
   let shaped = page;
   if (notes.length > 0) {
     const prefix = notes.join(' ');
@@ -284,6 +310,7 @@ function pageOutput<T>(page: Page<T>, notes: readonly string[]): ToolOutput {
   return {
     data: shaped,
     summary: `${shaped.result_count} result(s)${shaped.next_token !== undefined ? ', more available' : ''}.`,
+    units,
   };
 }
 
@@ -310,7 +337,7 @@ export const xBookmarksList = defineTool({
     );
     const res = await listBookmarks(ctx.http, userId, prepared.params);
     if (input.raw === true) return rawOutput(res);
-    return pageOutput(renderPostPage(res), prepared.notes);
+    return pageOutput(renderPostPage(res), prepared.notes, billableUnits(res));
   },
 });
 
