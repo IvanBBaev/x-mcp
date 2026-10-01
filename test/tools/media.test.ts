@@ -1416,14 +1416,40 @@ test('MEDIA-7: the bound call signal reaches the transport — the in-flight APP
   // End-to-end shape of the real thing: the registry binds the tools/call signal to the
   // invoker (MCP-7 `withCallSignal`), so the APPEND request itself is aborted mid-flight
   // rather than merely being followed by a loop check.
+  //
+  // The abort is driven by the transport itself, never by a wall-clock timer: the APPEND
+  // interceptor's body matcher runs while that request is being dispatched — INIT has
+  // already been answered and the request's abort listener is already armed — and that is
+  // the exact moment the host cancels. The APPEND reply is held back far longer than the
+  // test runs, so the only way the call can settle with "0 of 1" is the signal tearing the
+  // in-flight request down; a transport that never saw the signal would wait the delay out,
+  // get its 204, and report "1 of 1" instead.
   const path = tempFile('inflight.png', mediaBytes('png', 12));
   const controller = new AbortController();
+  // Wire order as the mock saw it (a body matcher may run more than once per request).
+  const wire: string[] = [];
   const mock = mockHttp();
   mock.pool
-    .intercept({ path: '/2/media/upload/initialize', method: 'POST' })
+    .intercept({
+      path: '/2/media/upload/initialize',
+      method: 'POST',
+      body: () => {
+        if (!wire.includes('INIT')) wire.push('INIT');
+        return true;
+      },
+    })
     .reply(200, { data: { id: '8400' } });
   mock.pool
-    .intercept({ path: '/2/media/upload/8400/append', method: 'POST' })
+    .intercept({
+      path: '/2/media/upload/8400/append',
+      method: 'POST',
+      body: () => {
+        if (!wire.includes('APPEND')) wire.push('APPEND');
+        // The MCP client cancels while this APPEND is in flight.
+        controller.abort();
+        return true;
+      },
+    })
     .reply(204)
     .delay(2000);
   // No FINALIZE interceptor, again on purpose.
@@ -1433,7 +1459,6 @@ test('MEDIA-7: the bound call signal reaches the transport — the in-flight APP
     http: withCallSignal(base.http, controller.signal),
     signal: controller.signal,
   };
-  const timer = setTimeout(() => controller.abort(), 20);
 
   await assert.rejects(
     () => upload.handler({ path }, ctx),
@@ -1448,7 +1473,8 @@ test('MEDIA-7: the bound call signal reaches the transport — the in-flight APP
       return true;
     },
   );
-  clearTimeout(timer);
+  // The cancellation landed mid-APPEND, after a completed INIT, and nothing followed it.
+  assert.deepEqual(wire, ['INIT', 'APPEND']);
   await mock.close();
 });
 
