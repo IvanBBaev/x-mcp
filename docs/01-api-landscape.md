@@ -7,7 +7,7 @@ so treat every number as perishable: re-verify against
 [`https://docs.x.com/x-api/llms.txt`](https://docs.x.com/x-api/llms.txt) and the
 [X API changelog](https://docs.x.com/changelog) at every phase boundary (standing rule 2
 of [08-implementation-roadmap.md](08-implementation-roadmap.md)). **Last fact-checked:
-2026-07-22.**
+2026-09-28.**
 
 ## 1. API generations
 
@@ -70,7 +70,7 @@ assumptions from the original design: (a) a per-tool *minimum tier*, (b) *tier i
 from 403 responses*, and (c) a *monthly post-read cap* as the budget unit. §3.2–§3.4
 replace all three.
 
-### 3.1 Pay-per-use credit pricing *(verified 2026-07-22)*
+### 3.1 Pay-per-use credit pricing *(verified 2026-09-28)*
 
 No subscriptions — credits are purchased upfront and spent per resource read and per
 write request. Rates (source:
@@ -90,9 +90,27 @@ write request. Rates (source:
 | **Post containing a URL** (since **2026-04-16**) | **$0.20** | `write-post-url` |
 | DM sent | $0.015 | `write-dm` |
 | List created | $0.010 | `write-list` |
-| Engagement writes (like/repost/bookmark/follow/mute/block, list follow/pin, deletes, media, hide-reply) | **not separately priced** on the pricing page as of 2026-07-22 | `write-engagement` — capture in Phase 1 live test |
+| User Interaction: Create (like/repost/follow "on", per action) | $0.015 | `write-engagement` |
+| Interaction: Delete (like/repost/follow "off", per action) | $0.010 | `write-engagement` |
+| Mute: Delete (unmute, per action) | $0.005 | `write-engagement` |
+| Content: Manage (hide/unhide a reply, per action) | $0.005 | `write-engagement` |
+| List: Manage (update/delete a list, member/follow/pin toggles, per action) | $0.005 | `write-engagement` |
+| Bookmark (add/remove, per action) | $0.005 | `write-engagement` |
+| Media Metadata (set alt text on uploaded media, per call) | $0.005 | `write-engagement` |
+| Counts: All (full-archive counts histogram, per call — not per bucket) | $0.010 | `read-post` |
 
-- **Hard platform cap: 2,000,000 post reads per monthly billing cycle.** Higher volumes
+These eight rows were added to the pricing page after this doc's previous fact-check
+(they landed some time between 2026-07-22 and 2026-09-28) and closed the gap the old
+`write-engagement` placeholder row used to flag. Three x-mcp write operations still
+have **no matching published row** and are priced conservatively (never under-counted)
+by mapping them to the nearest published class — see
+[Appendix B](#appendix-b--per-endpoint-static-cost-table) for the full per-tool
+mapping, including which rows are inferred: mute *create* (no "Mute: Create" row —
+priced at User Interaction: Create, $0.015), block create/unblock (no block row at
+all — priced at User Interaction: Create / Interaction: Delete, $0.015 / $0.010), and
+post delete (no delete-post row — priced at Interaction: Delete, $0.010).
+
+- **Hard platform cap: 3,000,000 post reads per monthly billing cycle.** Higher volumes
   require an Enterprise plan. This is the *only* hard cap under pay-per-use.
 - Credits are purchased upfront; the platform advertises up to 20 % back in xAI API
   credits.
@@ -121,7 +139,7 @@ a minimum tier. Availability classes are consumed by
 | `user-only` | Requires user-context OAuth 2.0/1.0a tokens (writes, DMs, home timeline, `me`, engagement). Degrades to an app-only shape (no 403) when running app-only — [07](07-corner-cases.md) AUTH-15. | **Yes** |
 | `pilot` | Behind an enrollment/pilot program (e.g. Community Notes *AI Note Writer* — X Developer AI access). | No — opt-in |
 | `premium-user` | Requires an **account property on the authenticated user** (an X Premium subscription), not an API plan — e.g. personalized trends. | No — opt-in |
-| `enterprise` | Only on an Enterprise contract (> 2 M reads/mo, compliance/firehose/replay). | No — opt-in |
+| `enterprise` | Only on an Enterprise contract (> 3 M reads/mo, compliance/firehose/replay). | No — opt-in |
 
 The **cost class** is the per-resource / per-request price bucket from §3.1; the full
 endpoint→class mapping is [Appendix B](#appendix-b--per-endpoint-static-cost-table).
@@ -139,7 +157,7 @@ operator-declared availability set** (roadmap WP-0.10):
   universally-available pay-per-use surface). The specially-provisioned classes
   (`pilot`, `premium-user`, `enterprise`) are **off** until explicitly listed.
 - **Surfaced in `auth_status`.** The resolved availability set is reported alongside
-  `context` / `user` / `scopes` / `policy` ([07](07-corner-cases.md) AUTH-15), so the
+  `auth_mode` / `me` / `scopes` / `policy` ([07](07-corner-cases.md) AUTH-15), so the
   agent and operator can see exactly what the account is declared to reach.
 - **Consumed by the registry** ([08](08-implementation-roadmap.md) WP-1.3): a tool whose
   declared availability class is **not** in the resolved set is **not registered at
@@ -188,7 +206,7 @@ removed.
   distinctly from the $0.015 base (COST-4).
 - **No per-call override** exists in any tool schema (COST-1): the operator sets the
   limit; the model cannot raise it (the old `ignore_budget` per-call flag is removed).
-- The **2 M post-reads/month** platform cap is **not** pre-tracked locally (monthly
+- The **3 M post-reads/month** platform cap is **not** pre-tracked locally (monthly
   state needs persistence the design deliberately omits); it surfaces verbatim as
   `billing` when hit (COST-7) and can be inspected on demand via `usage_get` (§3.5).
 
@@ -200,14 +218,14 @@ Verified against
 [llms.txt index](https://docs.x.com/x-api/llms.txt).
 
 - **Returns:** `project_id`, `project_usage` (posts read this cycle), `project_cap`
-  (= 2,000,000), `cap_reset_day`, `daily_project_usage[]`, `daily_client_app_usage[]`.
+  (= 3,000,000), `cap_reset_day`, `daily_project_usage[]`, `daily_client_app_usage[]`.
   Query params: `days` (1–90, default 7), `usage.fields`. Auth: **app bearer token** +
   an approved developer account — **no tier named** (the old "Basic" label is obsolete).
-- **It reports post-read *counts* against the 2 M cap only — NOT dollar/credit spend.**
+- **It reports post-read *counts* against the 3 M cap only — NOT dollar/credit spend.**
   Credit and dollar spend are visible only in the Developer Console (`console.x.com`);
   there is **no documented spend/credits API**.
 - **Consequence for WP-3.11 / T-317 — GO, scoped:** `x_usage_get` *can* ship, but as a
-  **read-cap reporter** (posts read vs the 2 M cap), **not** a credit-spend mirror. It
+  **read-cap reporter** (posts read vs the 3 M cap), **not** a credit-spend mirror. It
   does **not** close the COST-1 loop for *dollars* — no spend API exists — so the local
   session estimate (§3.4) remains the only per-dollar signal. Because it reports counts
   and not dollars, it is **not** used to seed the session credit budget.
@@ -220,7 +238,7 @@ Verified against
 - Some write endpoints additionally have 24-hour caps with their own headers — e.g.
   `POST /2/tweets` is 100/15 min (user) **and** 10,000/24 h (app,
   `x-app-limit-24hour-*`). Rate limits are orthogonal to the pay-per-use **credit
-  budget** (§3.4) and the 2 M-reads/mo platform cap (§3.1); all three can bite
+  budget** (§3.4) and the 3 M-reads/mo platform cap (§3.1); all three can bite
   independently.
 - x-mcp behavior (details in [02-architecture.md](02-architecture.md) §7):
   - Track the latest headers per (endpoint-class, auth-context) in memory; expose via
@@ -269,7 +287,7 @@ Availability classes in parentheses are from §3.2; everything unmarked is `app+
 - **Trends**: `GET /2/trends/by/woeid/:id`; personalized trends
   (`GET /2/users/personalized_trends` — `premium-user`: requires X Premium on the
   authenticated user)
-- **Ops**: `GET /2/usage/tweets` (reports posts-read vs the 2 M/mo cap; **no dollar
+- **Ops**: `GET /2/usage/tweets` (reports posts-read vs the 3 M/mo cap; **no dollar
   spend** — §3.5)
 
 Expansions & fields: v2 is sparse by default; almost every read accepts
@@ -302,7 +320,7 @@ standing rule 2 of [08](08-implementation-roadmap.md); items 1–4 below all cha
 within the six months before this rewrite):
 
 1. **Pay-per-use rates** (§3.1) — post/user/write prices, the $0.20 URL-post line, the
-   Owned-Reads discount, and the 2 M-reads cap. The whole model replaced tiers on
+   Owned-Reads discount, and the 3 M-reads cap. The whole model replaced tiers on
    2026-02-06 and the URL-post price landed 2026-04-16.
 2. Which surfaces the legacy tiers still include, and when grandfathered accounts are
    migrated to pay-per-use ([Appendix A](#appendix-a--legacy-tiers-grandfathered)).
@@ -342,7 +360,7 @@ sources were used only for legacy-tier history and are marked as such there.*
 Input to `core/budget`'s static cost table ([08](08-implementation-roadmap.md) WP-1.2,
 task T-112) and to the per-tool *cost class* column added to
 [03-tool-catalog.md](03-tool-catalog.md) (task T-012). Prices are the pay-per-use rates
-verified 2026-07-22 (§3.1). Reads are priced **per resource returned** (count from the
+verified 2026-09-28 (§3.1). Reads are priced **per resource returned** (count from the
 response); writes **per request**.
 
 | Cost class | Unit price | Applies to (endpoint families / tools) |
@@ -358,7 +376,17 @@ response); writes **per request**.
 | `write-post-url` | $0.20 / request | `post_create` when `text` contains a URL (COST-4) |
 | `write-dm` | $0.015 / request | `dm_send` |
 | `write-list` | $0.010 / request | `list_create` |
-| `write-engagement` | **unpriced on the pricing page (2026-07-22)** — capture in Phase 1 live test, treat as nominal/$0 locally until confirmed | `like_*`, `repost_*`, `bookmark_*`, `follow_*`, `mute_*`, `block_*`, `post_delete`, `list_update`/`list_delete`, `list_members_*`, `list_follow`/`list_unfollow`/`list_pin`, `post_hide_reply`, `media_upload`, `media_metadata_set` |
+| `write-engagement` — User Interaction: Create | $0.015 / request | `like_create`, `repost_create`, `follow_create` — the "on" direction of `x_like_set`, `x_repost_set`, `x_follow_set` |
+| `write-engagement` — Interaction: Delete | $0.010 / request | `like_delete`, `repost_delete`, `follow_delete` — the "off" direction of the same three tools |
+| `write-engagement` — Mute: Delete | $0.005 / request | `mute_delete` — `x_mute_set` `action:"unmute"` |
+| `write-engagement` — Mute: Create (**inferred**: no published "Mute: Create" row; priced conservatively at the User Interaction: Create rate) | $0.015 / request | `mute_create` — `x_mute_set` `action:"mute"` |
+| `write-engagement` — Block (**inferred**: no published block row at all; create priced conservatively at User Interaction: Create, unblock at Interaction: Delete) | $0.015 create / $0.010 unblock, per request | `block_create`/`block_delete` — `x_block_set` |
+| `write-engagement` — Content: Manage | $0.005 / request | `post_hide_reply` — `x_post_hide_reply` |
+| `write-engagement` — Post: Delete (**inferred**: no published delete-post row; priced conservatively at the higher of Content: Manage and Interaction: Delete) | $0.010 / request | `post_delete` — `x_post_delete` |
+| `write-engagement` — List: Manage | $0.005 / request | `list_update`, `list_delete`, `list_members_add`/`list_members_remove`, `list_follow`/`list_unfollow`, `list_pin`/`list_unpin` — `x_list_update`, `x_list_delete`, `x_list_member_set`, `x_list_follow_set`, `x_list_pin_set` |
+| `write-engagement` — Bookmark | $0.005 / request | `bookmark_create`/`bookmark_delete` — `x_bookmark_set`, both directions |
+| `write-engagement` — Media Metadata | $0.005 / request | `media_metadata_set`, charged only when `x_media_upload` is called with `alt_text` set; the upload call itself stays $0 |
+| `read-post` — Counts: All | $0.010 / request | `post_counts_archive` — `x_post_counts_archive` (billed once per call, not per bucket); distinct from `x_post_counts_recent`'s Counts: Recent, still $0.005 |
 
 Notes:
 
@@ -368,8 +396,12 @@ Notes:
   statically as `read-post` even when the target resolves to `me` — the own-vs-other
   cost resolution is not modeled for it (noted 2026-07-31, T-214 audit; revisit if
   the Owned Reads discount proves material in live captures).
-- `write-engagement` is the one gap in the published price list; its real cost (and the
-  real `billing` error body, COST-6) is a named Phase 1 live-capture task. Until then
-  the budget counts it as $0 and the docs flag the uncertainty rather than guessing.
+- `write-engagement` was a single unpriced placeholder through 2026-07-22; the pricing
+  page has since split it into the named per-operation rows above (verified
+  2026-09-28). Each `w:action` tool now carries a `cost` resolver
+  (`src/core/budget.ts`'s `*_USD` constants) returning its own operation's rate
+  instead of a flat class lookup. Three rows have no exact published match (mute
+  create, block, post delete) and are priced at the higher of the plausible published
+  rows, per the never-under-count rule — see the **inferred** notes above.
 - A URL-post is **13×** a plain post ($0.20 vs $0.015) — the single most expensive
   routine operation; `post_create` must warn distinctly (COST-4).

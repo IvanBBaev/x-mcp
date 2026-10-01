@@ -435,3 +435,78 @@ test('fetch adapter: rejections with an EMPTY or malformed error body carry only
   mock.assertDone();
   await mock.close();
 });
+
+test('AUTH-14: a 3xx from the token endpoint is not followed — the refresh token never chases Location', async () => {
+  const mock = mockHttp();
+  // One interceptor per status: following the redirect would need a second request to the
+  // Location host, which — net connect disabled — would reject instead of mapping to ok:false.
+  for (const status of [301, 302, 307, 308]) {
+    mock.pool
+      .intercept({ path: TOKEN_ENDPOINT_PATH, method: 'POST' })
+      .reply(status, '', { headers: { location: 'https://evil.example/token' } });
+  }
+
+  const http = createFetchRefreshHttp({
+    baseUrl: 'https://api.x.com',
+    clientId: 'client-1',
+    clientSecret: 'secret-1',
+    dispatcher: mock.dispatcher,
+  });
+  for (const status of [301, 302, 307, 308]) {
+    // A plain rejection: the machine fails closed on it and the stored pair is untouched.
+    assert.deepEqual(await http('refresh-1'), { ok: false, status });
+  }
+
+  mock.assertDone();
+  await mock.close();
+});
+
+// --- isTimeout(): the two shapes fetch can surface a timeout in, and the fall-through -----
+//
+// The MockAgent can only stage the WRAPPED shape (undici reports every dispatcher failure
+// as `TypeError: fetch failed` with the original as `cause`). The bare shape needs the
+// abort signal itself: when `AbortSignal.timeout`'s signal is already aborted by the time
+// fetch runs, fetch rejects with `signal.reason` DIRECTLY — no TypeError wrapper. Real
+// world: an event loop starved for the whole 25 s budget (a synchronous stall, a paused
+// container) between building the signal and dispatching the POST.
+
+test('fetch adapter: a timeout that fired before dispatch surfaces BARE and still classifies as retryable network', async (t) => {
+  const mock = mockHttp(); // net connect disabled and NO interceptor: a dispatch would throw
+  const reason = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+  const timeoutSignal = t.mock.method(AbortSignal, 'timeout', () => AbortSignal.abort(reason));
+
+  const http = createFetchRefreshHttp({
+    baseUrl: 'https://api.x.com',
+    clientId: 'client-1',
+    dispatcher: mock.dispatcher,
+  });
+  const err = await captureError(http('refresh-1'));
+  assert.equal(err.kind, 'network');
+  assert.equal(err.retryable, true);
+  assert.match(err.message, /unchanged locally/);
+  assert.equal(err.cause, reason); // the bare DOMException, recognized without unwrapping
+
+  // The per-attempt budget really is the one below the 30 s lock-staleness line (AUTH-5).
+  assert.deepEqual(
+    timeoutSignal.mock.calls.map((c) => c.arguments),
+    [[REFRESH_HTTP_TIMEOUT_MS]],
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('fetch adapter: a rejection that is neither named TimeoutError nor carries a cause rethrows RAW', async (t) => {
+  // Neither shape above: a bare Error with no `cause` (a fetch polyfill or a proxy agent
+  // that does not wrap) and a non-Error rejection value. Both must fall through the
+  // timeout detection untouched — reclassifying an unknown failure as "safe to retry"
+  // would be a lie about whether X rotated the tokens.
+  const bare = new Error('socket hang up');
+  const fetchMock = t.mock.method(globalThis, 'fetch', () => Promise.reject(bare));
+  const http = createFetchRefreshHttp({ baseUrl: 'https://api.x.com', clientId: 'client-1' });
+  await assert.rejects(http('refresh-1'), (err) => err === bare);
+
+  // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the non-Error arm is the point
+  fetchMock.mock.mockImplementation(() => Promise.reject('not even an Error'));
+  await assert.rejects(http('refresh-1'), (err) => err === 'not even an Error');
+  assert.equal(fetchMock.mock.callCount(), 2);
+});
