@@ -121,7 +121,12 @@ test('x_user_get merges id, @handle and me into one batch of distinct users', as
     ['@NASA', '@jack', '@self_bot'],
   );
   assert.equal(batch.missing, undefined);
-  assert.equal(out.summary, '3 user(s)');
+  // REND-6: at least one item came back, so the untrusted-content note rides on `summary`
+  // (BatchResult has no page-level `note` field of its own).
+  assert.equal(out.summary, `3 user(s) ${UNTRUSTED_CONTENT_NOTE}`);
+  // COST-3: three user records came back across the three requests this one call made,
+  // so three units are charged — the fan-out is billed by resources, not by requests.
+  assert.equal(out.units, 3);
   mock.assertDone();
   await mock.close();
 });
@@ -144,7 +149,10 @@ test('x_user_get surfaces an unresolved id in missing[] (partial batch, REND-2)'
   assert.equal(batch.missing?.length, 1);
   assert.equal(batch.missing?.[0]?.id, '404999');
   assert.equal(batch.missing?.[0]?.reason, 'not-found');
-  assert.equal(out.summary, '1 user(s), 1 missing');
+  // REND-6: still carries the note — at least one item came back.
+  assert.equal(out.summary, `1 user(s), 1 missing ${UNTRUSTED_CONTENT_NOTE}`);
+  // The id that came back in errors[] returned no resource, so only one unit is charged.
+  assert.equal(out.units, 1);
   mock.assertDone();
   await mock.close();
 });
@@ -171,7 +179,7 @@ test('x_user_get de-dupes a user reached by both id and @handle', async () => {
 
   assert.equal(batch.items.length, 1);
   assert.equal(batch.items[0]?.id, '12');
-  assert.equal(out.summary, '1 user(s)');
+  assert.equal(out.summary, `1 user(s) ${UNTRUSTED_CONTENT_NOTE}`);
   mock.assertDone();
   await mock.close();
 });
@@ -227,6 +235,7 @@ test('x_user_get raw:true merges @handle + me batches and carries the API errors
   // …and the partial-failure errors[] from the response survive into the merged envelope.
   assert.deepEqual(envelope.errors, byFixture.errors);
   assert.equal(out.summary, `2 raw user record(s) ${UNTRUSTED_CONTENT_NOTE}`);
+  assert.equal(out.units, 2); // one by-handle record + the me record
   mock.assertDone();
   await mock.close();
 });

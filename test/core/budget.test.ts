@@ -8,8 +8,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { XError } from '../../src/core/errors.js';
-import { COST_TABLE, createSessionBudget, priceOf } from '../../src/core/budget.js';
-import type { ResultMeta } from '../../src/core/tooldef.js';
+import {
+  COST_TABLE,
+  USER_INTERACTION_CREATE_USD,
+  createSessionBudget,
+  priceOf,
+} from '../../src/core/budget.js';
+import type { AnyToolDef, ResultMeta } from '../../src/core/tooldef.js';
+import { archiveTools } from '../../src/tools/archive.js';
+import { dmTools } from '../../src/tools/dm.js';
+import { engagementTools } from '../../src/tools/engagement.js';
+import { graphTools } from '../../src/tools/graph.js';
+import { listsTools } from '../../src/tools/lists.js';
+import { mediaTools } from '../../src/tools/media.js';
+import { postsTools } from '../../src/tools/posts.js';
+import { searchTools } from '../../src/tools/search.js';
+import { timelinesTools } from '../../src/tools/timelines.js';
+import { usersTools } from '../../src/tools/users.js';
 
 test('COST_TABLE prices each class at the verified pay-per-use rate (docs/01 App. B)', () => {
   assert.deepEqual(COST_TABLE, {
@@ -24,8 +39,10 @@ test('COST_TABLE prices each class at the verified pay-per-use rate (docs/01 App
     'w:post': 0.015,
     'w:dm': 0.015,
     'w:list': 0.01,
-    // w:action (engagement/graph/moderation writes + deletes) is unpriced on X's page as of
-    // 2026-07-22; counted $0 locally until the Phase 1 live capture (COST-6).
+    // w:action (engagement/graph/moderation writes + deletes) prices per operation via a
+    // `cost` resolver on each tool (see the `*_USD` constants below COST_TABLE, verified
+    // 2026-09-28, docs/01 App. B) rather than this table lookup. $0 here is an unreachable
+    // defensive fallback, never a live price.
     'w:action': 0,
   });
 });
@@ -100,6 +117,22 @@ test('COST-5: hard mode passes exactly at 100% and blocks only past it', () => {
   assert.equal(budget.total(), 1);
 });
 
+test('COST-4: a hard-mode refusal carries the estimate note naming why the call costs more', () => {
+  const budget = createSessionBudget({ limit: 0.1, mode: 'hard' });
+  const note = 'The text contains a URL, so X prices this post at $0.20 instead of $0.015.';
+  assert.throws(
+    () => budget.reserve({ class: 'w:post', usd: 0.2, note }),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'budget');
+      assert.ok(err.message.includes(note));
+      assert.match(err.message, /operator-set limit/);
+      return true;
+    },
+  );
+  assert.equal(budget.total(), 0);
+});
+
 test('COST-1: hard-mode block is a typed budget error the model cannot override', () => {
   const budget = createSessionBudget({ limit: 0.01, mode: 'hard' });
   assert.throws(
@@ -114,6 +147,23 @@ test('COST-1: hard-mode block is a typed budget error the model cannot override'
       return true;
     },
   );
+});
+
+test('a hard-mode budget accumulates a priced w:action write across repeated calls and blocks once the cap is crossed', () => {
+  // Simulates x_like_set's "like" resolver (User Interaction: Create, $0.015 — docs/01 App. B)
+  // reserving repeatedly, the way a real session would as an agent likes several posts.
+  const budget = createSessionBudget({ limit: 0.05, mode: 'hard' });
+  budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  const third = budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD });
+  assert.equal(third.session_total_usd, 0.045);
+  assert.match(third.budget_warning ?? '', /~90%/);
+  // A fourth like would push the total to $0.06, past the $0.05 cap — refused before spend.
+  assert.throws(
+    () => budget.reserve({ class: 'w:action', usd: USER_INTERACTION_CREATE_USD }),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  assert.equal(budget.total(), 0.045);
 });
 
 test('COST-1: no cap set → hard mode never blocks (X_MCP_CREDIT_BUDGET unset = no cap)', () => {
@@ -194,4 +244,133 @@ test('a $0 local call never blocks and never warns, even at the cap', () => {
   assert.equal(free.cost_usd, 0);
   assert.equal(free.session_total_usd, 1);
   assert.equal(budget.total(), 1);
+});
+
+// --- per-resource pricing: unit price × resources returned (docs/01 §3.1, COST-3) ---------
+
+test('COST-3: a read is priced per resource returned, not per call', () => {
+  // The platform bills reads per resource; a page of 100 posts costs 100 unit prices.
+  assert.equal(priceOf({ class: 'r:post', units: 100 }), 0.5);
+  assert.equal(priceOf({ class: 'r:user', units: 3 }), 0.03);
+  // One resource is the same price as the bare class — the pre-`units` behaviour.
+  assert.equal(priceOf({ class: 'r:post', units: 1 }), priceOf('r:post'));
+  assert.equal(priceOf({ class: 'r:post' }), priceOf('r:post'));
+});
+
+test('a page that returned nothing bills nothing (units: 0 is honoured, not defaulted)', () => {
+  assert.equal(priceOf({ class: 'r:post', units: 0 }), 0);
+  assert.equal(priceOf({ class: 'r:user', units: 0 }), 0);
+});
+
+test('a nonsense unit count falls back to ONE so nothing can ride free', () => {
+  // Defensive: a miswired handler must never make a call cheaper than one resource.
+  assert.equal(priceOf({ class: 'r:post', units: -5 }), 0.005);
+  assert.equal(priceOf({ class: 'r:post', units: Number.NaN }), 0.005);
+  assert.equal(priceOf({ class: 'r:post', units: Number.POSITIVE_INFINITY }), 0.005);
+});
+
+test('COST-4: a usd override is an ABSOLUTE per-call price and is never multiplied', () => {
+  // A URL-bearing post is $0.20 for the call — a `units` count alongside it changes nothing.
+  assert.equal(priceOf({ class: 'w:post', usd: 0.2, units: 4 }), 0.2);
+});
+
+test('settle tops up a reservation when the response carried more than one resource', () => {
+  const budget = createSessionBudget();
+  const held = budget.reserve('r:post'); // check time: one resource priced, $0.005
+  assert.equal(held.cost_usd, 0.005);
+  const settled = budget.settle(held, { class: 'r:post', units: 25 });
+  assert.equal(settled.cost_usd, 0.125);
+  assert.equal(settled.session_total_usd, 0.125);
+  assert.equal(budget.total(), 0.125); // moved by the difference, not charged twice
+});
+
+test('settle refunds down to zero when the page came back empty (REND-1)', () => {
+  const budget = createSessionBudget();
+  const held = budget.reserve('r:post');
+  const settled = budget.settle(held, { class: 'r:post', units: 0 });
+  assert.equal(settled.cost_usd, 0);
+  assert.equal(settled.session_total_usd, 0);
+  assert.equal(budget.total(), 0);
+});
+
+test('CONC-2: settle moves the ledger by the difference, never overwriting a concurrent total', () => {
+  const budget = createSessionBudget();
+  const held = budget.reserve('r:post'); // call A holds $0.005
+  budget.reserve('r:user'); // call B reserves $0.010 in between
+  assert.equal(budget.total(), 0.015);
+  const settled = budget.settle(held, { class: 'r:post', units: 3 }); // A: $0.005 → $0.015
+  assert.equal(settled.cost_usd, 0.015);
+  // B's $0.010 survives A's settlement: 0.015 (B + A's original) + 0.010 (A's top-up).
+  assert.equal(settled.session_total_usd, 0.025);
+  assert.equal(budget.total(), 0.025);
+});
+
+test('settle never throws in hard mode — the resources were already delivered', () => {
+  const budget = createSessionBudget({ limit: 0.01, mode: 'hard' });
+  const held = budget.reserve('r:post'); // $0.005, comfortably under the $0.01 cap
+  // The response carried 10 posts: $0.05, five times the cap. It cannot be un-returned.
+  const settled = budget.settle(held, { class: 'r:post', units: 10 });
+  assert.equal(settled.cost_usd, 0.05);
+  assert.equal(settled.session_total_usd, 0.05);
+  assert.match(settled.budget_warning ?? '', /already delivered/);
+  assert.match(settled.budget_warning ?? '', /the next call is/);
+  // …and the NEXT call is the one that gets refused (COST-1).
+  assert.throws(() => budget.reserve('r:post'), XError);
+});
+
+test('settle past the cap in warn mode carries the ordinary past-cap notice', () => {
+  const budget = createSessionBudget({ limit: 0.01 });
+  const held = budget.reserve('r:post');
+  const settled = budget.settle(held, { class: 'r:post', units: 10 });
+  assert.match(settled.budget_warning ?? '', /call not blocked/);
+  assert.equal(budget.total(), 0.05);
+});
+
+test('COST-5: a settle that crosses the 90% line warns like any other charge', () => {
+  const budget = createSessionBudget({ limit: 0.1 });
+  const held = budget.reserve('r:post');
+  assert.equal('budget_warning' in held, false);
+  const settled = budget.settle(held, { class: 'r:post', units: 19 }); // $0.095 = 95%
+  assert.match(settled.budget_warning ?? '', /~95% of the operator-set credit budget/);
+});
+
+test('settling to the same price leaves the ledger untouched', () => {
+  const budget = createSessionBudget();
+  const held = budget.reserve('r:post');
+  const settled = budget.settle(held, { class: 'r:post', units: 1 });
+  assert.equal(settled.cost_usd, 0.005);
+  assert.equal(budget.total(), 0.005);
+  assert.equal('budget_warning' in settled, false);
+});
+
+test('a double settle of the same reservation cannot drive the ledger negative', () => {
+  // Defensive: unreachable through the gate (the reservation is consumed once), but the
+  // counter must stay a plausible total if a future caller settles twice.
+  const budget = createSessionBudget();
+  const held = budget.reserve('r:post');
+  budget.settle(held, { class: 'r:post', units: 0 }); // → $0
+  const again = budget.settle(held, { class: 'r:post', units: 0 });
+  assert.equal(again.session_total_usd, 0);
+  assert.equal(budget.total(), 0);
+});
+
+test('no X-calling tool prices a w:action write through the $0 table fallback', () => {
+  // COST_TABLE['w:action'] is 0 by design: every w:action write has its own per-operation
+  // rate and must supply it through a `cost` resolver. A static `'w:action'` cost would bill
+  // $0 and silently under-count the advisory budget. (auth/usage are local/owned factories.)
+  const tools: AnyToolDef[] = [
+    ...postsTools,
+    ...usersTools,
+    ...searchTools,
+    ...engagementTools,
+    ...timelinesTools,
+    ...graphTools,
+    ...listsTools,
+    ...mediaTools,
+    ...dmTools,
+    ...archiveTools,
+  ];
+  assert.equal(tools.length, 39);
+  const staticActions = tools.filter((tool) => tool.cost === 'w:action').map((tool) => tool.name);
+  assert.deepEqual(staticActions, []);
 });

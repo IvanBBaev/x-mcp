@@ -14,10 +14,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createHttpClient } from '../../src/api/http.js';
-import { XError } from '../../src/core/errors.js';
+import { COUNTS_ARCHIVE_USD } from '../../src/core/budget.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import type { RawCountsResponse } from '../../src/api/endpoints/search.js';
 import { archiveTools, xPostCountsArchive, xSearchArchive } from '../../src/tools/archive.js';
 import {
@@ -74,13 +77,22 @@ test('archiveTools exposes both P3 read:content tools with the expected axes (re
     // availability gate (pilot/premium-user/enterprise only) can never exclude them;
     // COST-1 (session credit budget) + COST-3 (per-call r:post cost) are the guard rails.
     assert.equal(tool.availability, 'app+user');
-    assert.equal(tool.cost, 'r:post');
     assert.equal(tool.phase, 3);
     assert.equal(tool.annotations.readOnlyHint, true);
     assert.equal(tool.annotations.openWorldHint, true);
   }
+  // x_search_archive stays a flat r:post class; x_post_counts_archive now prices per call
+  // (Counts: All, $0.010 — docs/01 App. B), so its cost is a resolver instead.
+  assert.equal(xSearchArchive.cost, 'r:post');
+  assert.equal(typeof xPostCountsArchive.cost, 'function');
   assert.deepEqual([...xSearchArchive.scopes], ['tweet.read', 'users.read']);
   assert.deepEqual([...xPostCountsArchive.scopes], ['tweet.read']);
+});
+
+test('x_post_counts_archive prices at Counts: All ($0.010/call, docs/01 App. B)', () => {
+  const cost = xPostCountsArchive.cost;
+  assert.ok(typeof cost === 'function', 'x_post_counts_archive cost must be a resolver');
+  assert.deepEqual(cost({ query: 'x' }), { class: 'r:post', usd: COUNTS_ARCHIVE_USD });
 });
 
 test('x_search_archive: happy path renders a compact page with @handles and next_token', async () => {
@@ -98,6 +110,7 @@ test('x_search_archive: happy path renders a compact page with @handles and next
 
   assert.equal(page.items.length, 3);
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per post the archive page returned
   assert.equal(page.next_token, 'arch-next-1');
   assert.equal(page.items[0]?.author, '@carol_codes');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
@@ -154,7 +167,8 @@ test('PAGE-3: under-bound max_results clamps UP to 10 on the wire (both directio
 test('PAGE-1: page_token round-trips verbatim as next_token, alongside time window and sort order', async () => {
   const http = mockHttp();
   // The cursor from a previous page ('arch-next-1') must reach the wire untouched — the
-  // intercept pins it verbatim together with the optional start/end/sort params.
+  // intercept pins it verbatim together with the optional start/end/sort params (the time
+  // window re-emitted as canonical ISO-8601 UTC, REND-9).
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
@@ -163,8 +177,8 @@ test('PAGE-1: page_token round-trips verbatim as next_token, alongside time wind
         query: 'x api',
         ...ARCHIVE_FIELD_PARAMS,
         next_token: 'arch-next-1',
-        start_time: '2014-01-01T00:00:00Z',
-        end_time: '2015-12-31T23:59:59Z',
+        start_time: '2014-01-01T00:00:00.000Z',
+        end_time: '2015-12-31T23:59:59.000Z',
         sort_order: 'relevancy',
       },
     })
@@ -243,48 +257,107 @@ function noHttpCtx(): ToolContext {
   return {
     ports: makePorts(),
     http: {
-      send: () => Promise.reject(new Error('endpoint must not be called for a removed operator')),
+      send: () => Promise.reject(new Error('endpoint must not be called for an invalid operator')),
     },
   };
 }
 
 /** Assert the rejection is the typed DRIFT-3 `validation` error, not the stub's Error. */
-function isRemovedOperatorError(err: unknown): boolean {
+function isInvalidOperatorError(err: unknown): boolean {
   assert.ok(XError.is(err), 'expected an XError');
   assert.equal(err.kind, 'validation');
-  assert.match(err.message, /operator removed by X/);
+  assert.match(err.message, /web-search operator the X API rejects/);
   return true;
 }
 
-test('DRIFT-3: x_search_archive rejects each removed engagement operator before any request', async () => {
-  for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged
+ * (delta audit 09 Finding 1 residual) — doubly important here, where a leaked archive call can
+ * burn hundreds of `r:post` credits. Mirrors `test/tools/posts.test.ts`'s helper.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
+}
+
+test('DRIFT-3: x_search_archive rejects each invalid web-search engagement operator before the budget charge or any request', async () => {
+  for (const op of ['min_faves', 'min_retweets']) {
+    const { reg, budgetChecks } = chargeCountingRegistry(xSearchArchive);
     await assert.rejects(
-      () => xSearchArchive.handler({ query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
-      isRemovedOperatorError,
+      () => reg.call('x_search_archive', { query: `from:xdevelopers ${op}:10` }, noHttpCtx()),
+      isInvalidOperatorError,
     );
+    assert.equal(budgetChecks(), 0);
   }
 });
 
-test('DRIFT-3: x_post_counts_archive applies the same pre-validation', async () => {
+test('DRIFT-3: x_post_counts_archive applies the same pre-validation before the budget charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xPostCountsArchive);
   await assert.rejects(
-    () => xPostCountsArchive.handler({ query: 'ai min_replies:100' }, noHttpCtx()),
-    isRemovedOperatorError,
+    () => reg.call('x_post_counts_archive', { query: 'ai min_retweets:100' }, noHttpCtx()),
+    isInvalidOperatorError,
   );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('DRIFT-3: x_search_archive.input.safeParse rejects an invalid operator, naming the field', () => {
+  const rejected = xSearchArchive.input.safeParse({ query: 'from:xdevelopers min_faves:5' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /web-search operator the X API rejects/);
+  }
+});
+
+test('DRIFT-3: x_post_counts_archive.input.safeParse rejects an invalid operator, naming the field', () => {
+  const rejected = xPostCountsArchive.input.safeParse({ query: 'ai min_retweets:10' });
+  assert.equal(rejected.success, false);
+  if (!rejected.success) {
+    const issue = rejected.error.issues[0];
+    assert.deepEqual(issue?.path, ['query']);
+    assert.match(issue?.message ?? '', /web-search operator the X API rejects/);
+  }
+});
+
+test('DRIFT-3: the engagement operators X restored on 2026-05-04 pass pre-validation', () => {
+  // min_likes:/min_replies:/min_reposts: were removed 2026-01-19 and restored 2026-05-04
+  // (platform fact-check 2026-10-01), so the schemas must no longer refuse them.
+  for (const op of ['min_likes', 'min_replies', 'min_reposts']) {
+    assert.equal(xSearchArchive.input.safeParse({ query: `ai ${op}:10` }).success, true, op);
+    assert.equal(xPostCountsArchive.input.safeParse({ query: `ai ${op}:10` }).success, true, op);
+  }
 });
 
 test('DRIFT-3: an operator name as a plain word is not a false positive', async () => {
-  // Only the `operator:` form is the removed syntax; the bare word must still search.
+  // Only the `operator:` form is the refused syntax; the bare word must still search.
   const http = mockHttp();
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
       method: 'GET',
-      query: { query: 'discussing min_reposts removal', ...ARCHIVE_FIELD_PARAMS },
+      query: { query: 'discussing min_retweets removal', ...ARCHIVE_FIELD_PARAMS },
     })
     .reply(200, loadFixture<RawListResponse<RawTweet>>('archive/archive-empty.json'));
 
   const out = await xSearchArchive.handler(
-    { query: 'discussing min_reposts removal' },
+    { query: 'discussing min_retweets removal' },
     makeCtx(http),
   );
   const page = out.data as CompactPageResult;
@@ -320,16 +393,16 @@ test('x_post_counts_archive: maps buckets to numeric counts, prefers meta total,
   await http.close();
 });
 
-test('REND-10: raw search WITHOUT max_results sends no cap on the wire and counts a data-less page as 0', async () => {
+test('REND-10: raw search WITHOUT max_results sends the raw default (10) and counts a data-less page as 0', async () => {
   const http = mockHttp();
-  // The raw ceiling only rewrites a max_results the caller actually asked for; with none
-  // given the request must carry none — the API's own default applies, not an invented 25.
-  // The intercept pins the exact sorted query, so a smuggled max_results fails the match.
+  // With no size asked for, a raw read still bounds the page: it sends the raw default (10)
+  // rather than letting an API default (100 on some endpoints) breach the 25-item cap.
+  // The intercept pins the exact sorted query, so any other max_results fails the match.
   http.pool
     .intercept({
       path: '/2/tweets/search/all',
       method: 'GET',
-      query: { query: 'nothing-matches-this', ...ARCHIVE_FIELD_PARAMS },
+      query: { query: 'nothing-matches-this', ...ARCHIVE_FIELD_PARAMS, max_results: '10' },
     })
     .reply(200, { meta: { result_count: 0 } });
 
@@ -427,7 +500,7 @@ test('x_post_counts_archive: a data-less compact envelope renders an empty histo
   await http.close();
 });
 
-test('x_post_counts_archive: granularity, time window, and page_token (PAGE-1) reach the wire verbatim', async () => {
+test('x_post_counts_archive: granularity, ISO-normalized time window (REND-9), and page_token (PAGE-1) reach the wire', async () => {
   const http = mockHttp();
   http.pool
     .intercept({
@@ -436,8 +509,8 @@ test('x_post_counts_archive: granularity, time window, and page_token (PAGE-1) r
       query: {
         query: 'x api',
         granularity: 'day',
-        start_time: '2014-06-20T00:00:00Z',
-        end_time: '2014-06-23T00:00:00Z',
+        start_time: '2014-06-20T00:00:00.000Z',
+        end_time: '2014-06-23T00:00:00.000Z',
         next_token: 'counts-next-1',
       },
     })

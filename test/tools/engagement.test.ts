@@ -10,6 +10,11 @@ import assert from 'node:assert/strict';
 
 import { mapHttpError } from '../../src/api/errors.js';
 import { createHttpClient } from '../../src/api/http.js';
+import {
+  BOOKMARK_USD,
+  INTERACTION_DELETE_USD,
+  USER_INTERACTION_CREATE_USD,
+} from '../../src/core/budget.js';
 import { XError } from '../../src/core/errors.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
@@ -89,7 +94,8 @@ test('engagementTools exposes the three *_set tools with identical write axes', 
   for (const tool of [xLikeSet, xRepostSet, xBookmarkSet]) {
     assert.equal(tool.policy, 'write:engagement');
     assert.equal(tool.availability, 'user-only');
-    assert.equal(tool.cost, 'w:action');
+    // Each *_set tool prices its own operation via a resolver, not a flat class (docs/01 App. B).
+    assert.equal(typeof tool.cost, 'function');
     assert.equal(tool.phase, 2);
     // Reversible toggles: writes, but neither destructive nor open-ended (docs/03).
     assert.equal(tool.annotations.readOnlyHint, false);
@@ -112,6 +118,42 @@ test('x_bookmarks_list is a user-only OWN-DATA read, not a write (decisions/0002
   assert.equal(xBookmarksList.annotations.openWorldHint, true);
   // bookmark.READ, not the bookmark.write the toggle uses: a write-only grant cannot list.
   assert.deepEqual([...xBookmarksList.scopes], ['tweet.read', 'users.read', 'bookmark.read']);
+});
+
+test('x_like_set / x_repost_set / x_bookmark_set price each direction per docs/01 App. B', () => {
+  const likeCost = xLikeSet.cost;
+  assert.ok(typeof likeCost === 'function', 'x_like_set cost must be a resolver');
+  assert.deepEqual(likeCost({ post: '1', action: 'like' }), {
+    class: 'w:action',
+    usd: USER_INTERACTION_CREATE_USD,
+  });
+  assert.deepEqual(likeCost({ post: '1', action: 'unlike' }), {
+    class: 'w:action',
+    usd: INTERACTION_DELETE_USD,
+  });
+
+  const repostCost = xRepostSet.cost;
+  assert.ok(typeof repostCost === 'function', 'x_repost_set cost must be a resolver');
+  assert.deepEqual(repostCost({ post: '1', action: 'repost' }), {
+    class: 'w:action',
+    usd: USER_INTERACTION_CREATE_USD,
+  });
+  assert.deepEqual(repostCost({ post: '1', action: 'unrepost' }), {
+    class: 'w:action',
+    usd: INTERACTION_DELETE_USD,
+  });
+
+  // Bookmark is flat-rate both directions.
+  const bookmarkCost = xBookmarkSet.cost;
+  assert.ok(typeof bookmarkCost === 'function', 'x_bookmark_set cost must be a resolver');
+  assert.deepEqual(bookmarkCost({ post: '1', action: 'add' }), {
+    class: 'w:action',
+    usd: BOOKMARK_USD,
+  });
+  assert.deepEqual(bookmarkCost({ post: '1', action: 'remove' }), {
+    class: 'w:action',
+    usd: BOOKMARK_USD,
+  });
 });
 
 // --- x_like_set ------------------------------------------------------------------
@@ -423,6 +465,7 @@ test('bookmarks list: GET /2/users/me-id/bookmarks renders a compact page (REND-
   const page = out.data as CompactPageResult;
 
   assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3); // COST-3: billed per bookmarked post returned
   assert.equal(page.next_token, 'abc');
   assert.ok(page.items.every((p) => p.author.startsWith('@')));
   assert.ok(page.note);
@@ -495,14 +538,18 @@ test('REND-10: raw: true returns the exact envelope with max_results capped at 2
   await mock.close();
 });
 
-test('REND-10: raw without max_results sends no cap; a data-less 200 counts as 0', async () => {
+test('REND-10: raw without max_results sends the raw default (10); a data-less 200 counts as 0', async () => {
   const mock = mockHttp();
   interceptMe(mock);
-  // The intercept carries the field params ONLY — the raw cap applies just when the caller
-  // asked for a size. A degraded envelope with no `data` must still summarize (DRIFT-1).
+  // Bookmarks default to 100 per page at X; a raw read with no size must send the raw
+  // default instead. A degraded envelope with no `data` must still summarize (DRIFT-1).
   const envelope = { meta: { result_count: 0 } };
   mock.pool
-    .intercept({ path: '/2/users/9/bookmarks', method: 'GET', query: BOOKMARK_FIELD_PARAMS })
+    .intercept({
+      path: '/2/users/9/bookmarks',
+      method: 'GET',
+      query: { ...BOOKMARK_FIELD_PARAMS, max_results: '10' },
+    })
     .reply(200, envelope);
 
   const out = await xBookmarksList.handler({ raw: true }, contextFor(mock));
