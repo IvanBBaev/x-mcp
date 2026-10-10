@@ -309,7 +309,8 @@ Two follow-up commits address the docs and error-mapping recommendations:
 
 A third commit ("Price x_auth_status by whether it calls /2/users/me") takes F-4 (a):
 the tool resolves its cost from the session, `r:user` when a user-mode session must
-fetch its handle and `local` otherwise; docs/03 and docs/01 §3.1 follow.
+fetch its handle and `local` otherwise; docs/03 and docs/01 §3.1 follow. A fourth commit
+caches the fetched handle for the process, so only the first such call pays.
 
 Still open owner decisions: F-2 (Bookmark Folders, post-1.0), the F-3 video size cap,
 F-4 (b), and F-5 (the live check of follows, likes and quote-posts).

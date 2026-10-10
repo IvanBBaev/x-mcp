@@ -127,6 +127,14 @@ const EMPTY_INPUT = z.object({}).strict();
  * `[x_auth_status, x_rate_limit_status]` for the registry to collect (T-115).
  */
 export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
+  // The handle a /2/users/me call resolved. One profile per process fixes the account for the
+  // session (docs/04 T6), so it is fetched once and every later call is free.
+  let fetchedHandle: string | undefined;
+  const knownMe = (snap: AuthSessionInfo): AuthSessionInfo['me'] =>
+    snap.me === undefined || snap.me.handle !== undefined || fetchedHandle === undefined
+      ? snap.me
+      : { id: snap.me.id, handle: fetchedHandle };
+
   const xAuthStatus = defineTool({
     name: 'x_auth_status',
     title: 'Auth status',
@@ -140,11 +148,11 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
     scopes: ['users.read'],
     // Priced by the path the handler will take: only a user-mode session whose handle is not
     // known yet calls GET /2/users/me, which is not an Owned Read (review 11 F-4a). Every
-    // other path reads the composition-time snapshot and makes no X call.
+    // other path reads the snapshot (or the cached handle) and makes no X call.
     cost: () => {
       const snap = deps.session.snapshot();
-      const fetchesMe =
-        snap.authMode === 'user' && snap.me !== undefined && snap.me.handle === undefined;
+      const me = knownMe(snap);
+      const fetchesMe = snap.authMode === 'user' && me !== undefined && me.handle === undefined;
       return { class: fetchesMe ? 'r:user' : 'local' };
     },
     annotations: { title: 'Auth status', readOnlyHint: true, openWorldHint: false },
@@ -164,7 +172,11 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
       if (snap.authMode === 'user') {
         // User mode without a `me` snapshot is a degenerate composition-root state; we simply
         // omit `me` rather than invent one.
-        if (snap.me !== undefined) report.me = await resolveMe(snap.me, ctx);
+        const me = knownMe(snap);
+        if (me !== undefined) {
+          report.me = await resolveMe(me, ctx);
+          if (me.handle === undefined) fetchedHandle = report.me.handle;
+        }
       } else {
         report.note = APP_ONLY_NOTE; // AUTH-15 degraded shape.
       }

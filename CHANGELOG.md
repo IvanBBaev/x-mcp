@@ -23,8 +23,9 @@ development chronology lives in `WORKLOG.md`.
 ### Changed
 
 - `x_auth_status` now reserves the User read rate ($0.010) when it has to look up the
-  account's handle with `GET /2/users/me`, which is not an Owned Read; every other call
-  makes no X request and is free. It used to reserve $0.001 on every call.
+  account's handle with `GET /2/users/me`, which is not an Owned Read. The handle is then
+  cached for the rest of the process, so later calls make no X request and are free, like
+  every other call. It used to reserve $0.001 on every call.
 
 - `x_post_create` now explains two post-create refusals instead of returning the generic
   `forbidden` text: a reply X refuses because the original author did not summon the

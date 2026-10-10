@@ -129,7 +129,7 @@ Every catalogued tool is registered.
 
 | Tool | Class | Availability | Cost | Phase | What it does |
 |---|---|---|---|---|---|
-| `x_auth_status` | read:account | app+user | local | P1 | X (Twitter): active profile, auth mode, authenticated user (`me`), granted scopes, detected availability, resolved policy matrix. Degraded shape under app-only auth (corner case AUTH-15). Priced `r:user` only when a user-mode session must fetch its handle via `GET /2/users/me`; every other path is `local` |
+| `x_auth_status` | read:account | app+user | local | P1 | X (Twitter): active profile, auth mode, authenticated user (`me`), granted scopes, detected availability, resolved policy matrix. Degraded shape under app-only auth (corner case AUTH-15). Priced `r:user` only when a user-mode session must fetch its handle via `GET /2/users/me` (once per process; the handle is then cached); every other path is `local` |
 | `x_rate_limit_status` | read:account | app+user | local | P1 | X (Twitter): known per-endpoint rate-limit table (limit / remaining / reset) |
 | `x_usage_get` | read:account | app+user | owned | P3 | X (Twitter): this cycle's post-read consumption vs the monthly project cap, with optional per-day / per-app breakdown (`GET /2/usage/tweets`, `days` 1–90) + local session-spend budget state. **GO 2026-07-31 (WP-3.11):** ships unconditionally — reachable under pay-per-use with an app bearer token, no tier gate (docs/01 §3.5). Reports post-read **counts, never dollars** (X publishes no spend API), so it does not seed the session credit estimate (COST-2) |
 

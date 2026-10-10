@@ -316,6 +316,39 @@ test('F-4a: x_auth_status is priced r:user only when it will call /2/users/me', 
   assert.deepEqual(costOf({ ...base, authMode: 'app-only' }), { class: 'local' });
 });
 
+test('F-4a: a handle fetched once is cached — the next call is local and sends nothing', async () => {
+  const info: AuthSessionInfo = {
+    authMode: 'user',
+    me: { id: '9' },
+    scopes: [],
+    availability: ['app+user'],
+    policy: { preset: 'default-write', cells: { 'read:account': true } },
+    tokenStore: 'file',
+  };
+  const tool = getTool(createAuthTools(fakeDeps(info, SAMPLE_RATE_LIMIT)), 'x_auth_status');
+  const costNow = (): unknown => (typeof tool.cost === 'function' ? tool.cost({}) : tool.cost);
+
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: /^\/2\/users\/me/, method: 'GET' })
+    .reply(200, loadFixture<{ data: { id: string; username: string } }>('auth/me.json'));
+  const http = createHttpClient({
+    sleep: fakeSleep().fn,
+    random: fakeRandom(),
+    dispatcher: mock.dispatcher,
+  });
+  assert.deepEqual(costNow(), { class: 'r:user' });
+  const first = await tool.handler({}, { ports: makePorts(), http });
+  assert.equal(first.summary, 'auth: user @me_handle');
+  mock.assertDone();
+  await mock.close();
+
+  // NO_HTTP proves the second call reuses the cached handle instead of re-fetching it.
+  assert.deepEqual(costNow(), { class: 'local' });
+  const second = await tool.handler({}, { ports: makePorts(), http: NO_HTTP });
+  assert.deepEqual((second.data as AuthStatusData).me, { id: '9', handle: 'me_handle' });
+});
+
 // Statically pins the INT-6 dependency contract the integrator (T-130) must satisfy.
 test('AuthToolDeps shape is the INT-6 seam createAuthTools consumes', () => {
   const tracker: Pick<RateLimitTracker, 'status'> = { status: () => SAMPLE_RATE_LIMIT };
