@@ -5,7 +5,8 @@
 //
 // The write handlers additionally own the write-specific ERROR MEANING the generic
 // status -> XError mapper (api/errors, frozen) cannot know: duplicate-403 (POST-3),
-// too-long-400 (POST-2), gone-reply-target-400 (POST-7), and the write-ambiguity
+// too-long-400 (POST-2), gone-reply-target-400 (POST-7), non-summoned-reply-403 (POST-10),
+// over-long-video-403 (POST-11), and the write-ambiguity
 // decoration for timeouts/5xx (POST-4 / NET-4) plus thread-resume guidance (POST-9).
 
 import { z } from 'zod';
@@ -227,7 +228,25 @@ function withAmbiguityGuidance(err: XError, guidance: string): XError {
 }
 
 /**
- * Give a failed `POST /2/tweets` its write-specific meaning (POST-2/3/4/7/9, NET-4).
+ * POST-10: X's refusal of a reply whose author did not "summon" the replier (self-serve rule,
+ * platform changelog 2026-02-23). ASSUMPTION: no capture or published example of this 403
+ * body exists in the repo or in X's docs. The matched phrases come from the refusal text X is
+ * reported to send ("Reply to this conversation is not allowed because you have not been
+ * mentioned or otherwise engaged by the author of the post you are replying to.") plus the
+ * changelog's own "summoned" wording. Anything else falls through to the generic `forbidden`.
+ */
+const NOT_SUMMONED_REPLY = /not been mentioned|otherwise engaged|\bsummon/;
+
+/**
+ * POST-11: X refuses a post whose attached video is longer than the account may post (a 403
+ * at CREATE, not at upload; platform changelog 2026-09-01). Matched on the documented
+ * phrasing "not allowed to post a video longer than N minutes". ASSUMPTION: the exact body
+ * shape is not captured, so only the "video ... longer than" core is required.
+ */
+const VIDEO_TOO_LONG = /\bvideos?\b[^.]*\blonger than\b/;
+
+/**
+ * Give a failed `POST /2/tweets` its write-specific meaning (POST-2/3/4/7/9/10/11, NET-4).
  * The generic status -> XError mapping already happened in api/errors (frozen); this
  * narrows it using the platform's `title`/`detail` passed through in `data`.
  */
@@ -243,6 +262,24 @@ function mapCreateFailure(err: XError, hasReplyTo: boolean, text: string): XErro
       'X rejected this as a duplicate of a recent identical post (POST-3). If this call ' +
         'was the safe probe after an ambiguous create failure, the duplicate rejection ' +
         'means the original post DID land. Otherwise, change the text before posting again.',
+      { data: err.data, cause: err },
+    );
+  } else if (err.kind === 'forbidden' && hasReplyTo && NOT_SUMMONED_REPLY.test(platformText)) {
+    // POST-10: the self-serve "summoned replies only" rule (or the author's reply_settings).
+    mapped = forbiddenError(
+      'X refused this reply because the author of the post being replied to has not ' +
+        'summoned this account (POST-10). On self-serve API access, a programmatic reply is ' +
+        'allowed only when that author @mentioned this account or quoted one of its posts; ' +
+        "the author's reply settings can restrict replies the same way. Retrying will not " +
+        'help: post without `reply_to_id`, or reply only where this account was summoned.',
+      { data: err.data, cause: err },
+    );
+  } else if (err.kind === 'forbidden' && VIDEO_TOO_LONG.test(platformText)) {
+    // POST-11: the attached video exceeds the account's allowed duration.
+    mapped = forbiddenError(
+      "X refused the post because the attached video is longer than this account's allowed " +
+        'video duration (POST-11; see `platform_detail` for the limit X gave). The upload ' +
+        'itself succeeded: trim the video, upload it again, and post with the new media id.',
       { data: err.data, cause: err },
     );
   } else if (
@@ -687,7 +724,7 @@ export const xThreadCreate = defineTool({
         });
       } catch (err) {
         if (!XError.is(err)) throw err;
-        // Reuses x_post_create's own failure mapping (POST-2/3/4/7/9, NET-4) unchanged:
+        // Reuses x_post_create's own failure mapping (POST-2/3/4/7/9/10/11, NET-4) unchanged:
         // `hasReplyTo` is true from the second post on, so POST-9 thread-resume guidance
         // rides on the mapped error exactly as it would for a standalone reply failure.
         const mapped = mapCreateFailure(err, replyToId !== undefined, text);

@@ -22,6 +22,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_post_create` now explains two post-create refusals instead of returning the generic
+  `forbidden` text: a reply X refuses because the original author did not summon the
+  replying account (self-serve accounts may reply only after an @mention or a quote), and a
+  post whose attached video is longer than the account may post.
+
 - `x_search_recent`, `x_search_archive`, `x_post_counts_recent` and
   `x_post_counts_archive` accept the `min_likes:`, `min_replies:` and `min_reposts:`
   operators again. X removed them on 2026-01-19 and restored them on 2026-05-04, but

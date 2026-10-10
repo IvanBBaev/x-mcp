@@ -392,6 +392,18 @@ credits, not tiers, for post-2026-02-06 developers.)*
   A failed `post_create` with `reply_to_id` adds: "posts already created in this
   sequence remain live; resume by replying to the last successful id".
 
+- **POST-10 — Non-summoned reply refusal** `P2` `[new]`
+  On self-serve access X allows a programmatic reply only when the original author
+  summoned the replier (@mention or quote; platform changelog 2026-02-23). The 403
+  on a create with `reply_to_id` maps to `forbidden` naming the rule, never the
+  generic refusal text. Detection matches the reported refusal wording ("not been
+  mentioned or otherwise engaged", "summoned"); the body is not yet captured.
+
+- **POST-11 — Video longer than the account allows** `P2` `[new]`
+  X checks video duration at post creation, not at upload (platform changelog
+  2026-09-01). The 403 "not allowed to post a video longer than N minutes" maps to
+  `forbidden` saying the attached video exceeds the account's allowed duration.
+
 ## 9. MEDIA — Media upload *(Phase 3)*
 
 - **MEDIA-1 — v2 dedicated paths only** `P3` `[X-F6]`

@@ -347,10 +347,10 @@ DM reads return ids, timestamps and participants only; message bodies require an
 endpoints (`/2/dm_conversations…`, `/2/dm_events`). They cannot see or send into encrypted
 XChat conversations, which live behind X's separate Chat API.
 
-Replies via `x_post_create` (`reply_to_id`) and `x_thread_create` follow X's self-serve
-reply rule: a programmatic reply is allowed only when the original post's author
-"summoned" the replying account, by @mentioning it or quoting one of its posts. X refuses
-any other reply with a 403 (a `forbidden` error).
+Replies via `x_post_create` (`reply_to_id`) follow X's self-serve reply rule: a
+programmatic reply is allowed only when the original post's author "summoned" the replying
+account, by @mentioning it or quoting one of its posts. X refuses any other reply with a 403,
+which x-mcp reports as a `forbidden` error that names this rule.
 
 ### Tool packages
 

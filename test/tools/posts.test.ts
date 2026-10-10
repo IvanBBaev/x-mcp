@@ -694,6 +694,91 @@ test('POST-7: a gone/hidden reply target maps to not-found (never generic api)',
   await mock.close();
 });
 
+test('POST-10: a non-summoned reply 403 maps to an explained forbidden', async () => {
+  // ASSUMPTION: no capture exists; the body follows the RFC-7807 shape of the duplicate-403
+  // fixture with the refusal text X is reported to send for a non-summoned reply.
+  const mock = mockHttp();
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, {
+    title: 'Forbidden',
+    type: 'about:blank',
+    status: 403,
+    detail:
+      'Reply to this conversation is not allowed because you have not been mentioned or ' +
+      'otherwise engaged by the author of the post you are replying to.',
+  });
+
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'nice one', reply_to_id: '111' }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('forbidden', /has not summoned this account \(POST-10\)/)(err);
+      const xerr = err as XError;
+      assert.match(xerr.message, /@mentioned this account or quoted one of its posts/);
+      // POST-9 thread guidance still rides on the remapped error.
+      assert.match(xerr.message, /resume by replying to the last successful id/);
+      assert.equal(xerr.data.http_status, 403);
+      assert.equal(xerr.retryable, false);
+      return true;
+    },
+  );
+
+  // The changelog's own "summoned" wording is recognised too.
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, {
+    title: 'Forbidden',
+    detail: 'Replies are only allowed when you have been summoned by the author.',
+  });
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'nice one', reply_to_id: '111' }, contextFor(mock)),
+    xErrorOf('forbidden', /POST-10/),
+  );
+
+  // Without reply_to_id the same text is not a reply refusal: generic forbidden.
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, {
+    title: 'Forbidden',
+    detail: 'You have not been mentioned or otherwise engaged by the author.',
+  });
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'standalone' }, contextFor(mock)),
+    xErrorOf('forbidden', /X refused this specific action/),
+  );
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('POST-11: an over-long video 403 at create maps to an explained forbidden', async () => {
+  // ASSUMPTION: no capture exists; the detail follows the documented phrasing
+  // "not allowed to post a video longer than N minutes".
+  const mock = mockHttp();
+  const detail = 'You are not allowed to post a video longer than 20 minutes.';
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST' })
+    .reply(403, { title: 'Forbidden', detail });
+
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'demo', media_ids: ['1234567890'] }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('forbidden', /attached video is longer than this account's allowed/)(err);
+      const xerr = err as XError;
+      assert.match(xerr.message, /POST-11/);
+      assert.equal(xerr.data.platform_detail, detail);
+      return true;
+    },
+  );
+
+  // An unrelated 403 keeps the generic mapping.
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, {
+    title: 'Forbidden',
+    detail: 'The video has been processed and is no longer pending.',
+  });
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'demo', media_ids: ['1234567890'] }, contextFor(mock)),
+    xErrorOf('forbidden', /X refused this specific action/),
+  );
+
+  mock.assertDone();
+  await mock.close();
+});
+
 test('POST-9: any failed create with reply_to_id carries the thread-resume guidance', async () => {
   const mock = mockHttp();
   mock.pool

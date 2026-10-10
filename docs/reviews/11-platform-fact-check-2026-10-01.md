@@ -292,3 +292,20 @@ so new scopes are handled.
 Re-fetch the sources in §1 and diff the changelog against **Sep 29, 2026**, the
 newest entry seen here. Re-confirm rows 1–16 of §2. Settle F-5 with an approved live
 check. Decide F-3 and F-4 (a) before tagging 1.0.
+
+## 6. Follow-ups
+
+Two follow-up commits address the docs and error-mapping recommendations:
+
+- **Docs** ("Document the platform rules the 2026-10-01 fact-check surfaced"): F-4 (c),
+  the app-owner condition in the README pricing section; F-6, the legacy/unencrypted DM
+  note next to the README tool table; the docs half of F-7, the summoned-reply rule in
+  the README; F-8, the token exchange as the migration path in docs/01 §2.2.
+- **Errors** ("Explain the non-summoned reply and over-long video refusals on post
+  create"): F-7, the non-summoned reply 403 maps to an explained `forbidden` (POST-10);
+  the second bullet of F-3, the over-long video 403 at post creation maps to an
+  explained `forbidden` (POST-11). Neither 403 body has been captured, so detection
+  matches the reported wording and falls back to the generic mapping otherwise.
+
+Still open owner decisions: F-2 (Bookmark Folders, post-1.0), the F-3 video size cap,
+F-4 (a) and (b), and F-5 (the live check of follows, likes and quote-posts).
