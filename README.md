@@ -236,6 +236,11 @@ also caps post reads at **3,000,000 per month**. The authoritative table is
 [`docs/01-api-landscape.md`](docs/01-api-landscape.md) §3; the operator's view is
 [`docs/10-operator-guide.md`](docs/10-operator-guide.md) §5.
 
+The own-data ("Owned Reads") rate of $0.001 applies only when the authenticated user also
+owns the developer app the credentials belong to — the normal setup, where an operator runs
+x-mcp with their own app. Otherwise those reads bill at the normal read rate (mentions, for
+example, at $0.005 per post), and the local estimate for the `owned` tools under-counts.
+
 The budget is per process, advisory, resets on restart, and is **model-immutable** — there
 is no per-call override and no tool that raises it.
 
@@ -338,7 +343,14 @@ schemas, scopes, cost class, availability — is
 <!-- GENERATED:TOOLS:END -->
 
 DM reads return ids, timestamps and participants only; message bodies require an explicit
-`include_text: true` on the call.
+`include_text: true` on the call. The DM tools use X's legacy (unencrypted) Direct Message
+endpoints (`/2/dm_conversations…`, `/2/dm_events`). They cannot see or send into encrypted
+XChat conversations, which live behind X's separate Chat API.
+
+Replies via `x_post_create` (`reply_to_id`) and `x_thread_create` follow X's self-serve
+reply rule: a programmatic reply is allowed only when the original post's author
+"summoned" the replying account, by @mentioning it or quoting one of its posts. X refuses
+any other reply with a 403 (a `forbidden` error).
 
 ### Tool packages
 

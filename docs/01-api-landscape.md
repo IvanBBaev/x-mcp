@@ -49,6 +49,14 @@ Three auth contexts exist; x-mcp supports all three, selected by `X_MCP_AUTH_MOD
   app+user key quadruples (api key/secret + access token/secret).
 - No scopes, no expiry, HMAC-SHA1 request signing. Supported because many existing
   hobby apps only have these credentials; feature-gated identically to OAuth 2.0.
+- **Migration path off legacy mode** (platform changelog 2026-09-21): X exchanges a
+  stored OAuth 1.0a token pair for an OAuth 2.0 access + refresh token via
+  `POST /2/oauth2/token` with
+  `grant_type=urn:ietf:params:oauth:grant-type:token-exchange`. There is no consent
+  screen, and `offline.access` is always included. x-mcp does not automate the exchange
+  today; running `npx x-mcp-ai authorize` (§2.1) remains the supported way to obtain
+  OAuth 2.0 user credentials. An `authorize` option that performs the exchange is a
+  post-1.0 product decision ([reviews/11-platform-fact-check-2026-10-01.md](reviews/11-platform-fact-check-2026-10-01.md) F-8).
 
 ### 2.3 App-only Bearer token (application context)
 
