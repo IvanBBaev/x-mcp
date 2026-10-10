@@ -244,8 +244,9 @@ above; this is the single list to walk before tagging:
 - [ ] Scenario suite (walkthroughs A–C) green; ≥ 1 week dogfood without a P1 issue.
       *Scenario half first verified 2026-08-08; re-run 2026-08-30 as part of the delta
       audit — `node --test "build/test/scenarios/*.test.js"` → **13 tests, 13 pass,
-      0 fail, 0 skipped**. The dogfood week is checkpoint H4 and is elapsed time, not
-      work.*
+      0 fail, 0 skipped**; re-run 2026-10-10 at the 42-tool surface → **14 tests,
+      14 pass, 0 fail, 0 skipped**. The dogfood week is checkpoint H4 and is elapsed
+      time, not work.*
 - [x] `LICENSE`, `SECURITY.md`, privacy/data-handling statement, per-client setup
       docs, pricing warning — all published.
       *Verified 2026-08-07: MIT `LICENSE`, `SECURITY.md` disclosure policy,
