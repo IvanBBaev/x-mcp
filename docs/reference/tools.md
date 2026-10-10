@@ -60,7 +60,7 @@ annotated; they refuse the call (POL-7). DM cells are in no preset, not even `fu
 
 | Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
 |---|---|---|---|---|---|---|
-| `auth` | `read:account` | `app+user` | `owned` | 1 | read-only | `users.read` |
+| `auth` | `read:account` | `app+user` | `local` | 1 | read-only | `users.read` |
 
 Takes no input fields.
 

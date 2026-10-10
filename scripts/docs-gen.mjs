@@ -211,7 +211,10 @@ async function derivePackages(toolNames) {
   return { packageOf, conflicts, unmapped };
 }
 
-/** The static cost class; the one per-call resolver (`x_post_create`) reports its base class. */
+/**
+ * The static cost class, or what a per-call resolver reports for an empty input — its base
+ * class; `x_auth_status` resolves from the session, which is app-only here, so `local`.
+ */
 function costClass(tool) {
   if (typeof tool.cost !== 'function') return tool.cost;
   try {

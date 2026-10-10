@@ -123,14 +123,16 @@ post delete (no delete-post row — priced at Interaction: Delete, $0.010).
 - Credits are purchased upfront; the platform advertises up to 20 % back in xAI API
   credits.
 - **Owned Reads** ($0.001/resource) make own-data tools (`timeline_mentions`,
-  `bookmarks_list`, `liked_posts_list`, own `timeline_user`, `auth_status`, `usage_get`)
+  `bookmarks_list`, `liked_posts_list`, own `timeline_user`, `usage_get`)
   an order of magnitude cheaper — worth surfacing in the per-call cost estimate. The
   pricing page's qualifying list is the `GET /2/users/{id}/…` family (posts, mentions,
   liked posts, bookmarks, followers, following, blocking, muting, owned/followed/pinned
   lists, list memberships), and only when `{id}` is the authenticated user **and** that
-  user owns the developer app. `GET /2/users/me` (`auth_status`) and `GET /2/usage/tweets`
-  (`usage_get`) are not on that list, so their local `owned` class is an estimate, not a
-  published rate (fact-check 2026-10-01, review 11 F-4).
+  user owns the developer app. `GET /2/users/me` and `GET /2/usage/tweets` (`usage_get`)
+  are not on that list. `auth_status` therefore prices its one `/2/users/me` call (a
+  user-mode session whose handle is not yet known) as `read-user` and every other path as
+  local; `usage_get`'s `owned` class remains an estimate, not a published rate
+  (fact-check 2026-10-01, review 11 F-4).
 
 **Design consequences.** Every write costs real money; a link-bearing post costs **13×**
 a plain post. So (a) each result surfaces its estimated `cost_usd`
@@ -394,7 +396,7 @@ response); writes **per request**.
 | `read-dm` | $0.010 / event | `dm_events_list` |
 | `read-list-space` | $0.005 / resource | `list_get`, `lists_owned`, `list_members_list`, `space_get`, `spaces_search`, Community-Note reads |
 | `read-lmb` | $0.001 / resource | like/mute/block reads (`liking_users_list`, `blocks_list`, `mutes_list`) |
-| `read-owned` | $0.001 / resource | **own-data** reads: `timeline_mentions`, own `timeline_user`, `bookmarks_list`, `liked_posts_list`, `auth_status`, `usage_get` (Owned Reads discount) |
+| `read-owned` | $0.001 / resource | **own-data** reads: `timeline_mentions`, own `timeline_user`, `bookmarks_list`, `liked_posts_list`, `usage_get` (Owned Reads discount) |
 | `write-post` | $0.015 / request | `post_create` (no URL) |
 | `write-post-url` | $0.20 / request | `post_create` when `text` contains a URL (COST-4) |
 | `write-dm` | $0.015 / request | `dm_send` |

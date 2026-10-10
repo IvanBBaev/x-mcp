@@ -138,7 +138,15 @@ export function createAuthTools(deps: AuthToolDeps): AnyToolDef[] {
     policy: 'read:account',
     availability: 'app+user',
     scopes: ['users.read'],
-    cost: 'owned',
+    // Priced by the path the handler will take: only a user-mode session whose handle is not
+    // known yet calls GET /2/users/me, which is not an Owned Read (review 11 F-4a). Every
+    // other path reads the composition-time snapshot and makes no X call.
+    cost: () => {
+      const snap = deps.session.snapshot();
+      const fetchesMe =
+        snap.authMode === 'user' && snap.me !== undefined && snap.me.handle === undefined;
+      return { class: fetchesMe ? 'r:user' : 'local' };
+    },
     annotations: { title: 'Auth status', readOnlyHint: true, openWorldHint: false },
     input: EMPTY_INPUT,
     phase: 1,

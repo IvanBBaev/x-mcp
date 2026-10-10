@@ -294,6 +294,28 @@ test('a snapshot that already carries the handle is used verbatim — no /2/user
   assert.equal(result.summary, 'auth: user @preset_handle');
 });
 
+test('F-4a: x_auth_status is priced r:user only when it will call /2/users/me', () => {
+  const base = {
+    scopes: [],
+    availability: ['app+user'],
+    policy: { preset: 'default-write', cells: { 'read:account': true } },
+    tokenStore: 'file',
+  } satisfies Omit<AuthSessionInfo, 'authMode' | 'me'>;
+  const costOf = (info: AuthSessionInfo): unknown => {
+    const { cost } = getTool(createAuthTools(fakeDeps(info, SAMPLE_RATE_LIMIT)), 'x_auth_status');
+    assert.equal(typeof cost, 'function');
+    return typeof cost === 'function' ? cost({}) : cost;
+  };
+  // The handle is unknown, so the handler enriches it via GET /2/users/me — not an Owned Read.
+  assert.deepEqual(costOf({ ...base, authMode: 'user', me: { id: '9' } }), { class: 'r:user' });
+  // Every other path reads the snapshot only and makes no X call.
+  assert.deepEqual(costOf({ ...base, authMode: 'user', me: { id: '9', handle: 'h' } }), {
+    class: 'local',
+  });
+  assert.deepEqual(costOf({ ...base, authMode: 'user' }), { class: 'local' });
+  assert.deepEqual(costOf({ ...base, authMode: 'app-only' }), { class: 'local' });
+});
+
 // Statically pins the INT-6 dependency contract the integrator (T-130) must satisfy.
 test('AuthToolDeps shape is the INT-6 seam createAuthTools consumes', () => {
   const tracker: Pick<RateLimitTracker, 'status'> = { status: () => SAMPLE_RATE_LIMIT };
