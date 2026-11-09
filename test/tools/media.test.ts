@@ -1419,9 +1419,13 @@ test('MEDIA-7: the bound call signal reaches the transport — the in-flight APP
   const path = tempFile('inflight.png', mediaBytes('png', 12));
   const controller = new AbortController();
   const mock = mockHttp();
-  mock.pool
-    .intercept({ path: '/2/media/upload/initialize', method: 'POST' })
-    .reply(200, { data: { id: '8400' } });
+  let timer: NodeJS.Timeout | undefined;
+  mock.pool.intercept({ path: '/2/media/upload/initialize', method: 'POST' }).reply(200, () => {
+    // Arm the abort only once INIT has answered, so the session is always open when
+    // the signal fires — a fixed wall-clock delay could land before INIT on a loaded box.
+    timer = setTimeout(() => controller.abort(), 20);
+    return { data: { id: '8400' } };
+  });
   mock.pool
     .intercept({ path: '/2/media/upload/8400/append', method: 'POST' })
     .reply(204)
@@ -1433,7 +1437,6 @@ test('MEDIA-7: the bound call signal reaches the transport — the in-flight APP
     http: withCallSignal(base.http, controller.signal),
     signal: controller.signal,
   };
-  const timer = setTimeout(() => controller.abort(), 20);
 
   await assert.rejects(
     () => upload.handler({ path }, ctx),
