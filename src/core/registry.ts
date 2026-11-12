@@ -29,6 +29,7 @@
 
 import type { Ports } from './ports.js';
 import { POLICY_CELLS } from './tooldef.js';
+import type { ResolveCache } from './resolve.js';
 import type {
   AnyToolDef,
   CostEstimate,
@@ -132,6 +133,8 @@ export interface CallContext {
   readonly ports: Ports;
   readonly http: EndpointInvoker;
   readonly signal?: AbortSignal;
+  /** The process-scoped handle → id memo, handed through to the handler untouched. */
+  readonly resolveCache?: ResolveCache;
 }
 
 /** The pipeline output: the handler's compact payload plus the always-present cost meta. */
@@ -370,9 +373,10 @@ function trackSends(inner: EndpointInvoker): { http: EndpointInvoker; sent: () =
 
 /** Thread ports + the (cancellation-bound) invoker + the signal itself into a ToolContext. */
 function buildToolContext(ctx: CallContext, http: EndpointInvoker): ToolContext {
+  const cache = ctx.resolveCache === undefined ? {} : { resolveCache: ctx.resolveCache };
   return ctx.signal === undefined
-    ? { ports: ctx.ports, http }
-    : { ports: ctx.ports, http: withCallSignal(http, ctx.signal), signal: ctx.signal };
+    ? { ports: ctx.ports, http, ...cache }
+    : { ports: ctx.ports, http: withCallSignal(http, ctx.signal), signal: ctx.signal, ...cache };
 }
 
 /**

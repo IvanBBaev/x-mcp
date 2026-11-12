@@ -22,7 +22,7 @@ import { normalizeTimeBounds } from '../core/timebounds.js';
 import { createHandleLookup, getMe } from '../api/endpoints/users.js';
 import { homeTimeline, mentionsTimeline, userTimeline } from '../api/endpoints/timelines.js';
 import type { TimelineExclude } from '../api/endpoints/timelines.js';
-import type { CostEstimate, ToolOutput } from '../core/tooldef.js';
+import type { CostEstimate, ToolContext, ToolOutput } from '../core/tooldef.js';
 
 // --- Shared request preparation --------------------------------------------------
 
@@ -97,11 +97,14 @@ async function resolveMeId(http: EndpointInvoker): Promise<string> {
  * through `GET /2/users/me`, and handles resolve via `GET /2/users/by/username/:username`
  * (an unknown handle is a `not-found` — the timeline read is never spent).
  */
-async function resolveTimelineUser(refInput: string, http: EndpointInvoker): Promise<string> {
+async function resolveTimelineUser(refInput: string, ctx: ToolContext): Promise<string> {
   const ref = classifyUserRef(refInput);
   if (ref.kind === 'id') return ref.id;
-  if (ref.kind === 'me') return resolveMeId(http);
-  return resolveUserId(refInput, { lookup: createHandleLookup(http) });
+  if (ref.kind === 'me') return resolveMeId(ctx.http);
+  return resolveUserId(refInput, {
+    lookup: createHandleLookup(ctx.http),
+    cache: ctx.resolveCache,
+  });
 }
 
 // --- Pricing (Owned Reads, docs/01 §3.1) ------------------------------------------
@@ -249,7 +252,7 @@ export const xTimelineMentions = defineTool({
   input: mentionsInput,
   handler: async (input, ctx) => {
     const prepared = prepareRequest(input, ctx.ports.clock.now());
-    const userId = await resolveTimelineUser(input.user ?? 'me', ctx.http);
+    const userId = await resolveTimelineUser(input.user ?? 'me', ctx);
     const res = await mentionsTimeline(ctx.http, { userId, ...prepared.params });
     return renderTimelinePage(res, input.raw === true, prepared.notes);
   },
@@ -286,7 +289,7 @@ export const xTimelineUser = defineTool({
   input: userTimelineInput,
   handler: async (input, ctx) => {
     const prepared = prepareRequest(input, ctx.ports.clock.now());
-    const userId = await resolveTimelineUser(input.user, ctx.http);
+    const userId = await resolveTimelineUser(input.user, ctx);
     const exclude: TimelineExclude[] = [];
     if (input.exclude_replies === true) exclude.push('replies');
     if (input.exclude_reposts === true) exclude.push('retweets');

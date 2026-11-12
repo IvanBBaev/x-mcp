@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 
 import { createRegistry, deriveAnnotations, withCallSignal } from '../../src/core/registry.js';
+import { createResolveCache } from '../../src/core/resolve.js';
 import type {
   BudgetGate,
   BudgetReservation,
@@ -353,6 +354,29 @@ test('the pipeline runs the gauntlet in order (validate → policy → rate-limi
   assert.notEqual(seenCtx.http, fakeHttp);
   assert.equal(seenCtx.signal, ctrl.signal);
   assert.equal(typeof seenCtx.ports.clock.now(), 'number');
+});
+
+test('REND-8: the call context hands the shared resolve cache through to the handler, with and without a signal', async () => {
+  const seen: (ToolContext | undefined)[] = [];
+  const tool = makeTool({
+    name: 'x_user_get',
+    policy: 'read:content',
+    handler: (_input, ctx) => {
+      seen.push(ctx);
+      return Promise.resolve({ data: { ok: true } });
+    },
+  });
+  const reg = createRegistry([tool], deps());
+  const resolveCache = createResolveCache();
+
+  await reg.call('x_user_get', {}, callCtx({ resolveCache }));
+  await reg.call('x_user_get', {}, callCtx({ resolveCache, signal: new AbortController().signal }));
+  await reg.call('x_user_get', {}, callCtx());
+
+  assert.equal(seen[0]?.resolveCache, resolveCache);
+  assert.equal(seen[1]?.resolveCache, resolveCache);
+  assert.equal(seen[2]?.resolveCache, undefined);
+  assert.equal(seen[2] !== undefined && 'resolveCache' in seen[2], false);
 });
 
 test('validation runs before any gate; an unknown tool name is a typed validation error', async () => {

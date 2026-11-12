@@ -28,7 +28,7 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import type { EndpointInvoker, ToolOutput } from '../core/tooldef.js';
+import type { ToolContext, ToolOutput } from '../core/tooldef.js';
 import { validationError, XError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, renderDmPage } from '../core/render.js';
@@ -79,7 +79,7 @@ function parseConversationId(value: string): string {
  * by definition the OTHER user in the conversation. Malformed input is a `validation` error
  * before any request runs.
  */
-async function resolveParticipantId(refInput: string, http: EndpointInvoker): Promise<string> {
+async function resolveParticipantId(refInput: string, ctx: ToolContext): Promise<string> {
   const ref = classifyUserRef(refInput);
   if (ref.kind === 'id') return ref.id;
   if (ref.kind === 'me') {
@@ -88,7 +88,10 @@ async function resolveParticipantId(refInput: string, http: EndpointInvoker): Pr
         'participant. Pass their numeric id or @handle.',
     );
   }
-  return resolveUserId(refInput, { lookup: createHandleLookup(http) });
+  return resolveUserId(refInput, {
+    lookup: createHandleLookup(ctx.http),
+    cache: ctx.resolveCache,
+  });
 }
 
 // --- Shared request preparation --------------------------------------------------
@@ -301,7 +304,7 @@ export const xDmParticipantEventsList = defineTool({
   input: participantEventsInput,
   handler: async (input, ctx) => {
     const prepared = prepareDmRequest(input);
-    const participantId = await resolveParticipantId(input.participant, ctx.http);
+    const participantId = await resolveParticipantId(input.participant, ctx);
     const res = await dmParticipantEvents(ctx.http, { participantId, ...prepared.params });
     return renderDmEvents(res, input.include_text === true, prepared.notes);
   },
@@ -407,7 +410,7 @@ export const xDmSend = defineTool({
       const conversationId = parseConversationId(input.conversation_id);
       res = await sendDmToConversation(ctx.http, { conversationId, text: input.text });
     } else if (input.participant !== undefined) {
-      const participantId = await resolveParticipantId(input.participant, ctx.http);
+      const participantId = await resolveParticipantId(input.participant, ctx);
       res = await sendDmToParticipant(ctx.http, { participantId, text: input.text });
     } else {
       // Unreachable via the registry (the schema guarantees exactly one target); kept as a

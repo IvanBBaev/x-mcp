@@ -12,6 +12,7 @@
 
 import type { z } from 'zod';
 import type { Ports } from './ports.js';
+import type { ResolveCache } from './resolve.js';
 
 // --- Axes (const-unions so config/validation can enumerate them) -----------------
 
@@ -156,6 +157,14 @@ export interface EndpointInvoker {
 export interface ToolContext {
   readonly ports: Ports;
   readonly http: EndpointInvoker;
+  /**
+   * The process-scoped `@handle` → id memo (REND-8, core/resolve). Handle resolution passes
+   * it to `resolveUserId`, so a handle costs its `GET /2/users/by/username/:username` once
+   * per process instead of once per call. Optional so a handler under test can run without
+   * one (every lookup then goes to the network). It holds handle↔id pairs only — never the
+   * acting account's own id, which changes when the user re-authenticates as someone else.
+   */
+  readonly resolveCache?: ResolveCache;
   /** Cooperative cancellation from the MCP host. */
   readonly signal?: AbortSignal;
 }

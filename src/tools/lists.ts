@@ -53,7 +53,7 @@ import type { RawListResponse } from '../core/render.js';
 import type { Page } from '../core/render-shapes.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
-import type { EndpointInvoker, ToolContext, ToolOutput } from '../core/tooldef.js';
+import type { ToolContext, ToolOutput } from '../core/tooldef.js';
 
 // --- List-id normalization (REND-8; core/resolve has no list parser, so it lives here) --
 
@@ -123,16 +123,19 @@ async function selfUserId(ctx: ToolContext): Promise<string> {
  * `GET /2/users/me`, and handles resolve via `GET /2/users/by/username/:username` (an
  * unknown handle is a `not-found` — the list call is never spent).
  */
-async function resolveUserRef(refInput: string, http: EndpointInvoker): Promise<string> {
+async function resolveUserRef(refInput: string, ctx: ToolContext): Promise<string> {
   const ref = classifyUserRef(refInput);
   if (ref.kind === 'id') return ref.id;
   if (ref.kind === 'me') {
-    const res = await getUsersMe(http);
+    const res = await getUsersMe(ctx.http);
     const id = res.data?.id;
     if (id === undefined) throw apiError('GET /2/users/me returned no user id.');
     return id;
   }
-  return resolveUserId(refInput, { lookup: createHandleLookup(http) });
+  return resolveUserId(refInput, {
+    lookup: createHandleLookup(ctx.http),
+    cache: ctx.resolveCache,
+  });
 }
 
 // --- Shared pagination preparation (PAGE-1/PAGE-3, REND-10) ----------------------
@@ -459,7 +462,7 @@ export const xListsOwned = defineTool({
   input: ownedInput,
   handler: async (input, ctx) => {
     const prepared = preparePage(input);
-    const userId = await resolveUserRef(input.user ?? 'me', ctx.http);
+    const userId = await resolveUserRef(input.user ?? 'me', ctx);
     const res = await ownedLists(ctx.http, userId, prepared.params);
     if (input.raw === true) return rawOutput(res);
     return pageOutput(renderListPage(res), prepared.notes, billableUnits(res));
@@ -500,7 +503,7 @@ export const xListMemberSet = defineTool({
     // Normalize BEFORE any network call (REND-8): garbage throws typed `validation` here
     // and nothing is spent; an unknown handle is a `not-found` before the write.
     const listId = parseListId(input.list_id);
-    const userId = await resolveUserRef(input.user, ctx.http);
+    const userId = await resolveUserRef(input.user, ctx);
     const res =
       input.action === 'add'
         ? await addListMember(ctx.http, listId, userId)

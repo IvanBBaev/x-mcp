@@ -24,6 +24,7 @@ import type {
   RawTweet,
   RawUser,
 } from '../../src/core/render.js';
+import { createResolveCache } from '../../src/core/resolve.js';
 import type { ToolContext } from '../../src/core/tooldef.js';
 import {
   timelinesTools,
@@ -312,6 +313,34 @@ test('REND-8: x_timeline_mentions resolves a @handle via users/by/username', asy
   assert.equal(page.result_count, 0);
   assert.equal(page.note, 'No results matched this query.'); // REND-1
 
+  http.assertDone();
+  await http.close();
+});
+
+test('REND-8: a shared resolve cache spends the handle lookup once per process', async () => {
+  const http = mockHttp();
+  // ONE by-username interceptor: a second lookup would find no match and fail the call.
+  http.pool
+    .intercept({
+      path: '/2/users/by/username/BillGates',
+      method: 'GET',
+      query: USERS_PROJECTION,
+    })
+    .reply(200, loadFixture<RawSingleResponse<RawUser>>('users/handle-lookup-hit.json'));
+  for (const path of ['/2/users/50393960/mentions', '/2/users/50393960/tweets']) {
+    http.pool
+      .intercept({ path, method: 'GET', query: TIMELINE_FIELD_PARAMS })
+      .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-empty.json'));
+  }
+
+  const resolveCache = createResolveCache();
+  const ctx = { ...makeCtx(http), resolveCache };
+  await xTimelineMentions.handler({ user: '@BillGates' }, ctx);
+  // A different tool and a different casing still hit the cache (handles are case-insensitive).
+  const out = await xTimelineUser.handler({ user: 'billgates' }, ctx);
+
+  assert.equal((out.data as CompactPageResult).result_count, 0);
+  assert.equal(resolveCache.getIdByHandle('BILLGATES'), '50393960');
   http.assertDone();
   await http.close();
 });

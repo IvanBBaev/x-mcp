@@ -142,8 +142,9 @@ export interface Composition {
   readonly budget: SessionBudget;
   /**
    * The session-scoped user resolver seam (core/resolve): the memo cache plus the
-   * `@handle` → id lookup over the users-bucket client. No Phase-1 read tool consumes it
-   * (they resolve inline); the Phase-2 write tools take it via `resolveUserId`.
+   * `@handle` → id lookup over the users-bucket client. The cache is handed to every call
+   * (`ToolContext.resolveCache`), so each tool that resolves a handle inline — timelines,
+   * graph, lists, DMs — pays its by-username lookup once per process.
    */
   readonly resolver: { readonly cache: ResolveCache; readonly lookup: HandleLookup };
 }
@@ -351,11 +352,11 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     }),
   });
 
-  const server = buildMcpServer({ registry, ports, invokerFor });
   const resolver = {
     cache: createResolveCache(),
     lookup: createHandleLookup(invokerFor('x_user_get')),
   };
+  const server = buildMcpServer({ registry, ports, invokerFor, resolveCache: resolver.cache });
 
   return { server, registry, tracker, budget, resolver };
 }

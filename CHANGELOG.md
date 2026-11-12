@@ -22,6 +22,13 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A `@handle` is now looked up once per server process instead of on every call.
+  The timeline, follower/following, follow/mute/block, list and DM tools share one
+  handle-to-id cache, so a second call with the same handle (in any letter case) makes
+  no `GET /2/users/by/username/:username` request and spends nothing on it. The cache
+  holds handle↔id pairs only. It never holds the signed-in account's own id, which
+  still comes from `GET /2/users/me`.
+
 - `x_timeline_mentions` and `x_timeline_user` now price by target. Reading your own
   mentions or your own posts (`user: "me"`, or no `user` on mentions) reserves the Owned
   Reads rate ($0.001 per post); reading anyone else's reserves the post read rate ($0.005

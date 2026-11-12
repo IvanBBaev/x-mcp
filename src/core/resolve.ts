@@ -98,7 +98,7 @@ export interface ResolveUserOptions {
   /** The handle→identity network step (see {@link HandleLookup}). */
   readonly lookup: HandleLookup;
   /** Optional per-session cache; when present, resolved handles skip re-lookup. */
-  readonly cache?: ResolveCache;
+  readonly cache?: ResolveCache | undefined;
   /**
    * The authenticated user's numeric id, enabling the `"me"` self-reference. Omit it and a
    * `"me"` argument is a `validation` error — `me` is not a username and must never be sent

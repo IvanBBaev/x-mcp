@@ -776,6 +776,31 @@ test('INT-3: x_rate_limit_status is local-only — no bucket, no charge, empty t
   await mock.close();
 });
 
+test('REND-8: the composed server resolves a handle once per process across tools', async () => {
+  const mock = mockHttp();
+  // ONE by-username interceptor: a second lookup would find no match and fail the call.
+  mock.pool
+    .intercept({ path: (p) => p.startsWith('/2/users/by/username/BillGates?'), method: 'GET' })
+    .reply(200, loadFixture<object>('users/handle-lookup-hit.json'));
+  for (const segment of ['mentions', 'tweets']) {
+    mock.pool
+      .intercept({ path: (p) => p.startsWith(`/2/users/50393960/${segment}?`), method: 'GET' })
+      .reply(200, loadFixture<object>('search/recent-empty.json'));
+  }
+  const composition = composeFor(mock);
+  const client = await connect(composition);
+
+  const first = await call(client, 'x_timeline_mentions', { user: '@BillGates' });
+  const second = await call(client, 'x_timeline_user', { user: 'billgates' });
+
+  assert.notEqual(first.isError, true);
+  assert.notEqual(second.isError, true);
+  assert.equal(composition.resolver.cache.getIdByHandle('billgates'), '50393960');
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
 test('MCP-2: unknown arguments surface as a typed validation tool result, not a protocol error', async () => {
   const mock = mockHttp();
   const client = await connect(composeFor(mock));

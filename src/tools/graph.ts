@@ -81,7 +81,10 @@ async function resolveTargetUser(refInput: string, ctx: ToolContext): Promise<st
     );
   }
   if (ref.kind === 'id') return ref.id;
-  return resolveUserId(refInput, { lookup: createHandleLookup(ctx.http) });
+  return resolveUserId(refInput, {
+    lookup: createHandleLookup(ctx.http),
+    cache: ctx.resolveCache,
+  });
 }
 
 /**
@@ -94,7 +97,10 @@ async function resolveListUser(refInput: string, ctx: ToolContext): Promise<stri
   const ref = classifyUserRef(refInput);
   if (ref.kind === 'id') return ref.id;
   if (ref.kind === 'me') return selfUserId(ctx);
-  return resolveUserId(refInput, { lookup: createHandleLookup(ctx.http) });
+  return resolveUserId(refInput, {
+    lookup: createHandleLookup(ctx.http),
+    cache: ctx.resolveCache,
+  });
 }
 
 // --- Shared request preparation / output shaping ----------------------------------

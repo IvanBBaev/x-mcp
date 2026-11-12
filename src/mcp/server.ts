@@ -14,6 +14,7 @@ import { XError } from '../core/errors.js';
 import type { Ports } from '../core/ports.js';
 import type { Registry } from '../core/registry.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
+import type { ResolveCache } from '../core/resolve.js';
 import { toolInputSchema } from './schema.js';
 import { renderStructuredResult, toolOutputSchema } from './structured.js';
 
@@ -44,6 +45,8 @@ export interface McpServerDeps {
   readonly ports: Ports;
   /** The rate-limit-recording invoker for a tool's endpoint bucket (INT-3). */
   readonly invokerFor: (toolName: string) => EndpointInvoker;
+  /** The process-scoped handle → id memo every call's handler resolves through (REND-8). */
+  readonly resolveCache?: ResolveCache;
 }
 
 /** Render a typed XError as a structured tool error result (docs/02 §5 — never a crash). */
@@ -105,6 +108,7 @@ export function buildMcpServer(deps: McpServerDeps): Server {
           ports: deps.ports,
           http: deps.invokerFor(name),
           signal: extra.signal,
+          ...(deps.resolveCache === undefined ? {} : { resolveCache: deps.resolveCache }),
         });
         // Text block and structuredContent are built from the SAME render object
         // (REND-11 by construction); typed errors stay text-only (schemas cover success).
