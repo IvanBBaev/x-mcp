@@ -416,11 +416,14 @@ response); writes **per request**.
 Notes:
 
 - The **same read** can fall in `read-owned` instead of its base class when it targets
-  the authenticated user's own data. Of the shipped tools only `x_timeline_mentions`
-  models this discount locally (cost class `owned`); `x_timeline_user` prices
-  statically as `read-post` even when the target resolves to `me` — the own-vs-other
-  cost resolution is not modeled for it (noted 2026-07-31, T-214 audit; revisit if
-  the Owned Reads discount proves material in live captures).
+  the authenticated user's own data. `x_timeline_mentions` and `x_timeline_user`
+  model this with a per-call cost resolver: `owned` only when the input names the
+  caller explicitly (`user: "me"`, or an omitted `user` on mentions, which defaults to
+  `me`); any other reference — including a handle or id that later turns out to be the
+  caller — prices as `read-post`, because the cost is fixed before the call and an
+  unproven self-reference is never discounted (resolved 2026-11-12; until then
+  mentions of *another* user were under-priced as `owned` and own `timeline_user` was
+  over-priced as `read-post`).
 - `write-engagement` was a single unpriced placeholder through 2026-07-22; the pricing
   page has since split it into the named per-operation rows above (verified
   2026-09-28). Each `w:action` tool now carries a `cost` resolver

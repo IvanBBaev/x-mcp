@@ -22,7 +22,7 @@ import { normalizeTimeBounds } from '../core/timebounds.js';
 import { createHandleLookup, getMe } from '../api/endpoints/users.js';
 import { homeTimeline, mentionsTimeline, userTimeline } from '../api/endpoints/timelines.js';
 import type { TimelineExclude } from '../api/endpoints/timelines.js';
-import type { ToolOutput } from '../core/tooldef.js';
+import type { CostEstimate, ToolOutput } from '../core/tooldef.js';
 
 // --- Shared request preparation --------------------------------------------------
 
@@ -102,6 +102,20 @@ async function resolveTimelineUser(refInput: string, http: EndpointInvoker): Pro
   if (ref.kind === 'id') return ref.id;
   if (ref.kind === 'me') return resolveMeId(http);
   return resolveUserId(refInput, { lookup: createHandleLookup(http) });
+}
+
+// --- Pricing (Owned Reads, docs/01 §3.1) ------------------------------------------
+
+/**
+ * Price a timeline read by its target: the Owned Reads discount (`owned`) applies only
+ * when the input itself names the authenticated user (the `me` sentinel, or an omitted
+ * `user` where the tool defaults to `me`). Any other reference — even a handle or id that
+ * later resolves to the caller — prices as `r:post`: the cost is fixed before the call, so
+ * an unproven self-reference is never discounted (never under-count).
+ */
+function timelineCost(user: string | undefined, defaultsToMe: boolean): CostEstimate {
+  const self = user === undefined ? defaultsToMe : user.trim().toLowerCase() === 'me';
+  return { class: self ? 'owned' : 'r:post' };
 }
 
 // --- Output shaping --------------------------------------------------------------
@@ -229,7 +243,7 @@ export const xTimelineMentions = defineTool({
   policy: 'read:content',
   availability: 'app+user',
   scopes: ['tweet.read', 'users.read'],
-  cost: 'owned',
+  cost: (input) => timelineCost(input.user, true),
   annotations: { title: 'Read mentions timeline', readOnlyHint: true, openWorldHint: true },
   phase: 2,
   input: mentionsInput,
@@ -266,7 +280,7 @@ export const xTimelineUser = defineTool({
   policy: 'read:content',
   availability: 'app+user',
   scopes: ['tweet.read', 'users.read'],
-  cost: 'r:post',
+  cost: (input) => timelineCost(input.user, false),
   annotations: { title: 'Read a user timeline', readOnlyHint: true, openWorldHint: true },
   phase: 2,
   input: userTimelineInput,

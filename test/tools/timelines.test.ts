@@ -92,9 +92,25 @@ test('timelinesTools registers the three timeline read tools with the expected a
   assert.equal(xTimelineHome.availability, 'user-only');
   assert.equal(xTimelineHome.cost, 'r:post');
   assert.equal(xTimelineMentions.availability, 'app+user');
-  assert.equal(xTimelineMentions.cost, 'owned');
   assert.equal(xTimelineUser.availability, 'app+user');
-  assert.equal(xTimelineUser.cost, 'r:post');
+});
+
+test('timeline pricing: only an explicit self-reference earns the Owned Reads discount', () => {
+  const mentionsCost = xTimelineMentions.cost;
+  const userCost = xTimelineUser.cost;
+  assert.ok(typeof mentionsCost === 'function', 'x_timeline_mentions cost must be a resolver');
+  assert.ok(typeof userCost === 'function', 'x_timeline_user cost must be a resolver');
+  // Mentions default to `me` — own data, discounted.
+  assert.deepEqual(mentionsCost({}), { class: 'owned' });
+  assert.deepEqual(mentionsCost({ user: ' ME ' }), { class: 'owned' });
+  // Someone else's mentions are not own data.
+  assert.deepEqual(mentionsCost({ user: 'xdevelopers' }), { class: 'r:post' });
+  assert.deepEqual(mentionsCost({ user: '2244994945' }), { class: 'r:post' });
+  // `@me` is a real handle, never the self sentinel.
+  assert.deepEqual(mentionsCost({ user: '@me' }), { class: 'r:post' });
+  // Own posts are discounted; anyone else's (or an unproven self id) is not.
+  assert.deepEqual(userCost({ user: 'me' }), { class: 'owned' });
+  assert.deepEqual(userCost({ user: 'xdevelopers' }), { class: 'r:post' });
 });
 
 test('x_timeline_home: resolves me then renders a compact page (REND-8/REND-6)', async () => {

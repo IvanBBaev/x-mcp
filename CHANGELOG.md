@@ -22,6 +22,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `x_timeline_mentions` and `x_timeline_user` now price by target. Reading your own
+  mentions or your own posts (`user: "me"`, or no `user` on mentions) reserves the Owned
+  Reads rate ($0.001 per post); reading anyone else's reserves the post read rate ($0.005
+  per post). Mentions of another user used to be under-priced at the Owned Reads rate,
+  and your own `x_timeline_user` was over-priced at the post read rate. A handle or id
+  that happens to be your own still prices at the post read rate, because the price is
+  fixed before the call.
+
 - `x_auth_status` now reserves the User read rate ($0.010) when it has to look up the
   account's handle with `GET /2/users/me`, which is not an Owned Read. The handle is then
   cached for the rest of the process, so later calls make no X request and are free, like

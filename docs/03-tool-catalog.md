@@ -157,8 +157,8 @@ Every catalogued tool is registered.
 | Tool | Class | Availability | Cost | Phase | What it does |
 |---|---|---|---|---|---|
 | `x_timeline_home` | read:content | user-only | r:post | P2 | X (Twitter): authenticated user's reverse-chronological home timeline. `max_results` 5–100 |
-| `x_timeline_mentions` | read:content | app+user | owned | P2 | X (Twitter): mentions of a user (defaults to `me`). `max_results` 5–100 |
-| `x_timeline_user` | read:content | app+user | r:post | P2 | X (Twitter): a user's posts (`exclude` replies/reposts flags, time bounds). `max_results` 5–100 |
+| `x_timeline_mentions` | read:content | app+user | owned | P2 | X (Twitter): mentions of a user (defaults to `me`). `max_results` 5–100. Cost `owned` for `me`, `r:post` for anyone else |
+| `x_timeline_user` | read:content | app+user | r:post | P2 | X (Twitter): a user's posts (`exclude` replies/reposts flags, time bounds). `max_results` 5–100. Cost `owned` for `user: "me"`, `r:post` otherwise |
 
 ## engagement — likes, reposts, bookmarks
 
