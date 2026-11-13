@@ -44,8 +44,9 @@
 // carries) then brought the surface to **78,434 bytes**, and moving the parameter wording that
 // recurs across tools (page_token, raw, max_results, the time bounds, list_id) into one terse
 // source (src/tools/params.ts) to **76,816 bytes**; x_usage_get's per-tool `by_tool` map
-// then added 69 B, to **76,885 bytes**, and x_thread_create's resume `reply_to_id` 120 B,
-// to **77,005 bytes** — ~2,995 B of headroom. The
+// then added 69 B, to **76,885 bytes**, x_thread_create's resume `reply_to_id` 120 B,
+// to **77,005 bytes**, and `since_id` on the four search/timeline reads 464 B, to
+// **77,469 bytes** — ~2,531 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -65,7 +66,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 77_005;
+const BASELINE_BYTES = 77_469;
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;

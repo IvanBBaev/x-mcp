@@ -178,6 +178,7 @@ Takes no input fields.
 | `page_token` | string |  | next_token from a previous call. |
 | `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
 | `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `since_id` | string |  | Only posts newer than this post id or status URL; not with start_time. |
 | `sort_order` | `recency` \| `relevancy` |  | Result ordering; defaults to recency. |
 | `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
@@ -269,6 +270,7 @@ Takes no input fields.
 | `page_token` | string |  | next_token from a previous call. |
 | `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
 | `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `since_id` | string |  | Only posts newer than this post id or status URL; not with start_time. |
 | `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_timeline_mentions`
@@ -286,6 +288,7 @@ Takes no input fields.
 | `page_token` | string |  | next_token from a previous call. |
 | `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
 | `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `since_id` | string |  | Only posts newer than this post id or status URL; not with start_time. |
 | `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_timeline_user`
@@ -305,6 +308,7 @@ Takes no input fields.
 | `page_token` | string |  | next_token from a previous call. |
 | `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
 | `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `since_id` | string |  | Only posts newer than this post id or status URL; not with start_time. |
 | `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ## `graph`

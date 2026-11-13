@@ -28,6 +28,7 @@ export interface SearchRecentParams {
   readonly nextToken?: string;
   readonly startTime?: string;
   readonly endTime?: string;
+  readonly sinceId?: string;
   readonly sortOrder?: 'recency' | 'relevancy';
 }
 
@@ -46,6 +47,7 @@ export async function searchRecent(
     ...(params.nextToken !== undefined ? { next_token: params.nextToken } : {}),
     ...(params.startTime !== undefined ? { start_time: params.startTime } : {}),
     ...(params.endTime !== undefined ? { end_time: params.endTime } : {}),
+    ...(params.sinceId !== undefined ? { since_id: params.sinceId } : {}),
     ...(params.sortOrder !== undefined ? { sort_order: params.sortOrder } : {}),
   };
   return http.send<RawListResponse<RawTweet>>({

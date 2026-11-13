@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { defineTool } from '../core/tooldef.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from '../core/render.js';
+import { parsePostId } from '../core/resolve.js';
 import { normalizeTimeBounds } from '../core/timebounds.js';
 import { countsRecent, searchRecent } from '../api/endpoints/search.js';
 import type { SearchRecentParams } from '../api/endpoints/search.js';
@@ -20,7 +21,9 @@ import {
   PAGE_TOKEN_DESC,
   RAW_HISTOGRAM_DESC,
   RAW_PAGE_DESC,
+  SINCE_ID_DESC,
   START_TIME_DESC,
+  checkSinceId,
   maxResultsDesc,
 } from './params.js';
 
@@ -67,6 +70,7 @@ const searchInput = z
     page_token: z.string().optional().describe(PAGE_TOKEN_DESC),
     start_time: z.string().optional().describe(START_TIME_DESC),
     end_time: z.string().optional().describe(END_TIME_DESC),
+    since_id: z.string().optional().describe(SINCE_ID_DESC),
     sort_order: z
       .enum(['recency', 'relevancy'])
       .optional()
@@ -74,7 +78,10 @@ const searchInput = z
     raw: z.boolean().optional().describe(RAW_PAGE_DESC),
   })
   .strict()
-  .superRefine((value, ctx) => checkInvalidOperators(value.query, ctx));
+  .superRefine((value, ctx) => {
+    checkInvalidOperators(value.query, ctx);
+    checkSinceId(value, ctx);
+  });
 
 export const xSearchRecent = defineTool({
   name: 'x_search_recent',
@@ -112,6 +119,7 @@ export const xSearchRecent = defineTool({
       ...(nextToken !== undefined ? { nextToken } : {}),
       ...(bounds.startTime !== undefined ? { startTime: bounds.startTime } : {}),
       ...(bounds.endTime !== undefined ? { endTime: bounds.endTime } : {}),
+      ...(input.since_id !== undefined ? { sinceId: parsePostId(input.since_id) } : {}),
       ...(input.sort_order !== undefined ? { sortOrder: input.sort_order } : {}),
     };
 

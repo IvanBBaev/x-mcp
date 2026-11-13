@@ -535,3 +535,38 @@ test('x_post_counts_recent: sparse buckets count as 0 and total falls back to th
   http.assertDone();
   await http.close();
 });
+
+test('x_search_recent: since_id (id or status URL) rides the wire as since_id for incremental polling', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({
+      path: '/2/tweets/search/recent',
+      method: 'GET',
+      query: { query: 'x', ...SEARCH_FIELD_PARAMS, since_id: '1800000000000000000' },
+    })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
+
+  const out = await xSearchRecent.handler(
+    { query: 'x', since_id: 'https://x.com/someone/status/1800000000000000000' },
+    makeCtx(http),
+  );
+  assert.equal((out.data as CompactPageResult).result_count, 3);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('x_search_recent: a malformed since_id, or since_id with start_time, is refused before the budget charge', async () => {
+  for (const extra of [
+    { since_id: '@someone' },
+    { since_id: '1800000000000000000', start_time: '2026-07-20T00:00:00Z' },
+  ]) {
+    const { reg, budgetChecks } = chargeCountingRegistry(xSearchRecent);
+    await assert.rejects(
+      () => reg.call('x_search_recent', { query: 'x', ...extra }, noHttpCtx()),
+      (err: unknown) =>
+        err instanceof XError && err.kind === 'validation' && /since_id/.test(err.message),
+    );
+    assert.equal(budgetChecks(), 0);
+  }
+});

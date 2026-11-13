@@ -531,3 +531,45 @@ test('x_timeline_home: a me response without an id maps to a typed api error', a
   http.assertDone();
   await http.close();
 });
+
+test('since_id: every timeline tool sends it as since_id, a status URL normalized to its id', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({
+      path: '/2/users/50393960/tweets',
+      method: 'GET',
+      query: { ...TIMELINE_FIELD_PARAMS, since_id: '1800000000000000000' },
+    })
+    .reply(200, loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
+
+  const out = await xTimelineUser.handler(
+    { user: '50393960', since_id: 'https://x.com/someone/status/1800000000000000000' },
+    makeCtx(http),
+  );
+  assert.equal((out.data as CompactPageResult).result_count, 3);
+
+  http.assertDone();
+  await http.close();
+});
+
+test('since_id: each timeline schema refuses a malformed since_id or one combined with start_time', () => {
+  const cases: readonly [
+    typeof xTimelineHome.input | typeof xTimelineMentions.input | typeof xTimelineUser.input,
+    object,
+  ][] = [
+    [xTimelineHome.input, {}],
+    [xTimelineMentions.input, {}],
+    [xTimelineUser.input, { user: '101' }],
+  ];
+  for (const [schema, base] of cases) {
+    assert.equal(schema.safeParse({ ...base, since_id: '1800000000000000000' }).success, true);
+    for (const bad of [
+      { since_id: 'not-an-id' },
+      { since_id: '1800000000000000000', start_time: '2026-07-20T00:00:00Z' },
+    ]) {
+      const parsed = schema.safeParse({ ...base, ...bad });
+      assert.equal(parsed.success, false);
+      if (!parsed.success) assert.deepEqual(parsed.error.issues[0]?.path, ['since_id']);
+    }
+  }
+});

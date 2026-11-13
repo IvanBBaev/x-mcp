@@ -4,6 +4,11 @@
 // sentence repeated in 17 schemas is paid 17 times. One terse source of truth keeps the
 // wording identical everywhere and makes a trim land on every tool at once.
 
+import type { z } from 'zod';
+
+import { XError } from '../core/errors.js';
+import { parsePostId } from '../core/resolve.js';
+
 /** `page_token`: the cursor a paged read returned. */
 export const PAGE_TOKEN_DESC = 'next_token from a previous call.';
 
@@ -18,6 +23,35 @@ export const START_TIME_DESC = 'Oldest post time (ISO-8601 UTC).';
 
 /** `end_time` on a post read; REND-9 clamps it to `now - 10 s` (src/core/timebounds.ts). */
 export const END_TIME_DESC = 'Newest post time (ISO-8601 UTC; clamped to 10 s ago at most).';
+
+/** `since_id` on a post read: incremental polling from the newest id already seen. */
+export const SINCE_ID_DESC =
+  'Only posts newer than this post id or status URL; not with start_time.';
+
+/**
+ * Schema-level check for `since_id` (refused before the budget charge): it must be a post
+ * id or status URL, and it is not combined with `start_time` — the two bound the same edge
+ * of the window, so a caller gets one unambiguous lower bound.
+ */
+export function checkSinceId(
+  input: { readonly since_id?: string | undefined; readonly start_time?: string | undefined },
+  ctx: z.RefinementCtx,
+): void {
+  if (input.since_id === undefined) return;
+  if (input.start_time !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['since_id'],
+      message: 'Pass since_id or start_time, not both: each sets the oldest edge of the window.',
+    });
+  }
+  try {
+    parsePostId(input.since_id);
+  } catch (err) {
+    if (!(err instanceof XError)) throw err;
+    ctx.addIssue({ code: 'custom', path: ['since_id'], message: err.message });
+  }
+}
 
 /** `start_time` on a counts read. */
 export const BUCKET_START_TIME_DESC = 'Oldest bucket time (ISO-8601 UTC).';

@@ -40,6 +40,7 @@ export interface TimelineParams {
   readonly paginationToken?: string;
   readonly startTime?: string;
   readonly endTime?: string;
+  readonly sinceId?: string;
 }
 
 /** `exclude` values accepted by `GET /2/users/:id/tweets` (v2 wire vocabulary). */
@@ -61,6 +62,7 @@ function timelineQuery(params: TimelineParams): Record<string, QueryValue> {
     ...(params.paginationToken !== undefined ? { pagination_token: params.paginationToken } : {}),
     ...(params.startTime !== undefined ? { start_time: params.startTime } : {}),
     ...(params.endTime !== undefined ? { end_time: params.endTime } : {}),
+    ...(params.sinceId !== undefined ? { since_id: params.sinceId } : {}),
   };
 }
 

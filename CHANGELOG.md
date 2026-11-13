@@ -10,6 +10,11 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- `x_search_recent`, `x_timeline_home`, `x_timeline_mentions` and `x_timeline_user` take an
+  optional `since_id` (post id or status URL) for incremental polling: only posts newer than
+  it are returned, so a re-poll pays for new posts only. Pages are newest-first, so the next
+  `since_id` is the first item's id. A malformed `since_id`, or one combined with
+  `start_time`, is refused at validation and never charged.
 - `x_thread_create` takes an optional `reply_to_id` (post id or status URL): the first post
   replies to it, so a stopped thread is resumed in one call instead of by hand, and an
   existing post can be continued as a thread. A mid-thread failure's summary now names the

@@ -17,7 +17,7 @@ import { apiError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, rawMaxResults, rawSummary, renderPostPage } from '../core/render.js';
 import type { RawListResponse, RawTweet } from '../core/render.js';
-import { classifyUserRef, resolveUserId } from '../core/resolve.js';
+import { classifyUserRef, parsePostId, resolveUserId } from '../core/resolve.js';
 import { normalizeTimeBounds } from '../core/timebounds.js';
 import { createHandleLookup, getMe } from '../api/endpoints/users.js';
 import { homeTimeline, mentionsTimeline, userTimeline } from '../api/endpoints/timelines.js';
@@ -27,7 +27,9 @@ import {
   END_TIME_DESC,
   PAGE_TOKEN_DESC,
   RAW_PAGE_DESC,
+  SINCE_ID_DESC,
   START_TIME_DESC,
+  checkSinceId,
   maxResultsDesc,
 } from './params.js';
 
@@ -43,6 +45,7 @@ interface SharedTimelineInput {
   readonly page_token?: string | undefined;
   readonly start_time?: string | undefined;
   readonly end_time?: string | undefined;
+  readonly since_id?: string | undefined;
   readonly raw?: boolean | undefined;
 }
 
@@ -53,6 +56,7 @@ interface PreparedRequest {
     readonly paginationToken?: string;
     readonly startTime?: string;
     readonly endTime?: string;
+    readonly sinceId?: string;
   };
   readonly notes: readonly string[];
 }
@@ -82,6 +86,7 @@ function prepareRequest(input: SharedTimelineInput, nowMs: number): PreparedRequ
       ...(paginationToken !== undefined ? { paginationToken } : {}),
       ...(bounds.startTime !== undefined ? { startTime: bounds.startTime } : {}),
       ...(bounds.endTime !== undefined ? { endTime: bounds.endTime } : {}),
+      ...(input.since_id !== undefined ? { sinceId: parsePostId(input.since_id) } : {}),
     },
     notes,
   };
@@ -168,6 +173,7 @@ const maxResultsField = z.number().int().optional().describe(maxResultsDesc(5, 1
 const pageTokenField = z.string().optional().describe(PAGE_TOKEN_DESC);
 const startTimeField = z.string().optional().describe(START_TIME_DESC);
 const endTimeField = z.string().optional().describe(END_TIME_DESC);
+const sinceIdField = z.string().optional().describe(SINCE_ID_DESC);
 const rawField = z.boolean().optional().describe(RAW_PAGE_DESC);
 const userField = z
   .string()
@@ -182,9 +188,11 @@ const homeInput = z
     page_token: pageTokenField,
     start_time: startTimeField,
     end_time: endTimeField,
+    since_id: sinceIdField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine(checkSinceId);
 
 export const xTimelineHome = defineTool({
   name: 'x_timeline_home',
@@ -221,9 +229,11 @@ const mentionsInput = z
     page_token: pageTokenField,
     start_time: startTimeField,
     end_time: endTimeField,
+    since_id: sinceIdField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine(checkSinceId);
 
 export const xTimelineMentions = defineTool({
   name: 'x_timeline_mentions',
@@ -258,9 +268,11 @@ const userTimelineInput = z
     page_token: pageTokenField,
     start_time: startTimeField,
     end_time: endTimeField,
+    since_id: sinceIdField,
     raw: rawField,
   })
-  .strict();
+  .strict()
+  .superRefine(checkSinceId);
 
 export const xTimelineUser = defineTool({
   name: 'x_timeline_user',
