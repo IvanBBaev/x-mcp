@@ -28,7 +28,7 @@ import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
 import type { AnyToolDef, ToolOutput } from '../core/tooldef.js';
-import type { BudgetMode, SessionBudget } from '../core/budget.js';
+import type { BudgetMode, SessionBudget, SpendByTool } from '../core/budget.js';
 import { validationError } from '../core/errors.js';
 import { toIso } from '../core/render.js';
 import { sanitizePlatformText } from '../core/sanitize.js';
@@ -44,6 +44,8 @@ import type { RawUsageResponse } from '../api/endpoints/usage.js';
  */
 export interface UsageToolDeps {
   readonly budget: Pick<SessionBudget, 'limit' | 'mode' | 'total'>;
+  /** Read side of the per-tool attribution; absent → `by_tool` is never reported. */
+  readonly spend?: Pick<SpendByTool, 'snapshot'>;
 }
 
 // --- Rendered report shape ------------------------------------------------------------
@@ -80,6 +82,8 @@ export interface SessionBudgetReport {
   readonly remaining_usd?: number;
   /** `spent_usd` as a percentage of `limit_usd`, 1 dp. Absent when uncapped (COST-1). */
   readonly percent_used?: number;
+  /** Tool name → USD this session, highest first. Absent until some tool has spent. */
+  readonly by_tool?: Readonly<Record<string, number>>;
 }
 
 /** The compact `x_usage_get` payload. */
@@ -208,10 +212,13 @@ function renderPlatform(res: RawUsageResponse): PlatformUsage {
   };
 }
 
-function renderBudget(budget: UsageToolDeps['budget']): SessionBudgetReport {
+function renderBudget(deps: UsageToolDeps): SessionBudgetReport {
+  const { budget } = deps;
   const spent = usd(budget.total());
+  const byTool = deps.spend?.snapshot() ?? {};
+  const attribution = Object.keys(byTool).length > 0 ? { by_tool: byTool } : {};
   const limit = budget.limit;
-  if (limit === undefined) return { spent_usd: spent, mode: budget.mode };
+  if (limit === undefined) return { spent_usd: spent, mode: budget.mode, ...attribution };
   const percent = pct(spent, limit);
   return {
     spent_usd: spent,
@@ -219,6 +226,7 @@ function renderBudget(budget: UsageToolDeps['budget']): SessionBudgetReport {
     limit_usd: usd(limit),
     remaining_usd: usd(Math.max(0, limit - spent)),
     ...(percent !== undefined ? { percent_used: percent } : {}),
+    ...attribution,
   };
 }
 
@@ -279,7 +287,7 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
       ];
       const report: UsageReport = {
         platform,
-        session_budget: renderBudget(deps.budget),
+        session_budget: renderBudget(deps),
         note: notes.join(' '),
       };
 

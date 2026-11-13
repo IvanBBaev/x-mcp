@@ -255,3 +255,33 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
     },
   };
 }
+
+/**
+ * Per-tool attribution of the session estimate, so `x_usage_get` can say WHICH tools spent
+ * it. Moved by exactly the same amounts as the session ledger — the check-time reservation,
+ * the settle difference, the release back to $0 — so its entries always sum to the session
+ * total. It only records; it never refuses, so it cannot change what a call is charged.
+ */
+export interface SpendByTool {
+  /** Move `tool`'s running spend by `deltaUsd` (negative for a refund or release). */
+  record(tool: string, deltaUsd: number): void;
+  /** Tool → USD spent this session, highest first; tools at $0 are left out. */
+  snapshot(): Readonly<Record<string, number>>;
+}
+
+export function createSpendByTool(): SpendByTool {
+  const spent = new Map<string, number>();
+  return {
+    record(tool, deltaUsd) {
+      if (!Number.isFinite(deltaUsd) || deltaUsd === 0) return;
+      spent.set(tool, round6(Math.max(0, (spent.get(tool) ?? 0) + deltaUsd)));
+    },
+    snapshot() {
+      return Object.fromEntries(
+        [...spent]
+          .filter(([, usd]) => usd > 0)
+          .sort(([a, x], [b, y]) => y - x || a.localeCompare(b)),
+      );
+    },
+  };
+}

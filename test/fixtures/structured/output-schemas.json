@@ -3114,6 +3114,12 @@
                     },
                     "percent_used": {
                       "type": "number"
+                    },
+                    "by_tool": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
                     }
                   },
                   "required": ["spent_usd", "mode"]

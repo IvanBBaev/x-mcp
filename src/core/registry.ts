@@ -85,7 +85,8 @@ export interface BudgetReservation {
  * tool call produce exactly one charge.
  */
 export interface BudgetGate {
-  check(estimate: CostEstimate): void;
+  /** `tool` is the called tool's name, for per-tool attribution; it never changes the price. */
+  check(estimate: CostEstimate, tool?: string): void;
   reserve(estimate: CostEstimate, units?: number): BudgetReservation;
   /**
    * Hand back the reservation `check` took for a call whose handler failed BEFORE it sent a
@@ -274,7 +275,7 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     // (4) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
     //     Synchronous with step 3, so no await separates the two (CONC-2 still holds).
     const estimate = resolveCost(tool, input);
-    deps.budget.check(estimate);
+    deps.budget.check(estimate, tool.name);
 
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
     //     A handler that throws BEFORE its first request left through the invoker refused

@@ -516,6 +516,7 @@ const USAGE_DATA: SchemaNode = {
         limit_usd: NUM,
         remaining_usd: NUM,
         percent_used: NUM,
+        by_tool: { type: 'object', additionalProperties: NUM },
       },
       required: ['spent_usd', 'mode'],
     },

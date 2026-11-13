@@ -12,6 +12,7 @@ import {
   COST_TABLE,
   USER_INTERACTION_CREATE_USD,
   createSessionBudget,
+  createSpendByTool,
   priceOf,
 } from '../../src/core/budget.js';
 import type { AnyToolDef, ResultMeta } from '../../src/core/tooldef.js';
@@ -373,4 +374,21 @@ test('no X-calling tool prices a w:action write through the $0 table fallback', 
   assert.equal(tools.length, 39);
   const staticActions = tools.filter((tool) => tool.cost === 'w:action').map((tool) => tool.name);
   assert.deepEqual(staticActions, []);
+});
+
+test('SpendByTool sorts by spend, drops $0 tools and ignores non-finite deltas', () => {
+  const spend = createSpendByTool();
+  spend.record('x_b', 0.01);
+  spend.record('x_a', 0.01);
+  spend.record('x_c', 0.2);
+  spend.record('x_d', 0.005);
+  spend.record('x_d', -0.005); // released back to $0
+  spend.record('x_e', -1); // never below zero
+  spend.record('x_a', Number.NaN);
+  spend.record('x_a', 0);
+  assert.deepEqual(Object.entries(spend.snapshot()), [
+    ['x_c', 0.2],
+    ['x_a', 0.01],
+    ['x_b', 0.01],
+  ]);
 });

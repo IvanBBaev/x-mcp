@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- `x_usage_get` now reports `session_budget.by_tool`: the local session estimate split by
+  tool name (USD, highest first), so you can see which tools spent it. It moves with the
+  session total — a local refusal handed back to $0 drops out — and it is omitted until some
+  tool has spent. Additive output-schema change.
 - `x_thread_create` (roadmap Phase 3): post a thread — `posts: string[]` (2-25) — in one
   call instead of chaining `x_post_create` by hand. Post 1 is standalone and every
   following post replies to the previous id; each post is sent and rate-limit tracked

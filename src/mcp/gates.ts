@@ -5,7 +5,7 @@
 // plus a tool→bucket-key mapping, so the api wiring stays in the composition (INT-3).
 
 import type { BudgetGate, BudgetReservation, PolicyGate, RateLimitGate } from '../core/registry.js';
-import type { SessionBudget } from '../core/budget.js';
+import type { SessionBudget, SpendByTool } from '../core/budget.js';
 import { deniedToolError, isCellAllowed } from '../core/policy.js';
 import type { ResolvedPolicy } from '../core/policy.js';
 import type { AnyToolDef, CostEstimate } from '../core/tooldef.js';
@@ -49,30 +49,42 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  */
 export function createBudgetGate(
   budget: SessionBudget,
+  spend?: Pick<SpendByTool, 'record'>,
 ): BudgetGate & { release(estimate: CostEstimate): void } {
-  const reserved = new WeakMap<CostEstimate, BudgetReservation>();
+  // Each held reservation remembers the tool it was taken for, so every later move of the
+  // session ledger (settle, release) is mirrored onto the same tool's share.
+  const reserved = new WeakMap<CostEstimate, { meta: BudgetReservation; tool?: string }>();
+  const attribute = (tool: string | undefined, deltaUsd: number): void => {
+    if (tool !== undefined) spend?.record(tool, deltaUsd);
+  };
   return {
-    check(estimate) {
+    check(estimate, tool) {
       // Throws the typed `budget` XError in hard mode BEFORE any reservation (COST-1).
-      reserved.set(estimate, budget.reserve(estimate));
+      const meta = budget.reserve(estimate);
+      reserved.set(estimate, tool === undefined ? { meta } : { meta, tool });
+      attribute(tool, meta.cost_usd);
     },
     reserve(estimate, units) {
-      const meta = reserved.get(estimate);
-      if (meta !== undefined) {
+      const held = reserved.get(estimate);
+      if (held !== undefined) {
         reserved.delete(estimate);
-        return units === undefined ? meta : budget.settle(meta, { ...estimate, units });
+        if (units === undefined) return held.meta;
+        const settled = budget.settle(held.meta, { ...estimate, units });
+        attribute(held.tool, settled.cost_usd - held.meta.cost_usd);
+        return settled;
       }
       // Defensive: unreachable through the registry pipeline (check always precedes
       // reserve); if a future caller skips check, charge now so nothing rides free.
       return budget.reserve(units === undefined ? estimate : { ...estimate, units });
     },
     release(estimate) {
-      const meta = reserved.get(estimate);
-      if (meta === undefined) return;
+      const held = reserved.get(estimate);
+      if (held === undefined) return;
       reserved.delete(estimate);
       // Settle to the $0 `local` price: the ledger moves by minus exactly what this call
       // held, never by overwriting a total another call moved in between (CONC-2).
-      budget.settle(meta, 'local');
+      budget.settle(held.meta, 'local');
+      attribute(held.tool, -held.meta.cost_usd);
     },
   };
 }

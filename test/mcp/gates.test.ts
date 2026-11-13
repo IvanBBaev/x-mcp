@@ -7,8 +7,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { USER_INTERACTION_CREATE_USD, createSessionBudget } from '../../src/core/budget.js';
-import type { SessionBudget } from '../../src/core/budget.js';
+import {
+  USER_INTERACTION_CREATE_USD,
+  createSessionBudget,
+  createSpendByTool,
+} from '../../src/core/budget.js';
+import type { SessionBudget, SpendByTool } from '../../src/core/budget.js';
 import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
 import type { CallContext, Registry } from '../../src/core/registry.js';
@@ -124,6 +128,29 @@ test('RATE-2/CONC-2: release hands back exactly the held reservation, by the dif
   assert.equal(budget.total(), 0.01);
 });
 
+test('per-tool attribution moves with the session ledger: check, settle and release', () => {
+  const budget = createSessionBudget({ limit: 1, mode: 'hard' });
+  const spend = createSpendByTool();
+  const gate = createBudgetGate(budget, spend);
+  const read: CostEstimate = { class: 'r:post' };
+  const refused: CostEstimate = { class: 'w:action', usd: 0.015 };
+  const anonymous: CostEstimate = { class: 'r:user' };
+
+  gate.check(read, 'x_search_recent');
+  gate.check(refused, 'x_like_set');
+  gate.check(anonymous); // no tool name: charged, but attributed to nobody
+  assert.deepEqual(spend.snapshot(), { x_like_set: 0.015, x_search_recent: 0.005 });
+
+  gate.reserve(read, 10); // settled up to ten posts
+  gate.release(refused); // refused locally: handed back to $0 and dropped from the report
+  assert.deepEqual(spend.snapshot(), { x_search_recent: 0.05 });
+  assert.equal(budget.total(), 0.06); // 0.05 attributed + 0.01 unattributed
+
+  // A hard-mode refusal at check reserves nothing, so it attributes nothing either.
+  assert.throws(() => gate.check({ class: 'w:post', usd: 5 }, 'x_post_create'));
+  assert.deepEqual(spend.snapshot(), { x_search_recent: 0.05 });
+});
+
 // --- Local refusals of priced w:action writes, through the real registry + real gate ----
 //
 // These writes refuse some inputs inside the handler — after step 4 has reserved the
@@ -135,8 +162,10 @@ test('RATE-2/CONC-2: release hands back exactly the held reservation, by the dif
 function budgetedRegistry(tools: readonly AnyToolDef[]): {
   reg: Registry;
   budget: SessionBudget;
+  spend: SpendByTool;
 } {
   const budget = createSessionBudget({ limit: 1, mode: 'hard' });
+  const spend = createSpendByTool();
   const reg = createRegistry(tools, {
     policy: {
       preset: 'full',
@@ -144,10 +173,10 @@ function budgetedRegistry(tools: readonly AnyToolDef[]): {
       isAllowed: () => true,
       denyError: () => apiError('unused'),
     },
-    budget: createBudgetGate(budget),
+    budget: createBudgetGate(budget, spend),
     rateLimit: { preflight: () => {} },
   });
-  return { reg, budget };
+  return { reg, budget, spend };
 }
 
 /** A call context whose invoker records every request and answers with `reply`. */
@@ -202,4 +231,22 @@ test('COST-3: an unknown follow target stays charged — the handle lookup reach
   );
   assert.equal(sent.length, 1); // the lookup only — the write was never sent
   assert.equal(budget.total(), USER_INTERACTION_CREATE_USD);
+});
+
+test('the registry attributes each charge to the tool that was called', async () => {
+  const { reg, spend } = budgetedRegistry([xFollowSet, xLikeSet]);
+  // A local refusal: charged at check, released, so it never shows up.
+  await assert.rejects(
+    () => reg.call('x_like_set', { post: 'not-a-post-id', action: 'like' }, recordingCall().ctx),
+    isValidation,
+  );
+  // A call that reached X stays charged under its own name.
+  await assert.rejects(() =>
+    reg.call(
+      'x_follow_set',
+      { user: '@ghost', action: 'follow' },
+      recordingCall(() => loadFixture('users/handle-lookup-miss.json')).ctx,
+    ),
+  );
+  assert.deepEqual(spend.snapshot(), { x_follow_set: USER_INTERACTION_CREATE_USD });
 });

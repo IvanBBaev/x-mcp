@@ -190,6 +190,35 @@ test('COST-3: the session block carries spend, mode, remaining and percent of th
   await http.close();
 });
 
+test('session_budget.by_tool reports the per-tool share only once some tool has spent', async () => {
+  const http = mockHttp();
+  for (let i = 0; i < 2; i += 1) {
+    http.pool
+      .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+      .reply(200, loadFixture<RawUsageResponse>(FIXTURE));
+  }
+
+  const byTool = { x_search_recent: 0.1, x_user_get: 0.02 };
+  const capped = (
+    await usageTool({
+      budget: fakeBudget(0.12, 5),
+      spend: { snapshot: () => byTool },
+    }).handler({}, makeCtx(http))
+  ).data as UsageReport;
+  assert.deepEqual(capped.session_budget.by_tool, byTool);
+
+  const idle = (
+    await usageTool({ budget: fakeBudget(0), spend: { snapshot: () => ({}) } }).handler(
+      {},
+      makeCtx(http),
+    )
+  ).data as UsageReport;
+  assert.deepEqual(idle.session_budget, { spent_usd: 0, mode: 'warn' });
+
+  http.assertDone();
+  await http.close();
+});
+
 test('COST-7: the monthly read cap is reported as the platform states it, and stated to be untracked between sessions', async () => {
   const http = mockHttp();
   http.pool

@@ -18,7 +18,7 @@ import type { OAuth2Auth } from '../api/oauth2/index.js';
 import { createRateLimitTracker, rateLimitKey } from '../api/ratelimit.js';
 import type { RateLimitTracker } from '../api/ratelimit.js';
 import { createHandleLookup } from '../api/endpoints/users.js';
-import { createSessionBudget } from '../core/budget.js';
+import { createSessionBudget, createSpendByTool } from '../core/budget.js';
 import type { SessionBudget } from '../core/budget.js';
 import type { Config } from '../core/config.js';
 import { resolvePolicy } from '../core/policy.js';
@@ -301,6 +301,8 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     mode: config.budget.mode,
     ...(config.budget.creditUsd !== undefined ? { limit: config.budget.creditUsd } : {}),
   });
+  // Per-tool share of the same estimate: written only by the budget gate, read by x_usage_get.
+  const spend = createSpendByTool();
 
   const session = createSessionProvider(config, policy);
   const tools = [
@@ -323,7 +325,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     // INT-6, like createAuthTools: the report reads process state (the session credit
     // estimate) that the frozen ToolContext does not carry, so the budget is injected here.
     // Only the READ side of the budget is in the seam's type — the tool cannot charge.
-    ...createUsageTools({ budget }),
+    ...createUsageTools({ budget, spend }),
   ];
   for (const tool of tools) {
     if (!(tool.name in TOOL_BUCKETS)) {
@@ -345,7 +347,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
 
   const registry = createRegistry(gate.registered, {
     policy: createPolicyGate(policy, config.policy.hideDenied),
-    budget: createBudgetGate(budget),
+    budget: createBudgetGate(budget, spend),
     rateLimit: createRateLimitGate(tracker, (tool) => {
       const bucket = TOOL_BUCKETS[tool.name];
       return bucket == null ? null : rateLimitKey(bucket, authContext);

@@ -154,7 +154,8 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > tool and parameter descriptions (no parameter, constraint or behaviour change) then
 > brought it down to **78,434 B** (1,566 B of headroom). Moving the parameter wording that
 > recurs across tools into one terse source (`src/tools/params.ts`, 2026-11-13) brought it
-> to **76,816 B** (3,184 B of headroom).
+> to **76,816 B** (3,184 B of headroom); `x_usage_get`'s per-tool `by_tool` spend map
+> (2026-11-13) added 69 B, to **76,885 B** (3,115 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -200,7 +201,8 @@ above; this is the single list to walk before tagging:
       what the JSON Schema or a parameter's own description already says) moved
       the baseline 79,987 → **78,434 B** (2.0% headroom). Sharing the recurring
       parameter wording (`src/tools/params.ts`, 2026-11-13) moved it to
-      **76,816 B** (4.0% headroom).*
+      **76,816 B** (4.0% headroom); `x_usage_get`'s `by_tool` map then added 69 B
+      (**76,885 B**, 3.9% headroom).*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
       Audited the shipped code, not the design: 17 threats and 4 kill-chains walked
