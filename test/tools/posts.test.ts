@@ -1391,10 +1391,70 @@ test('x_thread_create: a mid-thread failure reports published posts, failed_at, 
   // the mapped failure exactly as it would for a standalone x_post_create reply failure.
   assert.match(data.error.message, /posts already created in this sequence remain live/);
   assert.match(data.error.message, /resume by replying to the last successful id/);
-  assert.equal(out.summary, `Thread stopped at post 2/3: ${data.error.message}`);
+  assert.equal(
+    out.summary,
+    `Thread stopped at post 2/3: ${data.error.message} To resume, call again with ` +
+      'reply_to_id 200 and posts from index 1.',
+  );
 
   // Only 2 interceptors were queued (for posts 1 and 2): the loop stopped at the failure
   // and never attempted post 3 — assertDone proves that, not just the returned shape.
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_thread_create: reply_to_id resumes a thread — post 1 replies to it (id or status URL)', async () => {
+  const mock = mockHttp();
+  const body1 = captureBody();
+  const body2 = captureBody();
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST', body: body1.matcher })
+    .reply(201, { data: { id: '301', text: 'two' } });
+  mock.pool
+    .intercept({ path: '/2/tweets', method: 'POST', body: body2.matcher })
+    .reply(201, { data: { id: '302', text: 'three' } });
+
+  const input = xThreadCreate.input.parse({
+    posts: ['two', 'three'],
+    reply_to_id: 'https://x.com/someone/status/300',
+  });
+  const out = await xThreadCreate.handler(input, contextFor(mock));
+
+  assert.deepEqual(JSON.parse(body1.get()), {
+    text: 'two',
+    reply: { in_reply_to_tweet_id: '300' },
+  });
+  assert.deepEqual(JSON.parse(body2.get()), {
+    text: 'three',
+    reply: { in_reply_to_tweet_id: '301' },
+  });
+  assert.equal((out.data as { ok: boolean }).ok, true);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_thread_create: a malformed reply_to_id is refused by the schema, before the budget charge', async () => {
+  const parsed = xThreadCreate.input.safeParse({ posts: ['a', 'b'], reply_to_id: 'not-a-post' });
+  assert.equal(parsed.success, false);
+  assert.deepEqual(parsed.error?.issues[0]?.path, ['reply_to_id']);
+
+  const { reg, budgetChecks } = chargeCountingRegistry(xThreadCreate);
+  await assert.rejects(
+    () => reg.call('x_thread_create', { posts: ['a', 'b'], reply_to_id: 'nope' }, noHttpCtx()),
+    xErrorOf('validation', /./),
+  );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('x_thread_create: a first-post failure with no reply_to_id has nothing to resume from', async () => {
+  const mock = mockHttp();
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(500, {
+    title: 'Internal Server Error',
+  });
+  const out = await xThreadCreate.handler({ posts: ['one', 'two'] }, contextFor(mock));
+  assert.equal((out.data as { failed_at: number }).failed_at, 0);
+  assert.doesNotMatch(out.summary ?? '', /To resume/);
   mock.assertDone();
   await mock.close();
 });

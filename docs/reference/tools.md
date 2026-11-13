@@ -144,6 +144,7 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `posts` | string[] (2–25 items) | ✅ | Thread texts, in order (2-25); each replies to the previous. |
+| `reply_to_id` | string |  | Post the first one replies to (id or status URL); resumes a stopped thread. |
 
 ## `users`
 

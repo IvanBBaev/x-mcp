@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- `x_thread_create` takes an optional `reply_to_id` (post id or status URL): the first post
+  replies to it, so a stopped thread is resumed in one call instead of by hand, and an
+  existing post can be continued as a thread. A mid-thread failure's summary now names the
+  `reply_to_id` and the index to resume from.
 - `x_usage_get` now reports `session_budget.by_tool`: the local session estimate split by
   tool name (USD, highest first), so you can see which tools spent it. It moves with the
   session total — a local refusal handed back to $0 drops out — and it is omitted until some

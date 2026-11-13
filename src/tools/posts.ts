@@ -675,8 +675,22 @@ const threadInput = z
         }
       })
       .describe('Thread texts, in order (2-25); each replies to the previous.'),
+    reply_to_id: z
+      .string()
+      .optional()
+      .describe('Post the first one replies to (id or status URL); resumes a stopped thread.'),
   })
-  .strict();
+  .strict()
+  // Same reference shape as x_post_create, refused in the schema so it is never charged.
+  .superRefine((input, ctx) => {
+    if (input.reply_to_id === undefined) return;
+    try {
+      parsePostId(input.reply_to_id);
+    } catch (err) {
+      if (!(err instanceof XError)) throw err;
+      ctx.addIssue({ code: 'custom', path: ['reply_to_id'], message: err.message });
+    }
+  });
 
 /** COST-4 applies per post; the whole thread is priced and charged as one aggregate. */
 const THREAD_COST_NOTE =
@@ -689,8 +703,8 @@ const THREAD_COST_NOTE =
  * unchanged — post 1 standalone, each following post replies to the previous id, and EVERY
  * post goes through the same per-post rate/cost/policy checks (no bypass). A mid-thread
  * failure is reported, not thrown (REND-2 precedent): the result lists what already
- * published and where it stopped, so the agent resumes with `x_post_create`'s
- * `reply_to_id` (POST-9); nothing already posted is auto-deleted. Gated at `write:content`,
+ * published and where it stopped, so the agent resumes by calling it again with
+ * `reply_to_id` set to the last published id (POST-9); nothing already posted is auto-deleted. Gated at `write:content`,
  * the same cell as `x_post_create` — callable only from the `publish` preset and above.
  */
 export const xThreadCreate = defineTool({
@@ -699,7 +713,7 @@ export const xThreadCreate = defineTool({
   description:
     'X (Twitter): post a thread — posts: string[] (2-25), each replying to the previous. ' +
     'Same per-post checks as x_post_create. On failure: returns posts published so far ' +
-    "plus the failed index, to resume via x_post_create's reply_to_id. Never auto-deletes.",
+    'plus the failed index; resume with reply_to_id = the last id. Never auto-deletes.',
   policy: 'write:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
@@ -721,7 +735,8 @@ export const xThreadCreate = defineTool({
   input: threadInput,
   handler: async (input, ctx) => {
     const posts: { id: string; url: string }[] = [];
-    let replyToId: string | undefined;
+    // Validated by the schema; parsePostId only normalizes a status URL to its id here.
+    let replyToId = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
     for (const [index, text] of input.posts.entries()) {
       let res: RawSingleResponse<RawCreatedPost>;
       try {
@@ -735,9 +750,13 @@ export const xThreadCreate = defineTool({
         // `hasReplyTo` is true from the second post on, so POST-9 thread-resume guidance
         // rides on the mapped error exactly as it would for a standalone reply failure.
         const mapped = mapCreateFailure(err, replyToId !== undefined, text);
+        const resume =
+          replyToId !== undefined
+            ? ` To resume, call again with reply_to_id ${replyToId} and posts from index ${index}.`
+            : '';
         return {
           data: { ok: false, posts, failed_at: index, error: mapped.toPayload().error },
-          summary: `Thread stopped at post ${index + 1}/${input.posts.length}: ${mapped.message}`,
+          summary: `Thread stopped at post ${index + 1}/${input.posts.length}: ${mapped.message}${resume}`,
         };
       }
       const id = res.data?.id ?? '';
