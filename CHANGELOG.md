@@ -50,6 +50,13 @@ development chronology lives in `WORKLOG.md`.
   self-serve tiers, so on pay-per-use that refusal will not clear on retry. The error
   class, `retryable`, `fix`, and platform data are unchanged. A quote refusal that
   another rule already explains, such as a duplicate post, is left as it was.
+- A refused DM send now reports why. X's typed DM refusals (problem types under
+  `https://api.x.com/2/problems/dm-…`, API changelog 2026-10-26) map to the matching
+  error class: a missing recipient or conversation is `not-found`, DM throttling is
+  `rate-limit`, a refusal on the sender's side is `forbidden` with `fix: operator`, and
+  content, safety and recipient-side refusals are `forbidden` with specific guidance. The
+  refusal slug (for example `dm-recipient-not-accepting`) is exposed as `data.refusal`.
+  An unexplained refusal (`about:blank`) is reported as before.
 - A `@handle` is now looked up once per server process instead of on every call.
   The timeline, follower/following, follow/mute/block, list and DM tools share one
   handle-to-id cache, so a second call with the same handle (in any letter case) makes

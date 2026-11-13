@@ -283,6 +283,11 @@ export function mapHttpError(
   }
 
   if (status === 403) {
+    // Checked first: a typed DM refusal is the platform naming the cause outright, so no
+    // keyword heuristic below may reclassify it (a `detail` mentioning "verified" or
+    // "access" must not turn a recipient-side refusal into `billing`).
+    const dmRefusal = dmRefusalOf(problem);
+    if (dmRefusal !== undefined) return mapDmRefusal(dmRefusal, data);
     if (looksLikeScope(problem)) return mapScope(problem, data);
     if (looksLikeBilling(problem)) return billingError(BILLING_MESSAGE, { data });
     return forbiddenError(
@@ -344,6 +349,85 @@ const USAGE_CAP_MESSAGE =
   'and retrying will not help. See `platform_detail` for the cap X reported. The cap lifts ' +
   'when the monthly usage period renews, or sooner if the operator raises it on the X ' +
   'developer account.';
+
+/**
+ * The `dm-*` slug of a typed DM refusal (X API changelog 2026-10-26). DM sends still answer
+ * HTTP 403, but the problem `type` now names the refusal with a URI under
+ * `https://api.x.com/2/problems/dm-…`; an unexplained refusal keeps `about:blank`.
+ */
+function dmRefusalOf(problem: ParsedProblem): string | undefined {
+  return /\/problems\/(dm-[a-z0-9-]+)\/?$/.exec(problem.type ?? '')?.[1];
+}
+
+/** Refusal slugs that mean the target itself is gone or invisible — `not-found`, not `forbidden`. */
+const DM_NOT_FOUND = new Set([
+  'dm-not-found',
+  'dm-conversation-not-found',
+  'dm-recipient-not-found',
+  'dm-participant-not-found',
+]);
+
+/** Refusal slugs the agent fixes by changing the message itself (content / arguments). */
+const DM_CONTENT =
+  /^dm-(?:bad-[a-z-]+|text-empty|text-too-long|unsupported-message|duplicate|conversation-name-too-long|too-few-participants|too-many-participants)$/;
+
+/**
+ * Map a typed DM refusal to the class and remediation its cause calls for. The slug rides
+ * along as `data.refusal` so an agent can branch on it without parsing prose; `detail`
+ * stays in `platform_detail` as X worded it.
+ */
+function mapDmRefusal(refusal: string, base: XErrorData): XError {
+  const data: XErrorData = { ...base, refusal };
+  const tag = `(\`${refusal}\`; see \`platform_detail\`.)`;
+  if (DM_NOT_FOUND.has(refusal)) {
+    return notFoundError(
+      `The DM recipient, participant or conversation does not exist or is not visible to ` +
+        `this account. Check the id and retry. ${tag}`,
+      { data },
+    );
+  }
+  if (refusal === 'dm-rate-limited') {
+    return rateLimitError(
+      `X is throttling direct messages from this account. Wait before sending more; a DM ` +
+        `send is a write and must not auto-retry (RATE-5). ${tag}`,
+      { data },
+    );
+  }
+  if (DM_CONTENT.test(refusal)) {
+    return forbiddenError(
+      `X refused the direct message because of its content or arguments (text, media, ` +
+        `attachment, URL or participant list). Fix the message and send again. ${tag}`,
+      { data },
+    );
+  }
+  if (refusal.startsWith('dm-safety-')) {
+    return forbiddenError(
+      `X's safety systems refused this direct message. Do not resend or reword it to get ` +
+        `around the refusal. ${tag}`,
+      { data },
+    );
+  }
+  if (refusal.startsWith('dm-sender-')) {
+    return forbiddenError(
+      `The authenticated account may not send this direct message (for example its DMs are ` +
+        `closed, it is read-only, unverified or needs a phone number, or it blocks the ` +
+        `recipient). Only the account owner can change that on X; resending will not help. ${tag}`,
+      { data, fix: 'operator' },
+    );
+  }
+  if (refusal.startsWith('dm-recipient-') || refusal.startsWith('dm-participant-')) {
+    return forbiddenError(
+      `The recipient cannot or will not receive this direct message (they block the sender, ` +
+        `do not accept DMs from this account, or are unavailable). Resending will not help; ` +
+        `reach them another way. ${tag}`,
+      { data },
+    );
+  }
+  return forbiddenError(
+    `X refused this direct message. Resending it unchanged will not succeed. ${tag}`,
+    { data },
+  );
+}
 
 function mapScope(problem: ParsedProblem, data: XErrorData): XError {
   const scope = extractScope(problem);

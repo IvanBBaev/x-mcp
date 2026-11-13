@@ -18,7 +18,8 @@
 //         Deliberately NO `raw: true` escape hatch on the DM reads — raw payloads would
 //         bypass both the minimization and the REND-6 sanitization.
 //   DM-4  a send refused by the platform (recipient does not follow / DMs closed / blocked)
-//         surfaces as a typed `forbidden` error with the platform reason; the ~1,440/24-h
+//         surfaces as a typed error with the platform reason — a typed `dm-*` problem
+//         type is mapped to its class and exposed as `data.refusal` (api/errors); the ~1,440/24-h
 //         send cap is declared on the tool and tracked as a RATE-6-style window by the
 //         rate-limit layer.
 //

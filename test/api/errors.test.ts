@@ -508,3 +508,70 @@ test('mapHttpError reads Node-style header records: numeric, string[] and absent
     assert.equal(absent.data.retry_after_seconds, undefined);
   }
 });
+
+/** A DM-send 403 in the 2026-10-26 typed-refusal shape: problem `type` names the cause. */
+function dmRefusal(slug: string, detail = 'The recipient is not accepting messages.'): XError {
+  return mapHttpError(
+    403,
+    {},
+    {
+      type: `https://api.x.com/2/problems/${slug}`,
+      title: 'Forbidden',
+      detail,
+      status: 403,
+    },
+  );
+}
+
+test('typed DM refusals: the dm-* slug picks the class and rides along as data.refusal', () => {
+  const cases: ReadonlyArray<readonly [string, string, 'agent' | 'operator', RegExp]> = [
+    ['dm-recipient-not-accepting', 'forbidden', 'agent', /recipient cannot or will not/],
+    ['dm-recipient-blocks-sender', 'forbidden', 'agent', /reach them another way/],
+    ['dm-participant-restricted', 'forbidden', 'agent', /recipient cannot or will not/],
+    ['dm-sender-dms-closed', 'forbidden', 'operator', /account owner/],
+    ['dm-sender-phone-required', 'forbidden', 'operator', /account owner/],
+    ['dm-text-too-long', 'forbidden', 'agent', /Fix the message/],
+    ['dm-bad-media', 'forbidden', 'agent', /Fix the message/],
+    ['dm-duplicate', 'forbidden', 'agent', /Fix the message/],
+    ['dm-safety-rejected', 'forbidden', 'agent', /Do not resend or reword/],
+    ['dm-conversation-not-found', 'not-found', 'agent', /does not exist/],
+    ['dm-recipient-not-found', 'not-found', 'agent', /does not exist/],
+    ['dm-rate-limited', 'rate-limit', 'agent', /must not auto-retry/],
+    ['dm-not-owner', 'forbidden', 'agent', /Resending it unchanged/],
+  ];
+  for (const [slug, kind, fix, message] of cases) {
+    const err = dmRefusal(slug);
+    assert.equal(err.kind, kind, slug);
+    assert.equal(err.fix, fix, slug);
+    assert.equal(err.data.refusal, slug, slug);
+    assert.equal(err.data.http_status, 403, slug);
+    assert.equal(err.data.platform_detail, 'The recipient is not accepting messages.', slug);
+    assert.match(err.message, message, slug);
+    assert.ok(err.message.includes(`\`${slug}\``), `${slug}: message names the refusal`);
+  }
+});
+
+test('typed DM refusals win over the billing/scope keyword heuristics', () => {
+  // A detail that would trip looksLikeBilling ("access level") stays a DM refusal.
+  const err = dmRefusal('dm-sender-not-verified', 'Your access level does not allow DMs.');
+  assert.equal(err.kind, 'forbidden');
+  assert.equal(err.data.refusal, 'dm-sender-not-verified');
+});
+
+test('an unexplained DM refusal (about:blank) keeps the generic forbidden mapping, no refusal key', () => {
+  const err = mapHttpError(
+    403,
+    {},
+    {
+      type: 'about:blank',
+      title: 'Forbidden',
+      detail: 'This operation is not permitted.',
+      status: 403,
+    },
+  );
+  assert.equal(err.kind, 'forbidden');
+  assert.equal('refusal' in err.data, false);
+  // A non-DM problem type that merely contains "dm-" mid-slug is not treated as a DM refusal.
+  const other = mapHttpError(403, {}, { type: 'https://api.x.com/2/problems/not-dm-related' });
+  assert.equal('refusal' in other.data, false);
+});

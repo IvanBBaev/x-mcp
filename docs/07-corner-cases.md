@@ -460,6 +460,16 @@ credits, not tiers, for post-2026-02-06 developers.)*
 - **DM-4 — `dm_send` failure modes** `P3` `[new]`
   Sending to a user who doesn't follow / has DMs closed → `forbidden` with the
   platform reason; the 1,440/24-h cap is tracked as a RATE-6-style window.
+  Since X's 2026-10-26 change the 403 problem `type` names the refusal
+  (`https://api.x.com/2/problems/dm-…`). The mapper reads the slug into
+  `data.refusal` and picks the class from it: `dm-*-not-found` → `not-found`,
+  `dm-rate-limited` → `rate-limit`, `dm-sender-*` → `forbidden` with
+  `fix: operator` (only the account owner can change it), content refusals
+  (`dm-bad-*`, `dm-text-*`, `dm-duplicate`, …) → `forbidden` "fix the message",
+  `dm-safety-*` → `forbidden` "do not resend or reword", and recipient-side
+  refusals → `forbidden` "resending will not help". The slug check runs before the
+  billing/scope keyword heuristics. An unexplained refusal keeps `about:blank`
+  and the generic `forbidden` mapping, with no `refusal` key.
 
 ## 11. REND — Rendering & partial results
 

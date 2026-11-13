@@ -62,6 +62,12 @@ export interface XErrorData {
   readonly platform_title?: string;
   /** X API `detail`, passed through verbatim. */
   readonly platform_detail?: string;
+  /**
+   * X's machine-readable refusal reason, when the problem type names one — the slug of a
+   * `https://api.x.com/2/problems/dm-*` type, e.g. `dm-recipient-not-accepting`. Stable
+   * enough to branch on; absent for an unexplained (`about:blank`) refusal.
+   */
+  readonly refusal?: string;
 }
 
 /** Per-class defaults for `retryable`/`fix`. A factory may override either. */
