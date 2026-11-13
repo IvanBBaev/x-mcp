@@ -45,6 +45,7 @@ import type { Page } from '../core/render-shapes.js';
 import { parsePostId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
 import type { ToolContext, ToolOutput } from '../core/tooldef.js';
+import { withSelfServeRemovalNote } from './self-serve.js';
 
 /**
  * Resolve the authenticated user's numeric id via `GET /2/users/me` (the AUTH-15 seam).
@@ -116,10 +117,16 @@ export const xLikeSet = defineTool({
     // typed `validation` error here and no read or write is ever spent.
     const postId = parsePostId(input.post);
     const userId = await selfUserId(ctx);
-    const res =
-      input.action === 'like'
-        ? await createLike(ctx.http, { userId, postId })
-        : await deleteLike(ctx.http, { userId, postId });
+    let res;
+    try {
+      res =
+        input.action === 'like'
+          ? await createLike(ctx.http, { userId, postId })
+          : await deleteLike(ctx.http, { userId, postId });
+    } catch (err) {
+      // F-5: likes may be refused outright on self-serve tiers — say so instead of a bare 403.
+      throw withSelfServeRemovalNote(err, 'like');
+    }
     // The 2xx envelope echoes the resulting state; if X omits it (DRIFT-1), the write
     // still succeeded, so fall back to the state the action requested.
     const liked = res.data?.liked ?? input.action === 'like';

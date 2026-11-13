@@ -723,6 +723,33 @@ test('input schemas: unknown action, empty refs, fractional max_results, extra k
 
 // --- Error mapping ----------------------------------------------------------------
 
+test('F-5: a follow or unfollow refused with 403 carries the self-serve note', async () => {
+  const fx = loadFixture<ErrorFixture>('errors/403-suspended-target.json');
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/following', method: 'POST', body: '{"target_user_id":"34"}' })
+    .reply(fx.status, fx.body as Record<string, unknown>, { headers: fx.headers });
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/following/34', method: 'DELETE' })
+    .reply(fx.status, fx.body as Record<string, unknown>, { headers: fx.headers });
+
+  for (const action of ['follow', 'unfollow'] as const) {
+    await assert.rejects(
+      () => xFollowSet.handler({ user: '34', action }, contextFor(mock)),
+      (err: unknown) => {
+        assert.ok(XError.is(err));
+        assert.equal(err.kind, 'forbidden');
+        assert.match(err.message, /follows via the API were removed from all self-serve tiers/);
+        return true;
+      },
+    );
+  }
+  mock.assertDone();
+  await mock.close();
+});
+
 test('block of a suspended target surfaces a typed forbidden error', async () => {
   const fx = loadFixture<ErrorFixture>('errors/403-suspended-target.json');
   const mock = mockHttp();

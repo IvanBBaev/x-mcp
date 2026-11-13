@@ -34,6 +34,7 @@ import {
 import type { RawSingleResponse } from '../core/render.js';
 import { parsePostId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
+import { withSelfServeRemovalNote } from './self-serve.js';
 
 const TITLE = 'Get posts';
 
@@ -469,7 +470,13 @@ export const xPostCreate = defineTool({
         ...(input.reply_settings !== undefined ? { replySettings: input.reply_settings } : {}),
       });
     } catch (err) {
-      if (XError.is(err)) throw mapCreateFailure(err, replyToId !== undefined, input.text);
+      if (XError.is(err)) {
+        const mapped = mapCreateFailure(err, replyToId !== undefined, input.text);
+        // F-5: a quote-post `forbidden` that no create rule explained gets the self-serve note.
+        throw quoteId !== undefined && mapped === err
+          ? withSelfServeRemovalNote(mapped, 'quote')
+          : mapped;
+      }
       throw err;
     }
 

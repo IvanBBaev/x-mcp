@@ -622,6 +622,46 @@ test('POST-3: a duplicate-content 403 maps to a meaningful forbidden', async () 
   await mock.close();
 });
 
+test('F-5: an unexplained 403 on a quote post carries the self-serve note; plain posts and duplicates do not', async () => {
+  const mock = mockHttp();
+  const generic = { title: 'Forbidden', detail: 'You are not permitted to perform this action.' };
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, generic);
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'look', quote_id: '222' }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('forbidden', /quote-posts via the API were removed from all self-serve tiers/)(err);
+      return true;
+    },
+  );
+
+  // The same refusal on a plain post is not a quote: no note.
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, generic);
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'look' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.doesNotMatch((err as XError).message, /self-serve/);
+      return true;
+    },
+  );
+
+  // A duplicate-content 403 on a quote is already explained (POST-3): left alone.
+  mock.pool.intercept({ path: '/2/tweets', method: 'POST' }).reply(403, {
+    title: 'Forbidden',
+    detail: 'You are not allowed to create a Tweet with duplicate content.',
+  });
+  await assert.rejects(
+    () => xPostCreate.handler({ text: 'look', quote_id: '222' }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('forbidden', /duplicate of a recent identical post/)(err);
+      assert.doesNotMatch((err as XError).message, /self-serve/);
+      return true;
+    },
+  );
+
+  mock.assertDone();
+  await mock.close();
+});
+
 test('POST-4: a timed-out create explains the ambiguity and the identical-text probe', async () => {
   const mock = mockHttp();
   const timeout = Object.assign(new Error('simulated timeout'), { name: 'TimeoutError' });

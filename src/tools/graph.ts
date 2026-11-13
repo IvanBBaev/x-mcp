@@ -43,6 +43,7 @@ import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
 import type { PageBounds } from '../core/paginate.js';
 import type { ToolContext, ToolOutput } from '../core/tooldef.js';
+import { withSelfServeRemovalNote } from './self-serve.js';
 
 // --- Self / target resolution (REND-8) --------------------------------------------
 
@@ -237,10 +238,16 @@ export const xFollowSet = defineTool({
     // `validation` error here and no read or write is ever spent.
     const targetUserId = await resolveTargetUser(input.user, ctx);
     const userId = await selfUserId(ctx);
-    const res =
-      input.action === 'follow'
-        ? await createFollow(ctx.http, { userId, targetUserId })
-        : await deleteFollow(ctx.http, { userId, targetUserId });
+    let res;
+    try {
+      res =
+        input.action === 'follow'
+          ? await createFollow(ctx.http, { userId, targetUserId })
+          : await deleteFollow(ctx.http, { userId, targetUserId });
+    } catch (err) {
+      // F-5: follows may be refused outright on self-serve tiers — say so instead of a bare 403.
+      throw withSelfServeRemovalNote(err, 'follow');
+    }
     // The 2xx envelope echoes the resulting state; if X omits it (DRIFT-1), the write
     // still succeeded, so fall back to the state the action requested.
     const following = res.data?.following ?? input.action === 'follow';

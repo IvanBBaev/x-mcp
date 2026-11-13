@@ -22,6 +22,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A `forbidden` refusal from `x_like_set`, `x_follow_set`, or an `x_post_create` call
+  with `quote_id` now ends with one sentence naming the likely cause. X's 2026-04-16
+  changelog says likes, follows, and quote-posts via the API were removed from all
+  self-serve tiers, so on pay-per-use that refusal will not clear on retry. The error
+  class, `retryable`, `fix`, and platform data are unchanged. A quote refusal that
+  another rule already explains, such as a duplicate post, is left as it was.
 - A `@handle` is now looked up once per server process instead of on every call.
   The timeline, follower/following, follow/mute/block, list and DM tools share one
   handle-to-id cache, so a second call with the same handle (in any letter case) makes

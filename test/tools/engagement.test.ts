@@ -406,6 +406,43 @@ test('like of a suspended target surfaces a typed forbidden error', async () => 
     (err: unknown) => {
       assert.ok(XError.is(err));
       assert.equal(err.kind, 'forbidden');
+      // F-5: the class is kept, the likely self-serve removal is named.
+      assert.match(err.message, /likes via the API were removed from all self-serve tiers/);
+      assert.equal(err.retryable, false);
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('F-5: an unlike refused with 403 carries the self-serve note; a 404 does not', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/likes/555', method: 'DELETE' })
+    .reply(403, { title: 'Forbidden', detail: 'You are not permitted to perform this action.' });
+  await assert.rejects(
+    () => xLikeSet.handler({ post: '555', action: 'unlike' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'forbidden');
+      assert.match(err.message, /likes via the API were removed from all self-serve tiers/);
+      return true;
+    },
+  );
+
+  const fx = loadFixture<ErrorFixture>('errors/404-not-found.json');
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/likes/555', method: 'DELETE' })
+    .reply(fx.status, fx.body as Record<string, unknown>, { headers: fx.headers });
+  await assert.rejects(
+    () => xLikeSet.handler({ post: '555', action: 'unlike' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.notEqual(err.kind, 'forbidden');
+      assert.doesNotMatch(err.message, /self-serve/);
       return true;
     },
   );
