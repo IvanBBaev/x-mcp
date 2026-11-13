@@ -86,6 +86,8 @@ export interface RawTweet {
   readonly referenced_tweets?: readonly RawReferencedTweet[];
   readonly attachments?: RawAttachments;
   readonly note_tweet?: RawNoteTweet;
+  /** Paid-promotion disclosure (X changelog 2026-06-03). */
+  readonly paid_partnership?: boolean;
 }
 
 /** A raw user object. */
@@ -292,6 +294,7 @@ interface MutableCompactPost {
   url?: string;
   note_tweet?: string;
   truncated?: boolean;
+  paid_partnership?: boolean;
 }
 
 interface MutableCompactUser {
@@ -517,6 +520,10 @@ function renderPostWith(raw: RawTweet, inc: IncludesIndex): CompactPost {
 
   const media = mediaFromKeys(raw.attachments?.media_keys, inc);
   if (media !== undefined) post.media = media;
+
+  // Paid-promotion disclosure: surfaced only when the author declared it, so an
+  // undisclosed post keeps its compact shape.
+  if (raw.paid_partnership === true) post.paid_partnership = true;
 
   // REND-3: recover the full body for long-form notes and reposts; mark truncation.
   const full = fullNoteText(raw, inc);

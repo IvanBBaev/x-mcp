@@ -31,7 +31,7 @@ import type { FakeClock, FakeSleep, MockHttp } from '../helpers/index.js';
 // undici matches the full query string, so the interceptor doubles as a wire-contract pin.
 const COMMON_QUERY = {
   'tweet.fields':
-    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id',
+    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,paid_partnership',
   expansions:
     'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys',
   'user.fields': 'username,name,verified',

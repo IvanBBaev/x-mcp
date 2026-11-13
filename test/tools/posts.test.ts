@@ -34,7 +34,7 @@ import type { MockHttp } from '../helpers/index.js';
 // (sorted) query string, so any drift in the endpoint's fields fails the match loudly.
 const COMMON_QUERY = {
   'tweet.fields':
-    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id',
+    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,paid_partnership',
   expansions:
     'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys',
   'user.fields': 'username,name,verified',
@@ -889,6 +889,27 @@ test('x_post_create: a poll rides the body as options + duration_minutes', async
 
   mock.assertDone();
   await mock.close();
+});
+
+test('x_post_create: paid_partnership true rides the body; false is omitted from the wire', async () => {
+  for (const [flag, expected] of [
+    [true, { text: 'post', paid_partnership: true }],
+    [false, { text: 'post' }],
+  ] as const) {
+    const mock = mockHttp();
+    const body = captureBody();
+    mock.pool
+      .intercept({ path: '/2/tweets', method: 'POST', body: body.matcher })
+      .reply(201, { data: { id: '700', text: 'post' } });
+
+    await xPostCreate.handler({ text: 'post', paid_partnership: flag }, contextFor(mock));
+    assert.deepEqual(JSON.parse(body.get()), expected);
+
+    mock.assertDone();
+    await mock.close();
+  }
+  // The flag is a boolean, never a string the API would reject.
+  assert.equal(xPostCreate.input.safeParse({ text: 'x', paid_partnership: 'yes' }).success, false);
 });
 
 test('x_post_create: a malformed reply_to_id or quote_id rejects before the budget charge or any HTTP', async () => {

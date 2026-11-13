@@ -502,3 +502,14 @@ test('renderListPage compacts lists and resolves owner handles from includes', (
   assert.deepEqual(page.items[0], { id: 'l1', name: 'Reading', member_count: 3, owner: '@owner' });
   assert.equal(Object.hasOwn(page, 'next_token'), false);
 });
+
+test('paid_partnership: a disclosed paid promotion surfaces; an undisclosed post omits the key', () => {
+  const disclosed = renderPost({ id: '1', author_id: '9', text: 'ad', paid_partnership: true });
+  assert.equal(disclosed.paid_partnership, true);
+
+  // false and absent both keep the compact shape free of the key.
+  const declined = renderPost({ id: '2', author_id: '9', text: 'hi', paid_partnership: false });
+  assert.equal('paid_partnership' in declined, false);
+  const absent = renderPost({ id: '3', author_id: '9', text: 'hi' });
+  assert.equal('paid_partnership' in absent, false);
+});

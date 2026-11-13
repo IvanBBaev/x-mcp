@@ -19,7 +19,8 @@ import type { RawListResponse, RawTweet } from '../../core/render.js';
 // bodies. `referenced_tweets.id.author_id` is included (as in api/endpoints/posts) because
 // timelines are dense with reposts/replies whose referenced authors REND-3/REND-5 resolve.
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const EXPANSIONS =
   'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys';
 const USER_FIELDS = 'username,name,verified';

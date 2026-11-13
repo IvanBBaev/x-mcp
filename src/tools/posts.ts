@@ -376,6 +376,10 @@ const createInput = z
       .enum(REPLY_SETTINGS)
       .optional()
       .describe('Who may reply. Omit to allow everyone.'),
+    paid_partnership: z
+      .boolean()
+      .optional()
+      .describe('true labels the post as a paid promotion (ad disclosure).'),
   })
   .strict()
   // POST-1 / POST-6 and the reply/quote reference shape, in the schema rather than the
@@ -468,6 +472,7 @@ export const xPostCreate = defineTool({
             }
           : {}),
         ...(input.reply_settings !== undefined ? { replySettings: input.reply_settings } : {}),
+        ...(input.paid_partnership === true ? { paidPartnership: true } : {}),
       });
     } catch (err) {
       if (XError.is(err)) {

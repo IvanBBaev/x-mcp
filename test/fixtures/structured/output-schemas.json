@@ -251,6 +251,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -1380,6 +1383,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -2004,6 +2010,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -2337,6 +2346,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -2484,6 +2496,9 @@
               "type": "string"
             },
             "truncated": {
+              "type": "boolean"
+            },
+            "paid_partnership": {
               "type": "boolean"
             }
           },
@@ -2684,6 +2699,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -2832,6 +2850,9 @@
             },
             "truncated": {
               "type": "boolean"
+            },
+            "paid_partnership": {
+              "type": "boolean"
             }
           },
           "required": ["id", "author", "text"]
@@ -2979,6 +3000,9 @@
               "type": "string"
             },
             "truncated": {
+              "type": "boolean"
+            },
+            "paid_partnership": {
               "type": "boolean"
             }
           },

@@ -13,7 +13,8 @@ import type { RawListResponse, RawTweet } from '../../core/render.js';
 // The tweet compaction field set, shared with the post read tools so search results carry
 // author handles, engagement metrics, references, media, and long-form note bodies.
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const EXPANSIONS = 'author_id,referenced_tweets.id,attachments.media_keys';
 const USER_FIELDS = 'username,name,verified';
 const MEDIA_FIELDS = 'type,url,preview_image_url,alt_text';

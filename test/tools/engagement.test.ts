@@ -69,7 +69,7 @@ function interceptMe(mock: MockHttp): void {
 /** The compaction field params the bookmarks read carries (mirrors api/endpoints/engagement). */
 const BOOKMARK_FIELD_PARAMS = {
   'tweet.fields':
-    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id',
+    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,paid_partnership',
   expansions:
     'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys',
   'user.fields': 'username,name,verified',

@@ -137,7 +137,7 @@ Every catalogued tool is registered.
 
 | Tool | Class | Availability | Cost | Phase | What it does |
 |---|---|---|---|---|---|
-| `x_post_create` | write:content | user-only | w:post | P2 | X (Twitter): create a post — `text`, optional `reply_to_id`, `quote_id`, `media_ids[]`, `poll {options[], duration_minutes}`, `reply_settings`. Returns id + URL. Note: a URL in the text raises the per-post cost to $0.20 |
+| `x_post_create` | write:content | user-only | w:post | P2 | X (Twitter): create a post — `text`, optional `reply_to_id`, `quote_id`, `media_ids[]`, `poll {options[], duration_minutes}`, `reply_settings`, `paid_partnership` (paid-promotion disclosure label). Returns id + URL. Note: a URL in the text raises the per-post cost to $0.20 |
 | `x_post_delete` | destructive:content | user-only | w:action | P2 | X (Twitter): delete own post by id. Standalone (never behind an enum) |
 | `x_post_get` | read:content | app+user | r:post | P1 | X (Twitter): batch post lookup — `ids: string[]` (1–100), each an id or a status URL. Compact shape (author, text, metrics, refs, media) |
 | `x_post_hide_reply` | write:moderation | user-only | w:action | P3 | X (Twitter): hide / unhide a reply to own post (`PUT /2/tweets/:id/hidden`) |

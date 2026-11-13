@@ -70,6 +70,8 @@ export interface CompactPost {
   readonly note_tweet?: string;
   /** True when the API clipped `text` (REND-4). */
   readonly truncated?: boolean;
+  /** Present (true) only when the author disclosed the post as a paid promotion. */
+  readonly paid_partnership?: boolean;
 }
 
 /** Public metrics on a user profile. Omitted fields mean the API withheld them. */

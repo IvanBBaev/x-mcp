@@ -40,7 +40,8 @@ const BOOKMARK_READ_SCOPES: readonly OAuthScope[] = ['tweet.read', 'users.read',
 // The tweet compaction field set, identical to the one the timeline and list reads send so
 // bookmarked posts compact into the same `CompactPost` shape (core/render `renderPostPage`).
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const TWEET_EXPANSIONS =
   'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys';
 const TWEET_USER_FIELDS = 'username,name,verified';

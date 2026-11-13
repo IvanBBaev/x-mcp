@@ -164,6 +164,7 @@ const COMPACT_POST: SchemaNode = {
     url: STR,
     note_tweet: STR,
     truncated: BOOL,
+    paid_partnership: BOOL,
   },
   required: ['id', 'author', 'text'],
 };

@@ -32,6 +32,11 @@ development chronology lives in `WORKLOG.md`.
   above. A mid-thread failure is reported, not thrown: the result lists the posts already
   published and where it stopped, so you can resume with `x_post_create`'s `reply_to_id`
   — nothing already posted is auto-deleted.
+- `x_post_create` takes an optional `paid_partnership: true` that labels the post as a
+  paid promotion (X's ad-disclosure flag, API changelog 2026-06-03). Every post-returning
+  tool now requests `tweet.fields=paid_partnership` and surfaces `paid_partnership: true`
+  on a disclosed post; the key is omitted otherwise. Costs 416 B of the `tools/list`
+  context budget (77,885 / 80,000 B).
 
 ### Changed
 

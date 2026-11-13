@@ -37,7 +37,8 @@ const MEMBER_USER_FIELDS =
 // Timeline projection: aligned with api/endpoints/timelines so list-timeline entries
 // carry author handles, engagement metrics, references, media, and note bodies.
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const TWEET_EXPANSIONS =
   'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys';
 const TWEET_USER_FIELDS = 'username,name,verified';

@@ -107,6 +107,7 @@ Takes no input fields.
 | `poll.options` | string[] (2–4 items) | ✅ | 2-4 poll choices, each at most 25 characters. |
 | `poll.duration_minutes` | integer (5–10080) | ✅ | Poll duration in minutes: 5 to 10080 (7 days). |
 | `reply_settings` | `following` \| `mentionedUsers` \| `subscribers` |  | Who may reply. Omit to allow everyone. |
+| `paid_partnership` | boolean |  | true labels the post as a paid promotion (ad disclosure). |
 
 ### `x_post_delete`
 

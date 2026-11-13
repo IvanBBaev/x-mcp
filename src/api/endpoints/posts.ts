@@ -13,7 +13,8 @@ import type { RawListResponse, RawSingleResponse, RawTweet } from '../../core/re
 // expansions needed to resolve `@handle`s and attached media. Kept module-local so the
 // wire contract lives in exactly one place.
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const EXPANSIONS =
   'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys';
 const USER_FIELDS = 'username,name,verified';
@@ -79,6 +80,8 @@ export interface CreatePostParams {
   readonly mediaIds?: readonly string[];
   readonly poll?: CreatePostPoll;
   readonly replySettings?: ReplySetting;
+  /** Paid-promotion disclosure (X changelog 2026-06-03); sent only when `true`. */
+  readonly paidPartnership?: boolean;
 }
 
 /** The `POST /2/tweets` success payload. Fields are read defensively (DRIFT-1). */
@@ -134,6 +137,7 @@ export async function createPost(
         }
       : {}),
     ...(params.replySettings !== undefined ? { reply_settings: params.replySettings } : {}),
+    ...(params.paidPartnership === true ? { paid_partnership: true } : {}),
   };
   const req: XApiRequest = {
     method: 'POST',

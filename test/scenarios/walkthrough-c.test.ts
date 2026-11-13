@@ -37,7 +37,7 @@ import type { MockHttp } from '../helpers/index.js';
 /** Search sends a narrower expansion set than posts/timelines (api/endpoints/search). */
 const SEARCH_FIELD_PARAMS = {
   'tweet.fields':
-    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id',
+    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,paid_partnership',
   expansions: 'author_id,referenced_tweets.id,attachments.media_keys',
   'user.fields': 'username,name,verified',
   'media.fields': 'type,url,preview_image_url,alt_text',

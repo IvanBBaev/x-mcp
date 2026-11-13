@@ -45,7 +45,7 @@ function makeCtx(http: ReturnType<typeof mockHttp>): ToolContext {
 // api/endpoints/archive). undici sorts params before comparing, so only the set matters.
 const ARCHIVE_FIELD_PARAMS = {
   'tweet.fields':
-    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id',
+    'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,paid_partnership',
   expansions: 'author_id,referenced_tweets.id,attachments.media_keys',
   'user.fields': 'username,name,verified',
   'media.fields': 'type,url,preview_image_url,alt_text',

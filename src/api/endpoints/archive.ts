@@ -21,7 +21,8 @@ import type { RawCountsResponse } from './search.js';
 // so archive results carry the same author handles, metrics, references, media, and
 // long-form note bodies through the shared renderPostPage path.
 const TWEET_FIELDS =
-  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id';
+  'created_at,public_metrics,referenced_tweets,attachments,note_tweet,entities,author_id,' +
+  'paid_partnership';
 const EXPANSIONS = 'author_id,referenced_tweets.id,attachments.media_keys';
 const USER_FIELDS = 'username,name,verified';
 const MEDIA_FIELDS = 'type,url,preview_image_url,alt_text';
