@@ -46,6 +46,7 @@ import { parsePostId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
 import type { ToolContext, ToolOutput } from '../core/tooldef.js';
 import { withSelfServeRemovalNote } from './self-serve.js';
+import { PAGE_TOKEN_DESC, RAW_PAGE_DESC, maxResultsDesc } from './params.js';
 
 /**
  * Resolve the authenticated user's numeric id via `GET /2/users/me` (the AUTH-15 seam).
@@ -243,19 +244,9 @@ export const xBookmarkSet = defineTool({
 
 const bookmarksListInput = z
   .object({
-    max_results: z
-      .number()
-      .int()
-      .optional()
-      .describe('Results per page (1-100); out-of-range values are clamped.'),
-    page_token: z
-      .string()
-      .optional()
-      .describe('Pagination cursor: the next_token from a previous call.'),
-    raw: z
-      .boolean()
-      .optional()
-      .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.'),
+    max_results: z.number().int().optional().describe(maxResultsDesc(1, 100)),
+    page_token: z.string().optional().describe(PAGE_TOKEN_DESC),
+    raw: z.boolean().optional().describe(RAW_PAGE_DESC),
   })
   .strict();
 

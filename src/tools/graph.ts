@@ -44,6 +44,7 @@ import { defineTool } from '../core/tooldef.js';
 import type { PageBounds } from '../core/paginate.js';
 import type { ToolContext, ToolOutput } from '../core/tooldef.js';
 import { withSelfServeRemovalNote } from './self-serve.js';
+import { PAGE_TOKEN_DESC, RAW_PAGE_DESC, maxResultsDesc } from './params.js';
 
 // --- Self / target resolution (REND-8) --------------------------------------------
 
@@ -185,19 +186,9 @@ const listUserField = z
   .string()
   .min(1)
   .describe('User to read: numeric id, handle, @handle, profile URL, or "me".');
-const maxResultsField = z
-  .number()
-  .int()
-  .optional()
-  .describe('Results per page (1-1000); out-of-range values are clamped.');
-const pageTokenField = z
-  .string()
-  .optional()
-  .describe('Pagination cursor: the next_token from a previous call.');
-const rawField = z
-  .boolean()
-  .optional()
-  .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.');
+const maxResultsField = z.number().int().optional().describe(maxResultsDesc(1, 1000));
+const pageTokenField = z.string().optional().describe(PAGE_TOKEN_DESC);
+const rawField = z.boolean().optional().describe(RAW_PAGE_DESC);
 
 // --- x_follow_set -----------------------------------------------------------------
 

@@ -173,12 +173,12 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query, e.g. "from:xdevelopers -is:retweet". |
-| `max_results` | integer |  | Results per page (10-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
+| `max_results` | integer |  | Page size 10-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
 | `sort_order` | `recency` \| `relevancy` |  | Result ordering; defaults to recency. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_post_counts_recent`
 
@@ -192,10 +192,10 @@ Takes no input fields.
 |---|---|:--:|---|
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query to count. |
 | `granularity` | `minute` \| `hour` \| `day` |  | Histogram bucket size; defaults to hour. |
-| `start_time` | string |  | Oldest bucket timestamp (ISO-8601 UTC). |
-| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON instead of the compact histogram. |
+| `start_time` | string |  | Oldest bucket time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest bucket time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON, not the compact histogram. |
 
 ## `engagement`
 
@@ -248,9 +248,9 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ## `timelines`
 
@@ -264,11 +264,11 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `max_results` | integer |  | Results per page (5-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 5-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_timeline_mentions`
 
@@ -281,11 +281,11 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `user` | string (non-empty) |  | User whose mentions to read: numeric id, handle, @handle, profile URL, or "me" (default). |
-| `max_results` | integer |  | Results per page (5-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 5-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_timeline_user`
 
@@ -300,11 +300,11 @@ Takes no input fields.
 | `user` | string (non-empty) | ✅ | User to read: numeric id, handle, @handle, profile URL, or "me". |
 | `exclude_replies` | boolean |  | Omit the user's replies. |
 | `exclude_reposts` | boolean |  | Omit the user's reposts (retweets). |
-| `max_results` | integer |  | Results per page (5-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 5-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ## `graph`
 
@@ -358,9 +358,9 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `user` | string (non-empty) | ✅ | User to read: numeric id, handle, @handle, profile URL, or "me". |
-| `max_results` | integer |  | Results per page (1-1000); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 1-1000 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_following_list`
 
@@ -373,9 +373,9 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `user` | string (non-empty) | ✅ | User to read: numeric id, handle, @handle, profile URL, or "me". |
-| `max_results` | integer |  | Results per page (1-1000); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 1-1000 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_user_search`
 
@@ -388,9 +388,9 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `query` | string (non-empty) | ✅ | Keyword search over profiles (name, handle, bio). |
-| `max_results` | integer |  | Results per page (1-1000); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 1-1000 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ## `lists`
 
@@ -418,7 +418,7 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
 | `name` | string (1–25 chars) |  | List name. |
 | `description` | string (max 100 chars) |  | List description. |
 | `private` | boolean |  | Whether the list is private (visible only to its owner). |
@@ -433,7 +433,7 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
 
 ### `x_list_get`
 
@@ -445,8 +445,8 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_lists_owned`
 
@@ -459,9 +459,9 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `user` | string (non-empty) |  | Owner whose lists to read: numeric id, handle, @handle, profile URL, or "me" (default). |
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_list_member_set`
 
@@ -473,7 +473,7 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
 | `user` | string (non-empty) | ✅ | User: numeric id, handle, @handle, profile URL, or "me". |
 | `action` | `add` \| `remove` | ✅ | Whether to add or remove the member. |
 
@@ -487,10 +487,10 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_list_timeline`
 
@@ -502,10 +502,10 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_list_follow_set`
 
@@ -517,7 +517,7 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
 | `action` | `follow` \| `unfollow` | ✅ | Whether to follow or unfollow the list. |
 
 ### `x_list_pin_set`
@@ -530,7 +530,7 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `list_id` | string (non-empty) | ✅ | Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123). |
+| `list_id` | string (non-empty) | ✅ | Target list: numeric id or list URL (x.com/i/lists/123). |
 | `action` | `pin` \| `unpin` | ✅ | Whether to pin or unpin the list. |
 
 ## `media`
@@ -573,8 +573,8 @@ Takes no input fields.
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
 | `include_text` | boolean |  | Include sanitized message bodies and media (default false: only ids, timestamps, and participants are returned). |
 
 ### `x_dm_conversation_events_list`
@@ -588,8 +588,8 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `conversation_id` | string (non-empty) | ✅ | DM conversation id: numeric, or two numeric ids joined by "-". |
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
 | `include_text` | boolean |  | Include sanitized message bodies and media (default false: only ids, timestamps, and participants are returned). |
 
 ### `x_dm_participant_events_list`
@@ -603,8 +603,8 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `participant` | string (non-empty) | ✅ | The other participant: numeric user id, handle, or @handle. |
-| `max_results` | integer |  | Results per page (1-100); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
 | `include_text` | boolean |  | Include sanitized message bodies and media (default false: only ids, timestamps, and participants are returned). |
 
 ### `x_dm_send`
@@ -634,12 +634,12 @@ Takes no input fields.
 | Field | Type | Required | Description |
 |---|---|:--:|---|
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query, e.g. "from:xdevelopers -is:retweet". |
-| `max_results` | integer |  | Results per page (10-500); out-of-range values are clamped. |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `start_time` | string |  | Oldest post timestamp to include (ISO-8601 UTC). |
-| `end_time` | string |  | Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
+| `max_results` | integer |  | Page size 10-500 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `start_time` | string |  | Oldest post time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest post time (ISO-8601 UTC; clamped to 10 s ago at most). |
 | `sort_order` | `recency` \| `relevancy` |  | Result ordering; defaults to recency. |
-| `raw` | boolean |  | Return the exact API JSON (capped at 25 items) instead of the compact page. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
 
 ### `x_post_counts_archive`
 
@@ -653,10 +653,10 @@ Takes no input fields.
 |---|---|:--:|---|
 | `query` | string (non-empty) | ✅ | X (Twitter) v2 search query to count. |
 | `granularity` | `minute` \| `hour` \| `day` |  | Histogram bucket size; defaults to hour. |
-| `start_time` | string |  | Oldest bucket timestamp (ISO-8601 UTC). |
-| `end_time` | string |  | Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted). |
-| `page_token` | string |  | Pagination cursor: the next_token from a previous call. |
-| `raw` | boolean |  | Return the exact API JSON instead of the compact histogram. |
+| `start_time` | string |  | Oldest bucket time (ISO-8601 UTC). |
+| `end_time` | string |  | Newest bucket time (ISO-8601 UTC; clamped to 10 s ago at most). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON, not the compact histogram. |
 
 ## `usage`
 

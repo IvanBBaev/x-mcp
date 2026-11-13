@@ -45,6 +45,7 @@ import {
 } from '../api/endpoints/dm.js';
 import type { RawDmSendResult } from '../api/endpoints/dm.js';
 import type { RawSingleResponse } from '../core/render.js';
+import { PAGE_TOKEN_DESC, maxResultsDesc } from './params.js';
 
 // --- Notes (DM-2 / DM-3) ---------------------------------------------------------
 
@@ -178,15 +179,8 @@ function renderDmEvents(
 
 // --- Shared schema fields --------------------------------------------------------
 
-const maxResultsField = z
-  .number()
-  .int()
-  .optional()
-  .describe('Results per page (1-100); out-of-range values are clamped.');
-const pageTokenField = z
-  .string()
-  .optional()
-  .describe('Pagination cursor: the next_token from a previous call.');
+const maxResultsField = z.number().int().optional().describe(maxResultsDesc(1, 100));
+const pageTokenField = z.string().optional().describe(PAGE_TOKEN_DESC);
 const includeTextField = z
   .boolean()
   .optional()

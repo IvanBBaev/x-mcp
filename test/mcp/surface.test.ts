@@ -16,6 +16,8 @@ import assert from 'node:assert/strict';
 import { parseConfig } from '../../src/core/config.js';
 import { composeServer } from '../../src/mcp/compose.js';
 import type { Composition } from '../../src/mcp/compose.js';
+import { toolInputSchema } from '../../src/mcp/schema.js';
+import { PAGE_TOKEN_DESC, RAW_HISTOGRAM_DESC, RAW_PAGE_DESC } from '../../src/tools/params.js';
 
 /**
  * The registered tool count. Changing this number is a deliberate act: it also moves
@@ -109,4 +111,36 @@ test('T-313: a stricter preset denies more tools without dropping any from the l
   for (const entry of readOnly) {
     if (entry.denied) assert.match(entry.description, /\(disabled by policy `read-only`\)$/);
   }
+});
+
+test('context budget: recurring parameters use the shared wording from src/tools/params.ts', () => {
+  // A copied literal would drift and re-grow the listing (scripts/context-gate.mjs).
+  const seen = { page_token: 0, max_results: 0, raw: 0 };
+  for (const tool of composeFull().registry.all()) {
+    const props = (toolInputSchema(tool).properties ?? {}) as Record<
+      string,
+      { description?: string }
+    >;
+    if (props.page_token !== undefined) {
+      seen.page_token += 1;
+      assert.equal(props.page_token.description, PAGE_TOKEN_DESC, tool.name);
+    }
+    if (props.max_results !== undefined) {
+      seen.max_results += 1;
+      assert.match(
+        props.max_results.description ?? '',
+        /^Page size \d+-\d+ \(clamped\)\.$/,
+        tool.name,
+      );
+    }
+    if (props.raw !== undefined && props.page_token !== undefined) {
+      seen.raw += 1;
+      assert.ok(
+        [RAW_PAGE_DESC, RAW_HISTOGRAM_DESC].includes(props.raw.description ?? ''),
+        `${tool.name} raw: ${props.raw.description}`,
+      );
+    }
+  }
+  // Pinned so a new paged tool is counted here, not silently skipped.
+  assert.deepEqual(seen, { page_token: 17, max_results: 15, raw: 14 });
 });

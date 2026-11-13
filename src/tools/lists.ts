@@ -54,6 +54,7 @@ import type { Page } from '../core/render-shapes.js';
 import { classifyUserRef, resolveUserId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
 import type { ToolContext, ToolOutput } from '../core/tooldef.js';
+import { PAGE_TOKEN_DESC, RAW_PAGE_DESC, maxResultsDesc } from './params.js';
 
 // --- List-id normalization (REND-8; core/resolve has no list parser, so it lives here) --
 
@@ -216,24 +217,14 @@ function pageOutput<T>(page: Page<T>, notes: readonly string[], units: number): 
 const listIdField = z
   .string()
   .min(1)
-  .describe('Target list: a numeric list id or a list URL (e.g. https://x.com/i/lists/123).');
+  .describe('Target list: numeric id or list URL (x.com/i/lists/123).');
 const userField = z
   .string()
   .min(1)
   .describe('User: numeric id, handle, @handle, profile URL, or "me".');
-const maxResultsField = z
-  .number()
-  .int()
-  .optional()
-  .describe('Results per page (1-100); out-of-range values are clamped.');
-const pageTokenField = z
-  .string()
-  .optional()
-  .describe('Pagination cursor: the next_token from a previous call.');
-const rawField = z
-  .boolean()
-  .optional()
-  .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.');
+const maxResultsField = z.number().int().optional().describe(maxResultsDesc(1, 100));
+const pageTokenField = z.string().optional().describe(PAGE_TOKEN_DESC);
+const rawField = z.boolean().optional().describe(RAW_PAGE_DESC);
 // X caps list names at 25 characters and descriptions at 100.
 const listNameField = z.string().min(1).max(25).describe('List name.');
 const listDescriptionField = z.string().max(100).describe('List description.');

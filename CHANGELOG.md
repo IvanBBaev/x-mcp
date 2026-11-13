@@ -22,6 +22,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- The parameter descriptions that recur across tools (`page_token`, `raw`, `max_results`,
+  `start_time`/`end_time`, `list_id`) now come from one shared, shorter wording. Parameters,
+  constraints, and behaviour are unchanged. The `tools/list` payload drops from 78,434 B to
+  76,816 B, so the context-budget headroom grows from 2.0% to 4.0%.
 - A `forbidden` refusal from `x_like_set`, `x_follow_set`, or an `x_post_create` call
   with `quote_id` now ends with one sentence naming the likely cause. X's 2026-04-16
   changelog says likes, follows, and quote-posts via the API were removed from all

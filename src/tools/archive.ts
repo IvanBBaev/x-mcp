@@ -21,6 +21,16 @@ import { billableUnits, rawMaxResults, rawSummary, renderPostPage, toIso } from 
 import { normalizeTimeBounds } from '../core/timebounds.js';
 import { countsArchive, searchArchive } from '../api/endpoints/archive.js';
 import type { SearchArchiveParams } from '../api/endpoints/archive.js';
+import {
+  BUCKET_END_TIME_DESC,
+  BUCKET_START_TIME_DESC,
+  END_TIME_DESC,
+  PAGE_TOKEN_DESC,
+  RAW_HISTOGRAM_DESC,
+  RAW_PAGE_DESC,
+  START_TIME_DESC,
+  maxResultsDesc,
+} from './params.js';
 
 // DRIFT-3: engagement-threshold operators under their X web-search names. X removed
 // `min_likes:`/`min_replies:`/`min_reposts:` from the v2 syntax on 2026-01-19 and restored
@@ -64,30 +74,15 @@ const searchInput = z
       .string()
       .min(1)
       .describe('X (Twitter) v2 search query, e.g. "from:xdevelopers -is:retweet".'),
-    max_results: z
-      .number()
-      .int()
-      .optional()
-      .describe('Results per page (10-500); out-of-range values are clamped.'),
-    page_token: z
-      .string()
-      .optional()
-      .describe('Pagination cursor: the next_token from a previous call.'),
-    start_time: z.string().optional().describe('Oldest post timestamp to include (ISO-8601 UTC).'),
-    end_time: z
-      .string()
-      .optional()
-      .describe(
-        'Newest post timestamp to include (ISO-8601 UTC; values inside the last 10 seconds are adjusted).',
-      ),
+    max_results: z.number().int().optional().describe(maxResultsDesc(10, 500)),
+    page_token: z.string().optional().describe(PAGE_TOKEN_DESC),
+    start_time: z.string().optional().describe(START_TIME_DESC),
+    end_time: z.string().optional().describe(END_TIME_DESC),
     sort_order: z
       .enum(['recency', 'relevancy'])
       .optional()
       .describe('Result ordering; defaults to recency.'),
-    raw: z
-      .boolean()
-      .optional()
-      .describe('Return the exact API JSON (capped at 25 items) instead of the compact page.'),
+    raw: z.boolean().optional().describe(RAW_PAGE_DESC),
   })
   .strict()
   .superRefine((value, ctx) => checkInvalidOperators(value.query, ctx));
@@ -172,21 +167,10 @@ const countsInput = z
       .enum(['minute', 'hour', 'day'])
       .optional()
       .describe('Histogram bucket size; defaults to hour.'),
-    start_time: z.string().optional().describe('Oldest bucket timestamp (ISO-8601 UTC).'),
-    end_time: z
-      .string()
-      .optional()
-      .describe(
-        'Newest bucket timestamp (ISO-8601 UTC; values inside the last 10 seconds are adjusted).',
-      ),
-    page_token: z
-      .string()
-      .optional()
-      .describe('Pagination cursor: the next_token from a previous call.'),
-    raw: z
-      .boolean()
-      .optional()
-      .describe('Return the exact API JSON instead of the compact histogram.'),
+    start_time: z.string().optional().describe(BUCKET_START_TIME_DESC),
+    end_time: z.string().optional().describe(BUCKET_END_TIME_DESC),
+    page_token: z.string().optional().describe(PAGE_TOKEN_DESC),
+    raw: z.boolean().optional().describe(RAW_HISTOGRAM_DESC),
   })
   .strict()
   .superRefine((value, ctx) => checkInvalidOperators(value.query, ctx));
