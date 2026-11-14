@@ -172,6 +172,15 @@ lists four policy-filtered workflow templates over the existing tools (`x_mentio
 `x_thread_draft`, `x_topic_digest`, `x_account_overview`; `src/mcp/prompts.ts`). No new
 tools, +0 B `tools/list`.
 
+**`.mcpb` Desktop bundle shipped 2026-11-14 (queue Q03, 15b4ea3):** `manifest.json` (MCPB
+0.3, fact-checked against MANIFEST.md; the 19 `X_MCP_*` variables as `user_config` with empty
+defaults, the two credentials `sensitive`), a reproducible `npm run bundle`
+(`scripts/bundle.mjs`, deterministic zip of the lockfile's production closure),
+`scripts/mcpb-guard.mjs` in `npm run gates` and CI (schema + lockstep with package.json and
+server.json), and the bundle attached as a release asset by `publish.yml`. The MCPB toolkit
+is a devDependency only; no runtime deps, +0 B `tools/list`. Open for the owner: the Desktop
+install walk-through under H3 (OAuth still needs a terminal `authorize`).
+
 ---
 
 ## 1.0 acceptance checklist
