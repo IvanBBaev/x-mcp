@@ -167,6 +167,11 @@ API (pilot), bookmark folders, post/media analytics, Streamable HTTP transport, 
 prompts, `.mcpb` Desktop bundle (OPS optional). Each candidate repeats the
 fact-check rule first — this is the fastest-moving part of the platform.
 
+**MCP prompts shipped 2026-11-14 (queue Q02, 1e2ed65):** the server declares `prompts` and
+lists four policy-filtered workflow templates over the existing tools (`x_mentions_triage`,
+`x_thread_draft`, `x_topic_digest`, `x_account_overview`; `src/mcp/prompts.ts`). No new
+tools, +0 B `tools/list`.
+
 ---
 
 ## 1.0 acceptance checklist
