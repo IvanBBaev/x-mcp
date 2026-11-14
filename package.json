@@ -41,7 +41,9 @@
     "docs:check": "npm run build && node scripts/docs-gen.mjs --check",
     "gate:context": "npm run build && node scripts/context-gate.mjs",
     "gate:manifest": "node scripts/server-json-guard.mjs",
-    "gates": "npm run build && node scripts/docs-gen.mjs --check && node scripts/context-gate.mjs --quiet && node scripts/server-json-guard.mjs",
+    "gate:mcpb": "node scripts/mcpb-guard.mjs",
+    "gates": "npm run build && node scripts/docs-gen.mjs --check && node scripts/context-gate.mjs --quiet && node scripts/server-json-guard.mjs && node scripts/mcpb-guard.mjs",
+    "bundle": "npm run clean && npm run build && node scripts/mcpb-guard.mjs && node scripts/bundle.mjs",
     "fuzz": "npm run build && node scripts/fuzz-tools.mjs",
     "mutate": "npm run build && node scripts/mutate-core.mjs",
     "verify": "npm run build && npm run lint && npm run format:check && node --test \"build/test/**/*.test.js\"",
@@ -63,6 +65,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.5.0",
     "c8": "^12.0.0",

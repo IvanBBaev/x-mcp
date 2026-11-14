@@ -49,6 +49,8 @@ your client config:
 On Windows use the native path form and escape backslashes in JSON
 (`"C:\\path\\to\\x-mcp\\build\\src\\index.js"`).
 
+Claude Desktop has a fifth option, the **`.mcpb` extension bundle** — see §4.1.
+
 ### From source
 
 ```bash
@@ -151,6 +153,37 @@ development, with the same `env` map.
 
 Restart Claude Desktop after editing. The server writes nothing to stdout except JSON-RPC;
 diagnostics go to stderr and land in the client's MCP log.
+
+#### One-click extension (`.mcpb`)
+
+Instead of editing `claude_desktop_config.json`, Claude Desktop can install the server as a
+**desktop extension**: a `.mcpb` file (MCPB manifest 0.3) holding the built server and its
+production dependencies, so nothing is fetched at spawn time.
+
+1. Get `x-mcp-ai-<version>.mcpb` — attached to the GitHub release of each tag from the next
+   release on, or built from a checkout with `npm ci && npm run bundle`
+   (`build/mcpb/x-mcp-ai-<version>.mcpb`; the build is reproducible, the same tree gives
+   the same SHA-256).
+2. Open it with Claude Desktop (double-click, or Settings → Extensions → install from file)
+   and fill in the settings. Every setting maps to one `X_MCP_*` variable of the env table
+   (docs/02 §4); a field left empty is passed as an empty variable, which the server
+   treats as unset, so its defaults apply exactly as in the `npx` setup. The OAuth 2.0
+   client secret and the app-only bearer token are marked sensitive, so Desktop stores them
+   as secrets. Flags take `1`/`0`, as in the env table.
+3. **OAuth 2.0 user context still needs the one-time `authorize`** (§3) — the extension
+   cannot open the browser flow itself. Run it in a terminal with the same client ID and
+   the same token store as the extension settings — with *Token file* and *Use the OS
+   keychain* left empty, both sides use the default token file:
+
+   ```bash
+   X_MCP_AUTH_MODE=oauth2 X_MCP_CLIENT_ID=your-oauth2-client-id npx -y x-mcp-ai@0.8.0 authorize
+   ```
+
+   App-only mode needs only the bearer token and no `authorize`.
+
+The extension declares Node ≥ 22 as its runtime. Do not configure the server both as an
+extension and in `claude_desktop_config.json` — Desktop would start two copies with two
+separate session budgets.
 
 ### 4.2 Claude Code
 

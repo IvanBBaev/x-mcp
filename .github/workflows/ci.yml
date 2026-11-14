@@ -100,6 +100,11 @@ jobs:
       - name: server.json is in lockstep with package.json
         run: node scripts/server-json-guard.mjs
 
+      # Phase 4: the Claude Desktop bundle manifest (manifest.json) against the MCPB 0.3 schema,
+      # package.json/server.json and the env surface.
+      - name: manifest.json is in lockstep with package.json and server.json
+        run: node scripts/mcpb-guard.mjs
+
   coverage:
     name: coverage upload
     runs-on: ubuntu-latest

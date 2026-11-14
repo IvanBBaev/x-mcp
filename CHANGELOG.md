@@ -10,6 +10,16 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- Claude Desktop extension bundle (`.mcpb`, MCPB manifest 0.3): `manifest.json` maps every
+  `X_MCP_*` variable of `server.json` to a Desktop setting (client secret and bearer token
+  marked sensitive; an empty setting reaches the server as unset), and `npm run bundle`
+  builds `build/mcpb/x-mcp-ai-<version>.mcpb` reproducibly — the server plus its production
+  dependencies, sorted entries, fixed timestamps, same tree → same SHA-256. A new guard
+  (`scripts/mcpb-guard.mjs`, in `npm run gates` and CI) checks the manifest against the
+  official 0.3 schema and keeps it in lockstep with `package.json`, `server.json` and the
+  env surface. The tag workflow builds the bundle after the npm publish and attaches it to
+  the tag's GitHub release when one exists. Setup: docs/10 §4.1. Runtime dependencies and
+  `tools/list` bytes are unchanged.
 - MCP prompts: the server now declares the `prompts` capability and lists four workflow
   templates over the existing tools — `x_mentions_triage`, `x_thread_draft`,
   `x_topic_digest` and `x_account_overview` (README §Prompts). A prompt is listed only when

@@ -231,6 +231,11 @@ carries the "spends real money" warning). Live tests are gated behind
   --audit-level=high` — required for release; wired as `prepublishOnly`.
 - `npm run release:dry` — packs the tarball and reviews its size/contents before a
   real publish.
+- `npm run bundle` — builds the Claude Desktop bundle `build/mcpb/x-mcp-ai-<version>.mcpb`
+  (`scripts/mcpb-guard.mjs`, then the deterministic zip in `scripts/bundle.mjs`; same tree,
+  same SHA-256). The manifest guard also runs in `npm run gates` and in CI;
+  `test/bundle.test.ts` rebuilds the bundle twice, unpacks it with the MCPB toolkit and boots
+  it. The tag workflow attaches the bundle to the tag's GitHub release.
 - Lockfile committed; CI installs with `npm ci` everywhere; `.npmrc`
   (`engine-strict=true`) and `.nvmrc` carried over from the family. Dependabot
   weekly (minor+patch grouped, majors separate; npm + github-actions). CodeQL with a

@@ -42,3 +42,44 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Claude Desktop bundle (docs/08 Phase 4). Built only after the npm publish succeeded, from
+  # the same tag, by the reproducible `npm run bundle` (manifest guard + deterministic zip).
+  # It is always kept as a workflow artifact, and attached to the tag's GitHub release when
+  # that release exists. This job never creates a release and publishes nothing anywhere else.
+  bundle:
+    name: build the .mcpb bundle
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # gh release upload onto the existing release
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the bundle
+        run: npm run bundle
+
+      - name: Keep the bundle as a workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: x-mcp-ai-mcpb
+          path: build/mcpb/*.mcpb
+          if-no-files-found: error
+
+      - name: Attach to the GitHub release, if it exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" build/mcpb/*.mcpb --clobber
+          else
+            echo "::notice::no GitHub release for $GITHUB_REF_NAME yet; the bundle is in the workflow artifacts"
+          fi

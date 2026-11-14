@@ -52,8 +52,8 @@
 // future `*_PATH`, `*_DIR` or `*_MODE`. Conversely a future `X_MCP_API_KEY`, `X_MCP_APP_SECRET`
 // or `X_MCP_WEBHOOK_TOKEN` fails this guard on the day it is added unless the flag is set.
 // Segments are compared for EQUALITY, never containment, which is what keeps KEYCHAIN from
-// being read as KEY. The head-noun set is the only thing to extend if a new credential shape
-// appears.
+// being read as KEY. The head-noun set (`CREDENTIAL_HEADS` in scripts/lib/env-surface.mjs, shared
+// with scripts/mcpb-guard.mjs) is the only thing to extend if a new credential shape appears.
 //
 // Over-marking (a non-credential variable flagged secret) is reported as a warning rather than
 // a failure: hiding a value the operator could have seen is a usability cost, not a leak, and
@@ -65,33 +65,13 @@ import fs from 'node:fs';
 import process from 'node:process';
 import { URL } from 'node:url';
 
+import { isCredentialName, knownVars } from './lib/env-surface.mjs';
+
 const REPO = new URL('../', import.meta.url);
 
 const MANIFEST = 'server.json';
 const MANIFEST_PACKAGE = 'package.json';
 const CONFIG = 'src/core/config.ts';
-
-/**
- * Head nouns that mean "this value IS a credential". Matched against the final
- * underscore-delimited segment of the variable name, by equality — see the header.
- */
-const CREDENTIAL_HEADS = new Set([
-  'SECRET',
-  'SECRETS',
-  'TOKEN',
-  'TOKENS',
-  'KEY',
-  'KEYS',
-  'APIKEY',
-  'PASSWORD',
-  'PASSWORDS',
-  'PASSWD',
-  'PASSPHRASE',
-  'CREDENTIAL',
-  'CREDENTIALS',
-  'COOKIE',
-  'PAT',
-]);
 
 /**
  * The registry's hard cap on the manifest description, learned the honest way: the v0.8.0
@@ -121,24 +101,6 @@ function readJson(relative) {
     );
     process.exit(2);
   }
-}
-
-/**
- * The set of variables `src/core/config.ts` recognizes, read out of its `KNOWN_VARS` literal —
- * the same list that drives the CFG-8 unknown-variable warning, so membership here is exactly
- * "the server reacts to this name". Parsed from source rather than imported because the
- * constant is module-private, and a public export existing only for this guard would be worse.
- */
-function knownVars(source) {
-  const block = /const KNOWN_VARS[^=]*=\s*new Set\(\[([\s\S]*?)\]\)/.exec(source);
-  if (block === null) return null;
-  return new Set([...block[1].matchAll(/'([A-Z][A-Z0-9_]*)'/g)].map((match) => match[1]));
-}
-
-/** True when the name's head noun is a credential noun — the rule documented in the header. */
-function isCredentialName(name) {
-  const segments = name.split('_');
-  return CREDENTIAL_HEADS.has(segments[segments.length - 1]);
 }
 
 // --- Checks -------------------------------------------------------------------------------
@@ -239,7 +201,7 @@ function checkEnvironment(findings, warnings, entry, recognized) {
       warnings.push(
         `${MANIFEST}: ${name} is marked secret but its head noun ` +
           `"${name.split('_').pop()}" is not a credential noun — either the marking is ` +
-          `over-cautious or CREDENTIAL_HEADS in this guard needs the noun added`,
+          `over-cautious or CREDENTIAL_HEADS in scripts/lib/env-surface.mjs needs the noun added`,
       );
     }
 

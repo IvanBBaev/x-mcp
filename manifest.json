@@ -1,0 +1,178 @@
+{
+  "manifest_version": "0.3",
+  "name": "x-mcp-ai",
+  "display_name": "x-mcp-ai (X API v2)",
+  "version": "0.8.0",
+  "description": "Safety-first X (Twitter) API v2 MCP server: 42 typed tools across 12 packages, policy-gated.",
+  "long_description": "Typed, policy-gated tools for the X (Twitter) API v2: posts, search, timelines, engagement, graph, lists, direct messages, media, archive and usage. A two-axis policy (read-only by default) decides which tools are offered, and a session spend budget caps pay-per-use cost.\n\nOAuth 2.0 user context needs a one-time `npx -y x-mcp-ai authorize` in a terminal, with the same client ID and token file as here; app-only mode needs only a bearer token. Setup: https://github.com/IvanBBaev/x-mcp/blob/main/docs/10-operator-guide.md\n\nx-mcp-ai is an independent, unofficial project and is not affiliated with, endorsed by, or sponsored by X Corp.",
+  "author": {
+    "name": "Ivan Baev",
+    "email": "ivanbbaev@gmail.com",
+    "url": "https://github.com/IvanBBaev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/IvanBBaev/x-mcp"
+  },
+  "homepage": "https://github.com/IvanBBaev/x-mcp#readme",
+  "documentation": "https://github.com/IvanBBaev/x-mcp/blob/main/docs/10-operator-guide.md",
+  "support": "https://github.com/IvanBBaev/x-mcp/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "bin/x-mcp-ai.cjs",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/bin/x-mcp-ai.cjs"],
+      "env": {
+        "X_MCP_AUTH_MODE": "${user_config.auth_mode}",
+        "X_MCP_CLIENT_ID": "${user_config.client_id}",
+        "X_MCP_CLIENT_SECRET": "${user_config.client_secret}",
+        "X_MCP_BEARER_TOKEN": "${user_config.bearer_token}",
+        "X_MCP_TOKEN_FILE": "${user_config.token_file}",
+        "X_MCP_TOKEN_KEYCHAIN": "${user_config.token_keychain}",
+        "X_MCP_POLICY": "${user_config.policy}",
+        "X_MCP_POLICY_ALLOW": "${user_config.policy_allow}",
+        "X_MCP_POLICY_DENY": "${user_config.policy_deny}",
+        "X_MCP_HIDE_DENIED": "${user_config.hide_denied}",
+        "X_MCP_MEDIA_DIR": "${user_config.media_dir}",
+        "X_MCP_AVAILABILITY": "${user_config.availability}",
+        "X_MCP_PROFILES_FILE": "${user_config.profiles_file}",
+        "X_MCP_PROFILE": "${user_config.profile}",
+        "X_MCP_TIMEOUT_MS": "${user_config.timeout_ms}",
+        "X_MCP_LOG_LEVEL": "${user_config.log_level}",
+        "X_MCP_CREDIT_BUDGET": "${user_config.credit_budget}",
+        "X_MCP_BUDGET_MODE": "${user_config.budget_mode}",
+        "X_MCP_ALLOW_PROXY": "${user_config.allow_proxy}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "keywords": ["x", "twitter", "x-api", "mcp", "social-media"],
+  "license": "MIT",
+  "privacy_policies": ["https://x.com/en/privacy"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  },
+  "user_config": {
+    "auth_mode": {
+      "type": "string",
+      "title": "Authentication mode",
+      "description": "oauth2 (user context, the default) or app-only. Leave empty for the default.",
+      "default": ""
+    },
+    "client_id": {
+      "type": "string",
+      "title": "OAuth 2.0 client ID",
+      "description": "Client ID of your X app (oauth2 mode). Run `npx -y x-mcp-ai authorize` once with the same ID.",
+      "default": ""
+    },
+    "client_secret": {
+      "type": "string",
+      "title": "OAuth 2.0 client secret",
+      "description": "Confidential clients only; PKCE public clients leave it empty.",
+      "sensitive": true,
+      "default": ""
+    },
+    "bearer_token": {
+      "type": "string",
+      "title": "App-only bearer token",
+      "description": "Application-only bearer token (app-only mode).",
+      "sensitive": true,
+      "default": ""
+    },
+    "token_file": {
+      "type": "string",
+      "title": "Token file",
+      "description": "Path of the OAuth 2.0 token store. Leave empty for the OS default (~/.config/x-mcp/tokens.json, %APPDATA%\\x-mcp\\tokens.json on Windows).",
+      "default": ""
+    },
+    "token_keychain": {
+      "type": "string",
+      "title": "Use the OS keychain",
+      "description": "1 = keep OAuth 2.0 tokens in the OS keychain (macOS, Linux) instead of a token file. Leave empty or 0 for the file.",
+      "default": ""
+    },
+    "policy": {
+      "type": "string",
+      "title": "Policy preset",
+      "description": "read-only (the default), engage, publish, manage or full.",
+      "default": ""
+    },
+    "policy_allow": {
+      "type": "string",
+      "title": "Policy allow cells",
+      "description": "Comma-separated op:domain cells allowed on top of the preset, e.g. read:dm,write:dm.",
+      "default": ""
+    },
+    "policy_deny": {
+      "type": "string",
+      "title": "Policy deny cells",
+      "description": "Comma-separated op:domain cells to deny; deny beats allow beats preset.",
+      "default": ""
+    },
+    "hide_denied": {
+      "type": "string",
+      "title": "Hide denied tools",
+      "description": "1 = drop policy-denied tools entirely instead of listing them annotated as denied.",
+      "default": ""
+    },
+    "media_dir": {
+      "type": "directory",
+      "title": "Media directory",
+      "description": "Uploads must resolve inside this directory. Media upload stays disabled while it is empty.",
+      "default": ""
+    },
+    "availability": {
+      "type": "string",
+      "title": "Special access classes",
+      "description": "Comma-separated specially provisioned classes: pilot, premium-user, enterprise. Empty = the conservative default.",
+      "default": ""
+    },
+    "profiles_file": {
+      "type": "string",
+      "title": "Profiles file",
+      "description": "Path to a profiles file holding named configuration blocks (multi-account).",
+      "default": ""
+    },
+    "profile": {
+      "type": "string",
+      "title": "Profile",
+      "description": "Name of the profile to select from the profiles file.",
+      "default": ""
+    },
+    "timeout_ms": {
+      "type": "string",
+      "title": "HTTP timeout (ms)",
+      "description": "Per-request timeout in milliseconds. Empty = 30000.",
+      "default": ""
+    },
+    "log_level": {
+      "type": "string",
+      "title": "Log level",
+      "description": "Diagnostics on stderr: silent, error, info (the default) or debug.",
+      "default": ""
+    },
+    "credit_budget": {
+      "type": "string",
+      "title": "Session budget (USD)",
+      "description": "Session spend cap in USD, e.g. 5.00. Empty = no cap.",
+      "default": ""
+    },
+    "budget_mode": {
+      "type": "string",
+      "title": "Budget mode",
+      "description": "warn (the default) or hard (calls past the cap fail with a budget error).",
+      "default": ""
+    },
+    "allow_proxy": {
+      "type": "string",
+      "title": "Trust the env proxy",
+      "description": "1 = trust a Node env-proxying HTTP(S) proxy and silence the startup warning.",
+      "default": ""
+    }
+  }
+}

@@ -133,6 +133,14 @@ Claude Code from the CLI:
 claude mcp add x --env X_MCP_POLICY=read-only -- npx -y x-mcp-ai@0.8.0
 ```
 
+Claude Desktop can also install it as a **one-click extension** (`.mcpb` bundle): the server
+and its production dependencies in one file, settings in the Extensions UI instead of a JSON
+config, the client secret and bearer token stored as sensitive fields. Release builds attach
+`x-mcp-ai-<version>.mcpb` to the GitHub release (from the next tag on); `npm run bundle`
+builds the same file from a checkout. OAuth 2.0 still needs a one-time
+`npx -y x-mcp-ai@0.8.0 authorize` in a terminal — see
+[`docs/10-operator-guide.md`](docs/10-operator-guide.md) §4.1.
+
 **Per-client instructions** — Claude Desktop, Claude Code, VS Code (`.vscode/mcp.json`),
 Cursor and MCP Inspector — are in
 [`docs/10-operator-guide.md`](docs/10-operator-guide.md) §4, together with the `authorize`
@@ -409,6 +417,9 @@ src/
 ├── mcp/                # compose, server, schema, structured, gates, session, prompts, progress
 └── cli/                # dispatch, authorize, doctor
 ```
+
+`manifest.json` at the root is the Claude Desktop bundle manifest (MCPB 0.3);
+`scripts/bundle.mjs` packs it with the build into a `.mcpb`.
 
 Dependency rule: `tools → core + api/endpoints`, `api → core`, `mcp → tools + core`,
 `cli → core + api`. Nothing in `core` reaches outward or does I/O.
