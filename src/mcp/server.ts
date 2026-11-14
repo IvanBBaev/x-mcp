@@ -7,8 +7,18 @@
 // tool result (`isError: true`), exactly as docs/02 §5 specifies.
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListToolsRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import type {
+  CallToolResult,
+  GetPromptResult,
+  ListPromptsResult,
+  ListToolsResult,
+} from '@modelcontextprotocol/sdk/types.js';
 
 import { XError } from '../core/errors.js';
 import type { Ports } from '../core/ports.js';
@@ -16,6 +26,7 @@ import type { Registry } from '../core/registry.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 import type { ResolveCache } from '../core/resolve.js';
 import type { ProgressBridge } from './progress.js';
+import { promptListing, renderPrompt } from './prompts.js';
 import { toolInputSchema } from './schema.js';
 import { renderStructuredResult, toolOutputSchema } from './structured.js';
 
@@ -68,7 +79,7 @@ function renderError(error: XError): CallToolResult {
 export function buildMcpServer(deps: McpServerDeps): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
+    { capabilities: { tools: {}, prompts: {} }, instructions: INSTRUCTIONS },
   );
 
   // tools/list — the registry's MCP view verbatim: derived annotations (MCP-4), the
@@ -147,6 +158,17 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         unbind?.();
       }
     },
+  );
+
+  // prompts/list + prompts/get (queue Q02) — workflow templates over the tools above, filtered
+  // by the same policy view `tools/list` uses. No `listChanged`: the policy is fixed at
+  // startup, so the list cannot change within a session. Bad arguments are JSON-RPC
+  // InvalidParams errors (prompts have no tool-result channel to carry a typed refusal).
+  server.setRequestHandler(ListPromptsRequestSchema, (): ListPromptsResult => ({
+    prompts: promptListing(deps.registry),
+  }));
+  server.setRequestHandler(GetPromptRequestSchema, (request): GetPromptResult =>
+    renderPrompt(deps.registry, request.params.name, request.params.arguments),
   );
 
   return server;

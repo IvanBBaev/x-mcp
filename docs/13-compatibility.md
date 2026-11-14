@@ -46,7 +46,8 @@ independently of any client.
 |---|---|---|
 | Transport | stdio only. One JSON-RPC frame per line on stdout; nothing else ever reaches stdout. | `protocol-verified` — [`test/mcp/spawn.test.ts:111`](../test/mcp/spawn.test.ts) |
 | Protocol version | Echoes the client's request when it is one of `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`, `2024-10-07`. An unrecognised version falls back to `2025-11-25`. | `probe-verified` (§7.1 reproduces it) |
-| Capabilities | Exactly `{"tools":{}}`. No `listChanged`, no resources, prompts, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts:61`](../src/mcp/server.ts), [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
+| Capabilities | Exactly `{"tools":{},"prompts":{}}`. No `listChanged`, no resources, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts`](../src/mcp/server.ts), [`test/mcp/prompts.test.ts`](../test/mcp/prompts.test.ts) |
+| Prompts | `prompts/list` returns up to 4 workflow templates over the existing tools (`x_mentions_triage`, `x_thread_draft`, `x_topic_digest`, `x_account_overview`); a prompt whose required tools are denied by the policy is not listed. `prompts/get` returns one `user` message; an unknown or hidden prompt, a missing required argument, an unknown argument or an over-long value is `-32602 Invalid params`. Not part of `tools/list` — no context-budget bytes. | `protocol-verified` — [`test/mcp/prompts.test.ts`](../test/mcp/prompts.test.ts) |
 | `instructions` | 944 characters returned on `initialize`. | `protocol-verified` — [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
 | `tools/list` | 42 tools, delivered in one response (~80 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:129`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
 | `tools/call` success | `content[0]` is a JSON text block **and** `structuredContent` is the same object. | `protocol-verified` — [`test/mcp/structured.test.ts:134`](../test/mcp/structured.test.ts) |
@@ -54,16 +55,16 @@ independently of any client.
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
 | Cancellation | `notifications/cancelled` aborts the in-flight HTTP request and rejects with JSON-RPC `-32001`; the session stays usable. | Plumbing `protocol-verified` — [`test/core/registry.test.ts:484`](../test/core/registry.test.ts), [`test/tools/media.test.ts:1259`](../test/tools/media.test.ts); end-to-end over MCP `probe-verified` (402 ms against a 60 s delayed reply, the full tool list still served afterwards) |
 | Progress notifications | **Not supported.** No `progressToken` handling, no `notifications/progress` — including for chunked media upload, which has an internal progress seam that is not wired to MCP. | `probe-verified` (no `progress` reference in [`src/mcp/compose.ts`](../src/mcp/compose.ts)) |
-| Unknown methods | `resources/list`, `prompts/list`, anything unrecognised → `-32601 Method not found`. `ping` works (SDK built-in). | `probe-verified` (§7.1) |
+| Unknown methods | `resources/list`, anything unrecognised → `-32601 Method not found`. `ping` works (SDK built-in). | `probe-verified` (§7.1) |
 | Startup failure | One `x-mcp-ai: fatal: <reason>` line on **stderr**, empty stdout, exit 1. | `protocol-verified` — [`test/mcp/spawn.test.ts:155`](../test/mcp/spawn.test.ts) |
 | Shutdown | Clean exit 0 on stdin EOF, SIGINT or SIGTERM. | `protocol-verified` — [`test/mcp/spawn.test.ts:111`](../test/mcp/spawn.test.ts), [`:140`](../test/mcp/spawn.test.ts) |
 
 **What this means for a client.** A client needs nothing beyond stdio spawn, `env`
 injection, `initialize`, `tools/list` and `tools/call`. Any client that cannot do those
-five things cannot use this server; any client that can needs no other feature, because the
-server advertises none. There is no tool-list-changed notification, so a client that caches
-`tools/list` across a session sees a stable list — which is correct here, since the policy
-is fixed at startup.
+five things cannot use this server; any client that can needs no other feature — prompts
+are optional convenience templates, and a client that ignores them loses no tool. There is
+no tool- or prompt-list-changed notification, so a client that caches either list across a
+session sees a stable list — which is correct here, since the policy is fixed at startup.
 
 ## 3. The matrix
 

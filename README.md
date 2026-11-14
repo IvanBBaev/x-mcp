@@ -378,9 +378,21 @@ is at most a post-1.0 exploratory idea, evaluated only if a real use case emerge
 
 ## Prompts
 
-Not part of 1.0. MCP prompts are an unordered, post-1.0 exploratory candidate — packaged
-templates for common workflows (e.g. draft-thread-from-notes, daily mentions triage) — that
-enters the roadmap only with a real use case, not on a schedule.
+The server lists ready-made workflow prompts (`prompts/list`) over the existing tools — no
+extra tools and no `tools/list` bytes. A prompt is only text that tells the model which tools
+to call in which order; every call still goes through the policy, budget and rate-limit
+gates. A prompt whose required tools the policy denies is not listed.
+
+| Prompt | Arguments | Workflow |
+|---|---|---|
+| `x_mentions_triage` | `user`, `since_id` | Read mentions, sort them into reply / watch / no action, draft replies. Posts an approved reply with `x_post_create` only when the policy allows it. |
+| `x_thread_draft` | `notes` (required), `reply_to_id` | Draft a 2-25 post thread from notes, get approval, post it with `x_thread_create`. Listed only when `write:content` is allowed. |
+| `x_topic_digest` | `query` (required), `since_id` | Volume trend, themes and notable posts for a search query over the last 7 days. |
+| `x_account_overview` | — | Auth mode, scopes and policy, read usage against the monthly cap, session spend by tool, exhausted rate-limit buckets. |
+
+Arguments are length-capped and reach the model as one JSON line, as data; a missing,
+unknown or over-long argument is an `Invalid params` error. In Claude Code the prompts
+appear as slash commands, e.g. `/mcp__x__x_topic_digest` when the server is registered as `x`.
 
 ## Project structure
 
@@ -394,7 +406,7 @@ src/
 │                       #   registry, render, resolve, paginate, sanitize
 ├── api/                # http, ratelimit, errors, oauth2/, endpoints/
 ├── tools/              # one module per package (posts, search, graph, …)
-├── mcp/                # compose, server, schema, structured, gates, session
+├── mcp/                # compose, server, schema, structured, gates, session, prompts
 └── cli/                # dispatch, authorize, doctor
 ```
 

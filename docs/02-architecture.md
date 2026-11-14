@@ -82,6 +82,7 @@ src/
     server.ts         #   McpServer wiring, capability negotiation, tool registration
     schema.ts         #   zod → JSON-schema input definitions shared by tools
     structured.ts     #   outputSchema + structuredContent parity (Phase 3, WP-3.8)
+    prompts.ts        #   prompts/list + prompts/get workflow templates, policy-filtered (Phase 4)
   tools/              # one file per tool package; each exports ToolDef[]
     auth.ts  posts.ts  search.ts  timelines.ts  engagement.ts
     users.ts  graph.ts  dm.ts  lists.ts  media.ts  spaces.ts  trends.ts

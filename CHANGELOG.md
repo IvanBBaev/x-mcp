@@ -10,6 +10,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- MCP prompts: the server now declares the `prompts` capability and lists four workflow
+  templates over the existing tools — `x_mentions_triage`, `x_thread_draft`,
+  `x_topic_digest` and `x_account_overview` (README §Prompts). A prompt is listed only when
+  the policy allows every tool it requires (the thread draft needs `write:content`), and
+  arguments are validated (`Invalid params` on a missing, unknown or over-long one). No new
+  tools and no `tools/list` bytes.
 - `x_media_upload` now reports upload progress to the client: a `tools/call` that sends
   `_meta.progressToken` receives one `notifications/progress` per accepted APPEND segment
   (`progress` = bytes uploaded, `total` = file size, plus a "segment i of n" message), all
@@ -119,11 +125,11 @@ development chronology lives in `WORKLOG.md`.
   where the pricing page has no exact match (mute create, block/unblock, post
   delete).
 
-- README no longer calls MCP resources and prompts "planned". Neither is a committed
-  roadmap item — the server's declared capabilities are exactly `{"tools":{}}` (no
-  `resources`, no `prompts`; see `docs/13-compatibility.md` §2), and both are at most
-  unordered, post-1.0 exploratory candidates (`docs/08-implementation-roadmap.md`
-  Phase 4) that enter only with a real use case, not on a schedule.
+- README no longer calls MCP resources "planned". They are not a committed roadmap item —
+  the server declares no `resources` capability (see `docs/13-compatibility.md` §2) — and
+  remain at most an unordered, post-1.0 exploratory candidate
+  (`docs/08-implementation-roadmap.md` Phase 4) that enters only with a real use case.
+  (Prompts have since shipped; see the MCP prompts entry above.)
 
 - `tools/list` is about 1.5 KB smaller. Redundant wording in tool and parameter
   descriptions — restatements of limits the schema already carries, and of what a
