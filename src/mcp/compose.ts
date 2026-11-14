@@ -42,6 +42,7 @@ import { timelinesTools } from '../tools/timelines.js';
 import { createUsageTools } from '../tools/usage.js';
 import { usersTools } from '../tools/users.js';
 import { createBudgetGate, createPolicyGate, createRateLimitGate } from './gates.js';
+import { createProgressBridge, mediaProgressListener } from './progress.js';
 import { buildMcpServer } from './server.js';
 import { createSessionProvider } from './session.js';
 import { assertOutputSchemaCoverage } from './structured.js';
@@ -305,6 +306,10 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
   const spend = createSpendByTool();
 
   const session = createSessionProvider(config, policy);
+  // WP-3.3 bridge: the media package's per-segment events reach the client as
+  // notifications/progress, but only for a tools/call that sent a progressToken — the
+  // adapter binds that call's signal, the listener routes each event by the signal it carries.
+  const progress = createProgressBridge();
   const tools = [
     ...createAuthTools({ session, rateLimit: tracker }),
     ...postsTools,
@@ -319,7 +324,10 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     // reach x_media_upload by being closed over here. Registering the unbound instances
     // would make every upload refuse with "no media directory is configured" even when the
     // operator set one (MEDIA-5's fail-closed default, misapplied).
-    ...createMediaTools(config.mediaDir !== undefined ? { mediaDir: config.mediaDir } : {}),
+    ...createMediaTools({
+      ...(config.mediaDir !== undefined ? { mediaDir: config.mediaDir } : {}),
+      onProgress: mediaProgressListener(progress),
+    }),
     ...dmTools,
     ...archiveTools,
     // INT-6, like createAuthTools: the report reads process state (the session credit
@@ -358,7 +366,13 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     cache: createResolveCache(),
     lookup: createHandleLookup(invokerFor('x_user_get')),
   };
-  const server = buildMcpServer({ registry, ports, invokerFor, resolveCache: resolver.cache });
+  const server = buildMcpServer({
+    registry,
+    ports,
+    invokerFor,
+    resolveCache: resolver.cache,
+    progress,
+  });
 
   return { server, registry, tracker, budget, resolver };
 }

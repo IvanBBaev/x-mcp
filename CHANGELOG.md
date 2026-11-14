@@ -10,6 +10,10 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- `x_media_upload` now reports upload progress to the client: a `tools/call` that sends
+  `_meta.progressToken` receives one `notifications/progress` per accepted APPEND segment
+  (`progress` = bytes uploaded, `total` = file size, plus a "segment i of n" message), all
+  before the result. Calls without a token are unchanged. No `tools/list` bytes added.
 - `x_search_recent`, `x_timeline_home`, `x_timeline_mentions` and `x_timeline_user` take an
   optional `since_id` (post id or status URL) for incremental polling: only posts newer than
   it are returned, so a re-poll pays for new posts only. Pages are newest-first, so the next

@@ -15,6 +15,7 @@ import type { Ports } from '../core/ports.js';
 import type { Registry } from '../core/registry.js';
 import type { EndpointInvoker } from '../core/tooldef.js';
 import type { ResolveCache } from '../core/resolve.js';
+import type { ProgressBridge } from './progress.js';
 import { toolInputSchema } from './schema.js';
 import { renderStructuredResult, toolOutputSchema } from './structured.js';
 
@@ -47,6 +48,12 @@ export interface McpServerDeps {
   readonly invokerFor: (toolName: string) => EndpointInvoker;
   /** The process-scoped handle → id memo every call's handler resolves through (REND-8). */
   readonly resolveCache?: ResolveCache;
+  /**
+   * The progress bridge (WP-3.3): a call that sends `_meta.progressToken` gets its signal
+   * bound to a `notifications/progress` sender for the call's lifetime. Absent → no call
+   * ever emits progress.
+   */
+  readonly progress?: ProgressBridge;
 }
 
 /** Render a typed XError as a structured tool error result (docs/02 §5 — never a crash). */
@@ -98,11 +105,28 @@ export function buildMcpServer(deps: McpServerDeps): Server {
   // closes). Handing it to `registry.call` is the whole of the adapter's cancellation duty:
   // the registry binds it to the invoker, so it reaches every in-flight HTTP request the
   // call makes, on every tool.
+  //
+  // WP-3.3: the same per-request signal is the progress correlation key. Only a request
+  // that carries `_meta.progressToken` is bound, and the binding is dropped in `finally`
+  // before the result goes back — no notification can follow the response. A failed send
+  // (closed transport) is advisory and never fails the call.
   server.setRequestHandler(
     CallToolRequestSchema,
     async (request, extra): Promise<CallToolResult> => {
       const name = request.params.name;
       const args: unknown = request.params.arguments ?? {};
+      const progressToken = request.params._meta?.progressToken;
+      const unbind =
+        progressToken === undefined || deps.progress === undefined
+          ? undefined
+          : deps.progress.bind(extra.signal, (update) => {
+              extra
+                .sendNotification({
+                  method: 'notifications/progress',
+                  params: { progressToken, ...update },
+                })
+                .catch(() => undefined);
+            });
       try {
         const result = await deps.registry.call(name, args, {
           ports: deps.ports,
@@ -119,6 +143,8 @@ export function buildMcpServer(deps: McpServerDeps): Server {
         // JSON-RPC internal error rather than disguising it as a tool outcome.
         if (XError.is(error)) return renderError(error);
         throw error;
+      } finally {
+        unbind?.();
       }
     },
   );
