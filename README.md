@@ -406,7 +406,7 @@ src/
 │                       #   registry, render, resolve, paginate, sanitize
 ├── api/                # http, ratelimit, errors, oauth2/, endpoints/
 ├── tools/              # one module per package (posts, search, graph, …)
-├── mcp/                # compose, server, schema, structured, gates, session, prompts
+├── mcp/                # compose, server, schema, structured, gates, session, prompts, progress
 └── cli/                # dispatch, authorize, doctor
 ```
 
