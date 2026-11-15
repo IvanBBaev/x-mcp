@@ -286,6 +286,11 @@ above; this is the single list to walk before tagging:
       *Pre-run 2026-10-01 ([reviews/11](reviews/11-platform-fact-check-2026-10-01.md)):
       three drifts fixed, and follows/likes/quote-posts on self-serve (F-5) still
       need a live check; the dated release-week run remains open.*
+      *Pre-run 2026-11-15 ([reviews/12](reviews/12-platform-fact-check-2026-11-15.md)):
+      rates and the 3M cap unchanged against OpenAPI 2.174 and the changelog to
+      2026-11-10; one drift fixed (F-1: counts/all and usage are app-only bearer only,
+      user search user-token only, mapped as AUTH-17); owner decisions OD-1–OD-7
+      listed; the dated release-week run remains open.*
 - [ ] npm provenance badge + MCP registry listing verified; `server.json` lockstep
       guard green. *Guard green: `npm run gate:manifest`
       (`scripts/server-json-guard.mjs`) verifies version lockstep across all three
