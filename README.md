@@ -327,7 +327,7 @@ schemas, scopes, cost class, availability — is
 | graph | `x_block_set` | destructive:social-graph |  | ✅ | Block or unblock a user as the authenticated user. |
 | graph | `x_followers_list` | read:social-graph | ✅ |  | List the accounts following an X (Twitter) user. |
 | graph | `x_following_list` | read:social-graph | ✅ |  | List the accounts an X (Twitter) user follows. |
-| graph | `x_user_search` | read:user | ✅ |  | Keyword search over X (Twitter) user profiles (names, handles, bios). |
+| graph | `x_user_search` | read:user | ✅ | ✅ | Keyword search over X (Twitter) user profiles (names, handles, bios). |
 | lists | `x_list_create` | write:content |  | ✅ | Create a list owned by the authenticated user. |
 | lists | `x_list_update` | write:content |  | ✅ | Update the authenticated user's own list metadata — `name`, `description`, and/or `private`. |
 | lists | `x_list_delete` | destructive:content |  | ✅ | Permanently delete the authenticated user's own list. |

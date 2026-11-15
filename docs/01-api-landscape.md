@@ -7,7 +7,8 @@ so treat every number as perishable: re-verify against
 [`https://docs.x.com/x-api/llms.txt`](https://docs.x.com/x-api/llms.txt) and the
 [X API changelog](https://docs.x.com/changelog) at every phase boundary (standing rule 2
 of [08-implementation-roadmap.md](08-implementation-roadmap.md)). **Last fact-checked:
-2026-10-01** (release-week pre-run, [review 11](reviews/11-platform-fact-check-2026-10-01.md)).
+2026-11-15** (release-week pre-run, [review 12](reviews/12-platform-fact-check-2026-11-15.md);
+previous: [review 11](reviews/11-platform-fact-check-2026-10-01.md), 2026-10-01).
 
 ## 1. API generations
 
@@ -122,6 +123,10 @@ post delete (no delete-post row — priced at Interaction: Delete, $0.010).
   require an Enterprise plan. This is the *only* hard cap under pay-per-use.
 - Credits are purchased upfront; the platform advertises up to 20 % back in xAI API
   credits.
+- **Free credit incentives (changelog 2026-10-02):** $20 of free API credits after saving
+  the first eligible payment card and completing the first credit purchase, plus a match of
+  the first auto-recharge up to $50. They change what an operator pays, not any per-call
+  rate, so the local estimate (COST-2) ignores them.
 - **Owned Reads** ($0.001/resource) make own-data tools (`timeline_mentions`,
   `bookmarks_list`, `liked_posts_list`, own `timeline_user`, `usage_get`)
   an order of magnitude cheaper — worth surfacing in the per-call cost estimate. The
@@ -151,8 +156,8 @@ a minimum tier. Availability classes are consumed by
 
 | Availability class | Meaning | In the conservative default? |
 |---|---|---|
-| `app+user` | Reachable with an app-only bearer **or** user tokens (search incl. full-archive, lookups, some timelines, counts). Full-archive search/counts are **pay-per-use reachable** as of 2026 (no longer a Pro gate). | **Yes** |
-| `user-only` | Requires user-context OAuth 2.0/1.0a tokens (writes, DMs, home timeline, `me`, engagement). Degrades to an app-only shape (no 403) when running app-only — [07](07-corner-cases.md) AUTH-15. | **Yes** |
+| `app+user` | Reachable with an app-only bearer **or** user tokens (search incl. full-archive, lookups, some timelines, recent counts). Full-archive search/counts are **pay-per-use reachable** as of 2026 (no longer a Pro gate). **Exceptions (2026-11-15, [review 12](reviews/12-platform-fact-check-2026-11-15.md) F-1):** `GET /2/tweets/counts/all` and `GET /2/usage/tweets` accept **only** an app-only bearer — classed `app+user` for want of an app-only class. | **Yes** |
+| `user-only` | Requires user-context OAuth 2.0/1.0a tokens (writes, DMs, home timeline, `me`, engagement, profile search `GET /2/users/search`). Degrades to an app-only shape (no 403) when running app-only — [07](07-corner-cases.md) AUTH-15. | **Yes** |
 | `pilot` | Behind an enrollment/pilot program (e.g. Community Notes *AI Note Writer* — X Developer AI access). | No — opt-in |
 | `premium-user` | Requires an **account property on the authenticated user** (an X Premium subscription), not an API plan — e.g. personalized trends. | No — opt-in |
 | `enterprise` | Only on an Enterprise contract (> 3 M reads/mo, compliance/firehose/replay). | No — opt-in |
@@ -179,7 +184,7 @@ operator-declared availability set** (roadmap WP-0.10):
   declared availability class is **not** in the resolved set is **not registered at
   all**. This gates only the specially-provisioned classes — `pilot` (Community Notes),
   `premium-user` (personalized trends), `enterprise` (firehose/compliance). Full-archive
-  search/counts and `user_search` are `app+user` (§3.2), so they are **not** gated here;
+  search/counts (`app+user`) and `user_search` (`user-only`) are base classes (§3.2), so they are **not** gated here;
   they register on the conservative default and are restrained by the credit budget, not
   by availability. Availability gating is *registration-time* and is **distinct** from
   policy denial (POL-7, which keeps denied tools registered + annotated): a tool the
@@ -235,7 +240,7 @@ Verified against
 
 - **Returns:** `project_id`, `project_usage` (posts read this cycle), `project_cap`
   (= 3,000,000), `cap_reset_day`, `daily_project_usage[]`, `daily_client_app_usage[]`.
-  Query params: `days` (1–90, default 7), `usage.fields`. Auth: **app bearer token** +
+  Query params: `days` (1–90, default 7), `usage.fields`. Auth: **app bearer token only** (no user token — OpenAPI 2.174, 2026-11-15) +
   an approved developer account — **no tier named** (the old "Basic" label is obsolete).
 - **It reports post-read *counts* against the 3 M cap only — NOT dollar/credit spend.**
   Credit and dollar spend are visible only in the Developer Console (`console.x.com`);
@@ -275,7 +280,8 @@ Availability classes in parentheses are from §3.2; everything unmarked is `app+
   /2/tweets/:id`, `PUT /2/tweets/:id/hidden` (hide reply)
 - **Search & counts**: `GET /2/tweets/search/recent` (7 days), `GET
   /2/tweets/search/all` (full-archive since 2006 — `app+user`, pay-per-use reachable),
-  `GET /2/tweets/counts/recent`, `GET /2/tweets/counts/all`
+  `GET /2/tweets/counts/recent`, `GET /2/tweets/counts/all` (app-only bearer only —
+  [07](07-corner-cases.md) AUTH-17)
 - **Timelines**: `GET /2/users/:id/tweets`, `GET /2/users/:id/mentions`, `GET
   /2/users/:id/timelines/reverse_chronological`
 - **Engagement**: likes (`POST/DELETE /2/users/:id/likes`, `GET /2/tweets/:id/liking_users`,
@@ -283,7 +289,7 @@ Availability classes in parentheses are from §3.2; everything unmarked is `app+
   `GET /2/tweets/:id/retweeted_by`), quotes (`GET /2/tweets/:id/quote_tweets`),
   bookmarks (`POST/DELETE/GET /2/users/:id/bookmarks`)
 - **Users**: `GET /2/users/me`, `GET /2/users/:id`, `GET /2/users/by/username/:u`,
-  batch variants, `GET /2/users/search` (`app+user`, pay-per-use reachable)
+  batch variants, `GET /2/users/search` (`user-only` — no app bearer; pay-per-use reachable)
 - **Social graph**: follows (`POST/DELETE /2/users/:id/following`, `GET
   /2/users/:id/followers`, `GET /2/users/:id/following`), blocks, mutes
 - **DMs** *(three event lookups only — there is **no** list-conversations endpoint)*:

@@ -389,7 +389,7 @@ Takes no input fields.
 
 | Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
 |---|---|---|---|---|---|---|
-| `graph` | `read:user` | `app+user` | `r:user` | 3 | read-only | `tweet.read`, `users.read` |
+| `graph` | `read:user` | `user-only` | `r:user` | 3 | read-only | `tweet.read`, `users.read` |
 
 | Field | Type | Required | Description |
 |---|---|:--:|---|

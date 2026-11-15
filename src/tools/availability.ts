@@ -8,8 +8,8 @@
 //
 //  - The universally-available pay-per-use classes (`app+user`, `user-only`) are ALWAYS in
 //    the resolved set — docs/01 §3.3: gating applies "only the specially-provisioned
-//    classes". Full-archive search/counts and `x_user_search` are `app+user`, so they
-//    register by default and are restrained by the session credit budget (COST-1), not
+//    classes". Full-archive search/counts (`app+user`) and `x_user_search` (`user-only`)
+//    are base classes, so they register by default and are restrained by the session credit budget (COST-1), not
 //    hidden here.
 //  - The specially-provisioned classes (`pilot`, `premium-user`, `enterprise`) are OFF
 //    until explicitly listed — the conservative default. A tool declaring one of them is

@@ -1,0 +1,11 @@
+{
+  "_provenance": "X API v2 403 for a credential type the endpoint does not accept (an OAuth 2.0 user-context token on the app-only-only `GET /2/tweets/counts/all`). Endpoint security from https://api.x.com/2/openapi.json v2.174 (fetched 2026-11-15, docs/reviews/12); body shape authored 2026-11-15 from the platform's `unsupported-authentication` problem family — not a live capture (H2). Exercises: AUTH-17 auth class on a 403 (vs scope/forbidden/billing), DX-F13.",
+  "status": 403,
+  "headers": { "content-type": "application/json; charset=utf-8" },
+  "body": {
+    "title": "Unsupported Authentication",
+    "type": "https://api.twitter.com/2/problems/unsupported-authentication",
+    "status": 403,
+    "detail": "Authenticating with OAuth 2.0 User Context is forbidden for this endpoint.  Supported authentication types are [OAuth 2.0 Application-Only]."
+  }
+}

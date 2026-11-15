@@ -142,9 +142,13 @@ test('graphTools exposes the six graph tools with the catalog axes (MCP-4/COST-3
   assert.deepEqual([...xMuteSet.scopes], ['tweet.read', 'users.read', 'mute.write']);
   assert.deepEqual([...xBlockSet.scopes], ['tweet.read', 'users.read', 'block.write']);
 
-  // The reads: compact-page list tools, readable in app or user mode.
-  for (const tool of [xFollowersList, xFollowingList, xUserSearch]) {
+  // The reads: compact-page list tools. The two list reads work in app or user mode;
+  // profile search accepts only a user-context token (OpenAPI 2.174; docs/reviews/12 F-1).
+  for (const tool of [xFollowersList, xFollowingList]) {
     assert.equal(tool.availability, 'app+user');
+  }
+  assert.equal(xUserSearch.availability, 'user-only');
+  for (const tool of [xFollowersList, xFollowingList, xUserSearch]) {
     assert.equal(tool.annotations.readOnlyHint, true);
   }
   assert.equal(xFollowersList.policy, 'read:social-graph');

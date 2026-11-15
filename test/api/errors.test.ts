@@ -60,6 +60,7 @@ const ERROR_FIXTURES = [
   '403-duplicate-content.json',
   '403-suspended-target.json',
   '403-insufficient-scope.json',
+  '403-unsupported-authentication.json',
   '403-billing-access-level.json',
   '402-payment-required.json',
   '429-rate-limit.json',
@@ -120,6 +121,57 @@ test('403 insufficient scope maps to scope (distinct from forbidden/billing) —
   const err = map('403-insufficient-scope.json');
   assert.equal(err.kind, 'scope');
   assert.equal(err.fix, 'operator');
+});
+
+test('AUTH-17: an unsupported-authentication 403 maps to auth with credential-type remediation', () => {
+  const err = map('403-unsupported-authentication.json');
+  assert.equal(err.kind, 'auth');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.equal(err.data.http_status, 403);
+  assert.equal(err.data.platform_title, 'Unsupported Authentication');
+  assert.match(String(err.data.platform_detail), /Supported authentication types/);
+  // Our own remediation names both modes; it is not the re-authorize advice of AUTH-8.
+  assert.match(err.message, /credential TYPE/);
+  assert.match(err.message, /X_MCP_AUTH_MODE=app-only/);
+  assert.match(err.message, /X_MCP_BEARER_TOKEN/);
+  assert.doesNotMatch(err.message, /npx x-mcp-ai authorize/);
+});
+
+test('AUTH-17: the credential-type signal wins over scope, billing and the generic refusal, on 401 and 403', () => {
+  const type = 'https://api.twitter.com/2/problems/unsupported-authentication';
+  const bodies = [
+    // By type alone — no title/detail at all.
+    { type },
+    // By detail alone, in both directions (app-only on a user-context endpoint).
+    {
+      title: 'Forbidden',
+      detail:
+        'Authenticating with OAuth 2.0 Application-Only is forbidden for this endpoint.  ' +
+        'Supported authentication types are [OAuth 1.0a User Context, OAuth 2.0 User Context].',
+    },
+    // A detail that also mentions scopes and access level must still read as credential type.
+    { title: 'Unsupported Authentication', detail: 'Check your scopes and access level.' },
+  ];
+  for (const body of bodies) {
+    for (const status of [401, 403]) {
+      assert.equal(
+        mapHttpError(status, {}, body).kind,
+        'auth',
+        `${status} ${JSON.stringify(body)}`,
+      );
+    }
+  }
+  // A typed DM refusal is still checked first — the credential-type match never steals it.
+  const dm = mapHttpError(
+    403,
+    {},
+    {
+      type: 'https://api.x.com/2/problems/dm-recipient-not-found',
+      detail: 'Supported authentication types are irrelevant here.',
+    },
+  );
+  assert.equal(dm.kind, 'not-found');
 });
 
 test('a scope signal without a dotted scope name still maps to scope; the name is simply omitted — DX-F13', () => {

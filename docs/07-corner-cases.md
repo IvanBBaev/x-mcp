@@ -169,6 +169,17 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
   code is consumed exactly once. The default browser flow detects launch failure and
   falls back to manual instructions instead of hanging.
 
+- **AUTH-17 — Credential type the endpoint does not accept** `P2` `[new, reviews/12 F-1]`
+  A few v2 endpoints take only one credential type (OpenAPI 2.174 `security`, fact-checked
+  2026-11-15): `GET /2/tweets/counts/all` and `GET /2/usage/tweets` accept **only** an
+  app-only bearer; `GET /2/users/search` and `GET /2/users/me` accept **only** user context.
+  The server runs one credential per process, so a mismatch is a guaranteed failure. X's
+  `unsupported-authentication` problem ("Supported authentication types are […]") on a 401
+  or 403 maps to the `auth` class (fix: operator, not retryable) with remediation naming
+  the mode the endpoint needs (`X_MCP_AUTH_MODE=app-only` + `X_MCP_BEARER_TOKEN`, or the
+  default `oauth2`) — never the AUTH-8 "re-authorize" advice, never `scope`, `billing` or
+  the generic `forbidden` refusal. A typed DM refusal (DM-4) is still checked first.
+
 ## 3. OA1 — OAuth 1.0a signing *(dropped — decision NO-GO)*
 
 > **Resolved 2026-07-31 (T-307):** OAuth 1.0a is **dropped** — see

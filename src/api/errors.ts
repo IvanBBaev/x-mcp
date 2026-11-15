@@ -1,5 +1,5 @@
 // HTTP → XError mapper (docs/02 §5.5 taxonomy, §6 pipeline; docs/07 DX-F13/REND-2/REND-7,
-// DRIFT-2, RATE-2/4/7, COST-6/7 (a usage-capped 429 is billing), AUTH-8, PAGE-2). Owned by T-116. This module is the single
+// DRIFT-2, RATE-2/4/7, COST-6/7 (a usage-capped 429 is billing), AUTH-8, AUTH-17, PAGE-2). Owned by T-116. This module is the single
 // place that turns an X API v2 error response into a typed `XError`, and a 200-with-`errors[]`
 // batch response into the partial-failure `missing[]` contract. It is PURE: it performs no
 // I/O and reads nothing but its arguments (the optional `nowMs` makes the one time-relative
@@ -167,6 +167,27 @@ function looksLikeScope(problem: ParsedProblem): boolean {
 }
 
 /**
+ * The endpoint does not accept this credential TYPE (AUTH-17). Some v2 endpoints take only an
+ * app-only bearer (`GET /2/tweets/counts/all`, `GET /2/usage/tweets`) and some only a user
+ * context (`GET /2/users/search`, `GET /2/users/me`) — OpenAPI 2.174 `security` blocks,
+ * fact-checked 2026-11-15 (docs/reviews/12). X answers a mismatch with an
+ * `unsupported-authentication` problem ("Supported authentication types are [...]"). It is
+ * neither a missing scope nor a refusal of the target, so it gets its own operator remediation.
+ */
+function looksLikeUnsupportedAuth(problem: ParsedProblem): boolean {
+  if (/unsupported-authentication/.test(problem.type ?? '')) return true;
+  return /\b(unsupported authentication|supported authentication types?)\b/.test(haystack(problem));
+}
+
+const UNSUPPORTED_AUTH_MESSAGE =
+  'X refused the credential TYPE for this endpoint, not the request itself (AUTH-17): some ' +
+  'endpoints accept only an app-only bearer token (full-archive counts, usage) and others only ' +
+  'a user-context token (user search, `me`). This server uses one credential per process, so ' +
+  'retrying will not help. Run a process with the credential the endpoint needs ' +
+  '(`X_MCP_AUTH_MODE=app-only` + `X_MCP_BEARER_TOKEN` for app-only endpoints, the default ' +
+  '`oauth2` mode for user-context ones); see `platform_detail` for the types X accepts.';
+
+/**
  * A billing/entitlement rejection — out of prepaid credit, or the account lacks the required
  * product/access level (COST-6/7). The real credit-exhaustion body is not publicly documented
  * (COST-6 is a named Phase-1 live-capture task), so detection is a conservative keyword set;
@@ -273,6 +294,7 @@ export function mapHttpError(
   }
 
   if (status === 401) {
+    if (looksLikeUnsupportedAuth(problem)) return authError(UNSUPPORTED_AUTH_MESSAGE, { data });
     if (looksLikeScope(problem)) return mapScope(problem, data);
     return authError(
       'The X API rejected the request credentials as missing, invalid, or expired, and an ' +
@@ -288,6 +310,7 @@ export function mapHttpError(
     // "access" must not turn a recipient-side refusal into `billing`).
     const dmRefusal = dmRefusalOf(problem);
     if (dmRefusal !== undefined) return mapDmRefusal(dmRefusal, data);
+    if (looksLikeUnsupportedAuth(problem)) return authError(UNSUPPORTED_AUTH_MESSAGE, { data });
     if (looksLikeScope(problem)) return mapScope(problem, data);
     if (looksLikeBilling(problem)) return billingError(BILLING_MESSAGE, { data });
     return forbiddenError(

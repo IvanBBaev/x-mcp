@@ -76,11 +76,14 @@ Every catalogued tool is registered.
 - **Availability** column — replaces the retired Free/Basic/Pro tier column
   (X moved to pay-per-use 2026-02-06; platform review FINDING-1). Values:
   - `app+user` — reachable with an app-only bearer token **and** with user context.
+    Two `app+user` tools are in fact **app-only-bearer only** — `x_post_counts_archive`
+    and `x_usage_get` (OpenAPI 2.174, fact-checked 2026-11-15, [reviews/12](reviews/12-platform-fact-check-2026-11-15.md)
+    F-1); there is no app-only class yet (owner decision), so their rows say so.
   - `user-only` — requires user-context OAuth (writes, DMs, home timeline, and own
     private reads such as bookmarks/blocks/mutes).
   - `pilot` — behind an enrollment/pilot program (e.g. Community Notes *AI Note
     Writer*); registered only when `X_MCP_AVAILABILITY` lists it (WP-0.10). **No v1
-    tool uses this class** — archive & profile search are `app+user`, not `pilot`
+    tool uses this class** — archive search is `app+user` and profile search `user-only`, not `pilot`
     (see docs/01 §3.2).
   - `premium-user` — requires the authenticated user to hold X Premium (reserved; no
     current tool — personalized trends would land here).
@@ -131,7 +134,7 @@ Every catalogued tool is registered.
 |---|---|---|---|---|---|
 | `x_auth_status` | read:account | app+user | local | P1 | X (Twitter): active profile, auth mode, authenticated user (`me`), granted scopes, detected availability, resolved policy matrix. Degraded shape under app-only auth (corner case AUTH-15). Priced `r:user` only when a user-mode session must fetch its handle via `GET /2/users/me` (once per process; the handle is then cached); every other path is `local` |
 | `x_rate_limit_status` | read:account | app+user | local | P1 | X (Twitter): known per-endpoint rate-limit table (limit / remaining / reset) |
-| `x_usage_get` | read:account | app+user | owned | P3 | X (Twitter): this cycle's post-read consumption vs the monthly project cap, with optional per-day / per-app breakdown (`GET /2/usage/tweets`, `days` 1–90) + local session-spend budget state. **GO 2026-07-31 (WP-3.11):** ships unconditionally — reachable under pay-per-use with an app bearer token, no tier gate (docs/01 §3.5). Reports post-read **counts, never dollars** (X publishes no spend API), so it does not seed the session credit estimate (COST-2) |
+| `x_usage_get` | read:account | app+user | owned | P3 | X (Twitter): this cycle's post-read consumption vs the monthly project cap, with optional per-day / per-app breakdown (`GET /2/usage/tweets`, `days` 1–90) + local session-spend budget state. **GO 2026-07-31 (WP-3.11):** ships unconditionally — reachable under pay-per-use with an app bearer token, no tier gate (docs/01 §3.5). **App-only bearer only** (`X_MCP_AUTH_MODE=app-only`); under the default `oauth2` mode X refuses it (AUTH-17 `auth` error; [reviews/12](reviews/12-platform-fact-check-2026-11-15.md) F-1). Reports post-read **counts, never dollars** (X publishes no spend API), so it does not seed the session credit estimate (COST-2) |
 
 ## posts — create, read, delete
 
@@ -150,7 +153,7 @@ Every catalogued tool is registered.
 | `x_search_recent` | read:content | app+user | r:post | P1 | X (Twitter): last-7-days search, full v2 query syntax (`from:`, `to:`, `conversation_id:`, operators). Input `query`, optional `sort_order`, time bounds. `max_results` 10–100 |
 | `x_search_archive` | read:content | app+user | r:post | P3 | X (Twitter): full-archive search since 2006. `max_results` 10–500. High-volume read — guard with the credit budget (renamed from `search_all`) |
 | `x_post_counts_recent` | read:content | app+user | r:post | P1 | X (Twitter): volume histogram for a query, last 7 days, granularity minute/hour/day |
-| `x_post_counts_archive` | read:content | app+user | r:post | P3 | X (Twitter): full-archive volume histogram (renamed from `post_counts_all`) |
+| `x_post_counts_archive` | read:content | app+user | r:post | P3 | X (Twitter): full-archive volume histogram (renamed from `post_counts_all`). **App-only bearer only** — `GET /2/tweets/counts/all` takes no user token, so it needs `X_MCP_AUTH_MODE=app-only`; under the default `oauth2` mode X refuses it (AUTH-17 `auth` error). Classed `app+user` for want of an app-only class ([reviews/12](reviews/12-platform-fact-check-2026-11-15.md) F-1, owner decision OD-1) |
 
 ## timelines
 
@@ -174,7 +177,7 @@ Every catalogued tool is registered.
 | Tool | Class | Availability | Cost | Phase | What it does |
 |---|---|---|---|---|---|
 | `x_user_get` | read:user | app+user | r:user | P1 | X (Twitter): batch user lookup — `users: string[]` (1–100), each an id, a handle, or a `@handle`; `"me"` resolves the authenticated user. Compact profile (handle, name, bio, metrics, created). Merged from `user_get`/`user_by_username`/`users_get` |
-| `x_user_search` | read:user | app+user | r:user | P3 | X (Twitter): keyword search over profiles. `max_results` 1–1000 |
+| `x_user_search` | read:user | user-only | r:user | P3 | X (Twitter): keyword search over profiles. `max_results` 1–1000. User context only — `GET /2/users/search` takes no app bearer (fact-check 2026-11-15, [reviews/12](reviews/12-platform-fact-check-2026-11-15.md) F-1) |
 
 ## graph — follows, blocks, mutes
 

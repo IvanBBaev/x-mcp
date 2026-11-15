@@ -16,7 +16,9 @@ re-audit of the implementation" entry for the running status of that series.
 
 Platform fact-checks against the live X documentation, outside both series:
 [11-platform-fact-check-2026-10-01.md](11-platform-fact-check-2026-10-01.md), the
-release-week pre-run of the 1.0 checklist's final platform fact-check.
+release-week pre-run of the 1.0 checklist's final platform fact-check, and
+[12-platform-fact-check-2026-11-15.md](12-platform-fact-check-2026-11-15.md), its
+pre-H5 refresh (credential types per endpoint, AUTH-17; owner decisions OD-1–OD-7).
 
 ## Verdicts
 

@@ -77,6 +77,13 @@ development chronology lives in `WORKLOG.md`.
   content, safety and recipient-side refusals are `forbidden` with specific guidance. The
   refusal slug (for example `dm-recipient-not-accepting`) is exposed as `data.refusal`.
   An unexplained refusal (`about:blank`) is reported as before.
+- A call that uses a credential type the endpoint does not accept is now reported as an
+  `auth` error (`fix: operator`, not retryable) that names the mode to run, instead of the
+  generic `forbidden` "the target is suspended, protected or blocked" refusal. Per X's
+  OpenAPI 2.174, `x_post_counts_archive` and `x_usage_get` accept only an app-only bearer
+  (`X_MCP_AUTH_MODE=app-only`), and `x_user_search` accepts only a user-context token. The
+  docs now say so, and `x_user_search` is classed `user-only` instead of `app+user`.
+  Registration and `tools/list` bytes are unchanged.
 - A `@handle` is now looked up once per server process instead of on every call.
   The timeline, follower/following, follow/mute/block, list and DM tools share one
   handle-to-id cache, so a second call with the same handle (in any letter case) makes
@@ -289,6 +296,17 @@ development chronology lives in `WORKLOG.md`.
   `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
 
 ### Platform changes absorbed
+
+- (2026-11-15) Platform fact-check pre-run
+  ([docs/reviews/12](docs/reviews/12-platform-fact-check-2026-11-15.md)). X's typed DM
+  refusals (2026-10-26) are mapped (see Changed). Three endpoints accept only one
+  credential type: full-archive counts and usage take only an app-only bearer, and user
+  search takes only a user-context token (see Changed). New credit incentives (2026-10-02:
+  $20 after the first card and purchase, the first auto-recharge matched up to $50) change
+  what an operator pays, not any per-call rate. The per-user Livestream routes deprecated on
+  2026-11-05 are not used by any tool. All pay-per-use rates, the 3,000,000 monthly post-read
+  cap, the media limits and every endpoint the tools call (OpenAPI 2.174) are unchanged
+  since 2026-10-01.
 
 - (2026-10-01) Release-week platform fact-check pre-run
   ([docs/reviews/11](docs/reviews/11-platform-fact-check-2026-10-01.md)). X restored

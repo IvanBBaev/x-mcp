@@ -12,6 +12,10 @@
 // `app+user` under pay-per-use — no longer a Pro/Academic gate. These endpoints therefore
 // register by default and are restrained by the session credit budget (COST-1), never by
 // availability gating (src/tools/availability.ts gates only pilot/premium-user/enterprise).
+// Credential type (fact-check 2026-11-15, docs/reviews/12 F-1): `GET /2/tweets/counts/all`
+// accepts ONLY an app-only bearer (OpenAPI 2.174 `security`), unlike `search/all`, which
+// takes either. Under the default oauth2 mode X refuses it and api/errors maps the refusal
+// to an AUTH-17 `auth` error naming `X_MCP_AUTH_MODE=app-only`.
 
 import type { EndpointInvoker } from '../../core/tooldef.js';
 import type { RawListResponse, RawTweet } from '../../core/render.js';
