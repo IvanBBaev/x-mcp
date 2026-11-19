@@ -171,6 +171,11 @@ The server never prompts interactively; all configuration comes from environment
 - `app-only` — application-only bearer token (`X_MCP_BEARER_TOKEN`); read endpoints only, no
   user context.
 
+The server runs one credential per process. A tool whose endpoint does not accept that
+credential is refused locally with a typed `auth` error that names the mode to run, before
+anything is sent or charged: every "User" tool under `app-only`, and `x_post_counts_archive`
+and `x_usage_get` (app-only bearer only) under `oauth2`.
+
 ```bash
 X_MCP_AUTH_MODE=oauth2 X_MCP_CLIENT_ID=… node build/src/index.js authorize
 ```

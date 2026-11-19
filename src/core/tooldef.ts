@@ -264,6 +264,15 @@ export interface ToolDef<I = unknown> {
   readonly phase: 1 | 2 | 3;
   /** True for a tool registered only when a precondition holds (e.g. x_usage_get, WP-3.11). */
   readonly conditional?: boolean;
+  /**
+   * Set ONLY on a tool whose endpoint accepts an app-only bearer token and nothing else
+   * (OpenAPI `security`, AUTH-17; reviews/12 F-1, OD-1). Its availability class still says
+   * `app+user`, because registration does not depend on the credential mode. The registry
+   * reads this marker at call time: under user-context OAuth it refuses the call locally,
+   * before any charge. The other direction needs no marker, because the `user-only` class
+   * already states that the endpoint needs a user-context token.
+   */
+  readonly credential?: 'app-only';
 }
 
 /** The registry holds heterogeneous tools; input types are erased at the collection boundary. */
@@ -287,6 +296,7 @@ export function defineTool<S extends z.ZodType>(def: {
   readonly handler: ToolHandler<z.infer<S>>;
   readonly phase: 1 | 2 | 3;
   readonly conditional?: boolean;
+  readonly credential?: 'app-only';
 }): ToolDef<z.infer<S>> {
   // zod v4's `ZodType` carries its internals in a third type parameter, so TypeScript
   // cannot prove the generic `S` is a `ZodType<z.infer<S>>` inside this body; the cast

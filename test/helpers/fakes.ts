@@ -113,6 +113,26 @@ export function inMemoryTokenStore(initial: TokenPair | null = null): InMemoryTo
   };
 }
 
+/**
+ * The minimal user-context (`oauth2`) env for a composed server. Pair it with
+ * {@link userTokenStore} via the `tokens` override. A `user-only` tool needs this mode: under
+ * an app-only bearer the registry refuses it locally (AUTH-17, OD-1).
+ */
+export function userContextEnv(extra: Record<string, string> = {}): Record<string, string> {
+  return { X_MCP_AUTH_MODE: 'oauth2', X_MCP_CLIENT_ID: 'client-1', ...extra };
+}
+
+/** An in-memory store holding a user token pair that is valid for two hours from `now`. */
+export function userTokenStore(now: number = Date.now()): InMemoryTokenStore {
+  return inMemoryTokenStore({
+    access_token: 'user-access',
+    refresh_token: 'user-refresh',
+    obtained_at: now,
+    expires_in: 7200,
+    version: 1,
+  });
+}
+
 /** Overrides for {@link makePorts}. */
 export interface FakePortsOptions {
   readonly clock?: FakeClock;

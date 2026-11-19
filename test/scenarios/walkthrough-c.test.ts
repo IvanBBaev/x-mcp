@@ -29,7 +29,7 @@ import type { Composition } from '../../src/mcp/compose.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
 import type { RawCountsResponse } from '../../src/api/endpoints/search.js';
 
-import { mockHttp, loadFixture } from '../helpers/index.js';
+import { mockHttp, loadFixture, userContextEnv, userTokenStore } from '../helpers/index.js';
 import type { MockHttp } from '../helpers/index.js';
 
 // --- Wire-contract constants (mirrored from test/tools/search.test.ts) -------------
@@ -52,12 +52,12 @@ const WINNER_ID = '1800000000000000001';
 
 // --- Harness (mirrors test/mcp/server.test.ts) ------------------------------------
 
-function appOnlyEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'AAAA', ...extra };
-}
-
+/** User context: the walkthrough ends in a quote post, a `user-only` write (AUTH-17). */
 function composeFor(mock: MockHttp, extraEnv: Record<string, string> = {}): Composition {
-  return composeServer(parseConfig(appOnlyEnv(extraEnv)), { dispatcher: mock.dispatcher });
+  return composeServer(parseConfig(userContextEnv(extraEnv)), {
+    dispatcher: mock.dispatcher,
+    tokens: userTokenStore(),
+  });
 }
 
 async function connect(composition: Composition): Promise<Client> {

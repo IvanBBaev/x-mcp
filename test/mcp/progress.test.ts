@@ -21,7 +21,7 @@ import { composeServer } from '../../src/mcp/compose.js';
 import { createProgressBridge, mediaProgressListener } from '../../src/mcp/progress.js';
 import type { ProgressUpdate } from '../../src/mcp/progress.js';
 
-import { mockHttp } from '../helpers/index.js';
+import { mockHttp, userContextEnv, userTokenStore } from '../helpers/index.js';
 import type { MockHttp } from '../helpers/index.js';
 
 // --- Bridge unit tests ----------------------------------------------------------------
@@ -133,13 +133,14 @@ function interceptUpload(mock: MockHttp, mediaId: string): void {
 async function connectRecording(
   mock: MockHttp,
 ): Promise<{ client: Client; sent: JSONRPCMessage[] }> {
-  const config = parseConfig({
-    X_MCP_AUTH_MODE: 'app-only',
-    X_MCP_BEARER_TOKEN: 'AAAA',
-    X_MCP_POLICY: 'publish',
-    X_MCP_MEDIA_DIR: mediaRoot,
+  // Media upload is `user-only`: an app-only bearer would be refused locally (AUTH-17).
+  const config = parseConfig(
+    userContextEnv({ X_MCP_POLICY: 'publish', X_MCP_MEDIA_DIR: mediaRoot }),
+  );
+  const composition = composeServer(config, {
+    dispatcher: mock.dispatcher,
+    tokens: userTokenStore(),
   });
-  const composition = composeServer(config, { dispatcher: mock.dispatcher });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const sent: JSONRPCMessage[] = [];
   const send = serverTransport.send.bind(serverTransport);

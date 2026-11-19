@@ -197,6 +197,10 @@ export const xPostCountsArchive = defineTool({
     'gauge volume before a full-archive search.',
   policy: 'read:content',
   availability: 'app+user',
+  // `GET /2/tweets/counts/all` accepts ONLY an app-only bearer (OpenAPI 2.174 `security`,
+  // reviews/12 F-1). Under `oauth2` the registry refuses the call locally, before the
+  // charge (AUTH-17, OD-1).
+  credential: 'app-only',
   scopes: ['tweet.read'],
   // "Counts: All" — distinct from `x_post_counts_recent`'s "Counts: Recent" $0.005 (docs/01
   // App. B, verified 2026-09-28). No `units` multiplier: a counts call is billed once per

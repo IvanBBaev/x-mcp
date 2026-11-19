@@ -179,6 +179,12 @@ Phase tags (`P1`–`P3`) mark when the behavior must exist, matching
   the mode the endpoint needs (`X_MCP_AUTH_MODE=app-only` + `X_MCP_BEARER_TOKEN`, or the
   default `oauth2`) — never the AUTH-8 "re-authorize" advice, never `scope`, `billing` or
   the generic `forbidden` refusal. A typed DM refusal (DM-4) is still checked first.
+  Since 2026-11-19 (OD-1) the known mismatches never reach X: the registry refuses them
+  after the policy check and before the rate-limit preflight and the budget charge, with
+  the same `auth` class and remediation — a `user-only` tool under an app-only bearer, and
+  a tool marked `credential: 'app-only'` (counts/all, usage) under `oauth2`. The tools stay
+  registered (0 B `tools/list`). Tests assert zero requests and zero charge; X's own
+  refusal mapping stays the fallback for an endpoint the registry does not know about.
 
 ## 3. OA1 — OAuth 1.0a signing *(dropped — decision NO-GO)*
 

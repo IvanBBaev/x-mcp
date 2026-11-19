@@ -60,6 +60,12 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- A call whose endpoint cannot accept the process credential is now refused locally, before
+  anything is sent or charged: `x_post_counts_archive` and `x_usage_get` (app-only bearer
+  only) under `oauth2`, and every `user-only` tool under `app-only`. The refusal is the same
+  typed `auth` error as X's own `unsupported-authentication` answer (AUTH-17) and names the
+  mode to run. Previously the request went out, X refused it, and the session estimate kept
+  the charge. The tools stay registered; `tools/list` bytes are unchanged (OD-1).
 - The parameter descriptions that recur across tools (`page_token`, `raw`, `max_results`,
   `start_time`/`end_time`, `list_id`) now come from one shared, shorter wording. Parameters,
   constraints, and behaviour are unchanged. The `tools/list` payload drops from 78,434 B to

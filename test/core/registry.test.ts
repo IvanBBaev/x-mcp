@@ -29,6 +29,7 @@ import {
 } from '../../src/core/errors.js';
 import type {
   AnyToolDef,
+  AvailabilityClass,
   CostEstimate,
   CostSpec,
   EndpointInvoker,
@@ -50,13 +51,16 @@ function makeTool(props: {
   input?: z.ZodType<unknown>;
   handler?: ToolHandler<unknown>;
   annotations?: ToolAnnotations;
+  availability?: AvailabilityClass;
+  credential?: 'app-only';
 }): AnyToolDef {
   return {
     name: props.name,
     title: props.name,
     description: props.description ?? `desc ${props.name}`,
     policy: props.policy,
-    availability: 'app+user',
+    availability: props.availability ?? 'app+user',
+    ...(props.credential !== undefined ? { credential: props.credential } : {}),
     scopes: [],
     cost: props.cost ?? 'local',
     annotations: props.annotations ?? { title: props.name },
@@ -118,6 +122,7 @@ function deps(over: Partial<RegistryDeps> = {}): RegistryDeps {
     policy: over.policy ?? fakePolicy(),
     budget: over.budget ?? fakeBudget(),
     rateLimit: over.rateLimit ?? fakeRateLimit(),
+    ...(over.credentialMode !== undefined ? { credentialMode: over.credentialMode } : {}),
   };
 }
 
@@ -883,4 +888,129 @@ test('RATE-2/COST-3: a gate without `release` still surfaces a local handler ref
   const reg = createRegistry([tool], deps());
   const err = await rejected(reg.call('x_post_get', {}, callCtx()));
   assert.equal(err.kind, 'validation');
+});
+
+// --- AUTH-17 / OD-1: the credential-mode check (step 2b) -----------------------------
+
+/** Gates that record every step they see, and an invoker that records every send. */
+function recordingGates(seen: string[]): Pick<RegistryDeps, 'budget' | 'rateLimit'> {
+  return {
+    budget: {
+      check: () => {
+        seen.push('check');
+      },
+      reserve: () => {
+        seen.push('reserve');
+        return { cost_usd: 0.005, session_total_usd: 0.005 };
+      },
+      release: () => {
+        seen.push('release');
+      },
+    },
+    rateLimit: {
+      preflight: () => {
+        seen.push('preflight');
+      },
+    },
+  };
+}
+
+function credentialTools(handlerRuns: string[]): AnyToolDef[] {
+  const handler: ToolHandler<unknown> = async (_input, ctx) => {
+    handlerRuns.push('handler');
+    await ctx.http.send({ method: 'GET', path: '/2/x' });
+    return { data: {} };
+  };
+  return [
+    makeTool({
+      name: 'x_usage_get',
+      policy: 'read:account',
+      credential: 'app-only',
+      handler,
+    }),
+    makeTool({
+      name: 'x_user_search',
+      policy: 'read:user',
+      availability: 'user-only',
+      handler,
+    }),
+    makeTool({ name: 'x_post_get', policy: 'read:content', handler }),
+  ];
+}
+
+test('AUTH-17/OD-1: an app-only-only tool under user context is refused before any gate or request', async () => {
+  const seen: string[] = [];
+  const sent: XApiRequest[] = [];
+  const reg = createRegistry(
+    credentialTools(seen),
+    deps({ ...recordingGates(seen), credentialMode: 'user' }),
+  );
+
+  const err = await rejected(reg.call('x_usage_get', {}, callCtx({ http: recordingHttp(sent) })));
+  assert.equal(err.kind, 'auth');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.match(err.message, /AUTH-17/);
+  assert.match(err.message, /X_MCP_AUTH_MODE=app-only/);
+  assert.match(err.message, /X_MCP_BEARER_TOKEN/);
+  assert.match(err.message, /nothing was sent or charged/);
+  assert.deepEqual(seen, [], 'no preflight, no charge, no reserve/release, no handler');
+  assert.equal(sent.length, 0, 'no HTTP request');
+});
+
+test('AUTH-17/OD-1: a user-only tool under an app-only bearer is refused before any gate or request', async () => {
+  const seen: string[] = [];
+  const sent: XApiRequest[] = [];
+  const reg = createRegistry(
+    credentialTools(seen),
+    deps({ ...recordingGates(seen), credentialMode: 'app-only' }),
+  );
+
+  const err = await rejected(reg.call('x_user_search', {}, callCtx({ http: recordingHttp(sent) })));
+  assert.equal(err.kind, 'auth');
+  assert.equal(err.fix, 'operator');
+  assert.equal(err.retryable, false);
+  assert.match(err.message, /X_MCP_AUTH_MODE=oauth2/);
+  assert.match(err.message, /authorize/);
+  assert.deepEqual(seen, []);
+  assert.equal(sent.length, 0);
+});
+
+test('AUTH-17/OD-1: a matching credential, or an app+user tool, passes straight through the full gauntlet', async () => {
+  for (const [mode, name] of [
+    ['app-only', 'x_usage_get'],
+    ['user', 'x_user_search'],
+    ['app-only', 'x_post_get'],
+    ['user', 'x_post_get'],
+  ] as const) {
+    const seen: string[] = [];
+    const sent: XApiRequest[] = [];
+    const reg = createRegistry(
+      credentialTools(seen),
+      deps({ ...recordingGates(seen), credentialMode: mode }),
+    );
+    await reg.call(name, {}, callCtx({ http: recordingHttp(sent) }));
+    assert.deepEqual(seen, ['preflight', 'check', 'handler', 'reserve'], `${mode} ${name}`);
+    assert.equal(sent.length, 1);
+  }
+});
+
+test('AUTH-17/OD-1: policy still decides first, and no credential mode means no local check', async () => {
+  // A tool the policy denies reports `policy`, not `auth`: the operator unlocks the cell
+  // first, and only then learns the process runs the wrong credential.
+  const denied = createRegistry(
+    credentialTools([]),
+    deps({ policy: fakePolicy({ isAllowed: () => false }), credentialMode: 'user' }),
+  );
+  const err = await rejected(denied.call('x_usage_get', {}, callCtx()));
+  assert.equal(err.kind, 'policy');
+
+  // Without a credential mode the registry does not guess: the call reaches X, and X's own
+  // `unsupported-authentication` refusal (mapped in api/errors) stays the fallback.
+  const seen: string[] = [];
+  const sent: XApiRequest[] = [];
+  const unset = createRegistry(credentialTools(seen), deps(recordingGates(seen)));
+  await unset.call('x_user_search', {}, callCtx({ http: recordingHttp(sent) }));
+  await unset.call('x_usage_get', {}, callCtx({ http: recordingHttp(sent) }));
+  assert.equal(sent.length, 2);
 });

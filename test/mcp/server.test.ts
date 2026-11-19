@@ -24,7 +24,15 @@ import type { Dispatcher, Ports } from '../../src/core/ports.js';
 import type { Registry } from '../../src/core/registry.js';
 import type { RateLimitStatus } from '../../src/api/ratelimit.js';
 
-import { fakeClock, fakeRandom, fakeSleep, mockHttp, loadFixture } from '../helpers/index.js';
+import {
+  fakeClock,
+  fakeRandom,
+  fakeSleep,
+  mockHttp,
+  loadFixture,
+  userContextEnv,
+  userTokenStore,
+} from '../helpers/index.js';
 import type { FakeClock, FakeSleep, MockHttp } from '../helpers/index.js';
 
 // The exact field/expansion query x_post_get sends (pinned in test/tools/posts.test.ts):
@@ -50,6 +58,14 @@ function appOnlyEnv(extra: Record<string, string> = {}): Record<string, string> 
 /** Compose the production object graph over the mock dispatcher. */
 function composeFor(mock: MockHttp, extraEnv: Record<string, string> = {}): Composition {
   return composeServer(parseConfig(appOnlyEnv(extraEnv)), { dispatcher: mock.dispatcher });
+}
+
+/** The same, signed with a user-context token: `user-only` tools refuse app-only (AUTH-17). */
+function composeForUser(mock: MockHttp, extraEnv: Record<string, string> = {}): Composition {
+  return composeServer(parseConfig(userContextEnv(extraEnv)), {
+    dispatcher: mock.dispatcher,
+    tokens: userTokenStore(),
+  });
 }
 
 /** Connect an SDK client to the composed server over an in-memory pair (MCP-2). */
@@ -376,7 +392,7 @@ test('DM-4/RATE-6: the ~1,440/24-h send cap is tracked as an app-24h window that
     });
 
   // write:dm is reachable only via an explicit ALLOW override (POL-3/POL-4) — never a preset.
-  const composition = composeFor(mock, { X_MCP_POLICY_ALLOW: 'write:dm' });
+  const composition = composeForUser(mock, { X_MCP_POLICY_ALLOW: 'write:dm' });
   const client = await connect(composition);
 
   // Call 1: reaches the API and succeeds, but the response headers report the 24-h app cap
@@ -397,7 +413,7 @@ test('DM-4/RATE-6: the ~1,440/24-h send cap is tracked as an app-24h window that
   const table = textPayload<Rendered>(status).data as RateLimitStatus;
   assert.deepEqual(
     table.buckets.map((b) => b.key),
-    ['dm-send#app'],
+    ['dm-send#user'],
   );
 
   mock.assertDone();
@@ -600,7 +616,11 @@ interface TimedComposition {
  * random stream (0.5) makes the retry jitter exactly 250 + 0.5 × 500 = 500 ms whichever
  * consumer draws first. The dispatcher is wrapped to count every request sent.
  */
-function composeTimed(mock: MockHttp, extraEnv: Record<string, string> = {}): TimedComposition {
+function composeTimed(
+  mock: MockHttp,
+  extraEnv: Record<string, string> = {},
+  userContext = false,
+): TimedComposition {
   const clock = fakeClock(RATE5_NOW_MS);
   const sleep = fakeSleep(clock);
   let sent = 0;
@@ -614,11 +634,13 @@ function composeTimed(mock: MockHttp, extraEnv: Record<string, string> = {}): Ti
       };
     },
   }) as unknown as Dispatcher;
-  const composition = composeServer(parseConfig(appOnlyEnv(extraEnv)), {
+  const env = userContext ? userContextEnv(extraEnv) : appOnlyEnv(extraEnv);
+  const composition = composeServer(parseConfig(env), {
     dispatcher: counting,
     clock,
     sleep: sleep.fn,
     random: fakeRandom([0.5]),
+    ...(userContext ? { tokens: userTokenStore(RATE5_NOW_MS) } : {}),
   });
   return { composition, clock, sleep, requests: () => sent };
 }
@@ -713,7 +735,11 @@ test('RATE-5/RATE-7: a later retry-after pushes a near reset past 5 s, so the GE
 
 test('RATE-5: a write 429 never auto-retries, even with the reset 1 s away', async () => {
   const mock = mockHttp();
-  const { composition, clock, sleep, requests } = composeTimed(mock, { X_MCP_POLICY: 'publish' });
+  const { composition, clock, sleep, requests } = composeTimed(
+    mock,
+    { X_MCP_POLICY: 'publish' },
+    true, // a post write is `user-only` (AUTH-17)
+  );
   mock.pool
     .intercept({ path: '/2/tweets', method: 'POST' })
     .reply(429, RATE_LIMIT_BODY, { headers: exhaustedHeaders(clock, 1) });
@@ -875,4 +901,80 @@ test('MCP-2: a non-XError escapes as a JSON-RPC internal error, and a schema-les
   await assert.rejects(client.callTool({ name: 'x_probe_stub' }), /wiring bug/);
 
   await client.close();
+});
+
+// --- AUTH-17 / OD-1: credential-mode mismatches refused locally, before the charge ----
+
+test('AUTH-17/OD-1: under oauth2 the app-only-only tools stay listed but refuse locally — no request, no charge', async () => {
+  // No interceptor is queued and the MockAgent refuses net-connect: any request would fail
+  // the call with a transport error instead of the typed `auth` refusal asserted here.
+  const mock = mockHttp();
+  const composition = composeForUser(mock);
+  const client = await connect(composition);
+
+  const { tools } = await client.listTools();
+  const names = tools.map((t) => t.name);
+  assert.ok(names.includes('x_usage_get'), 'still registered (0 B tools/list delta)');
+  assert.ok(names.includes('x_post_counts_archive'));
+
+  for (const [name, args] of [
+    ['x_usage_get', {}],
+    ['x_post_counts_archive', { query: 'from:xdevelopers' }],
+  ] as const) {
+    const result = await call(client, name, args);
+    assert.equal(result.isError, true, name);
+    const err = textPayload<RenderedError>(result).error;
+    assert.equal(err.kind, 'auth', name);
+    assert.equal(err.retryable, false);
+    assert.match(err.message, /X_MCP_AUTH_MODE=app-only/);
+  }
+  assert.equal(composition.budget.total(), 0, 'nothing charged');
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('AUTH-17/OD-1: under an app-only bearer a user-only tool stays listed but refuses locally — no request, no charge', async () => {
+  const mock = mockHttp();
+  const composition = composeFor(mock);
+  const client = await connect(composition);
+
+  const { tools } = await client.listTools();
+  assert.ok(tools.some((t) => t.name === 'x_user_search'));
+
+  const result = await call(client, 'x_user_search', { query: 'devs' });
+  assert.equal(result.isError, true);
+  const err = textPayload<RenderedError>(result).error;
+  assert.equal(err.kind, 'auth');
+  assert.match(err.message, /X_MCP_AUTH_MODE=oauth2/);
+  assert.equal(composition.budget.total(), 0);
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('AUTH-17: X-side `unsupported-authentication` still maps to the typed auth refusal as the fallback', async () => {
+  // An endpoint the registry has no local knowledge of (an unmarked `app+user` tool) can
+  // still answer with the platform refusal: the http layer's mapping stays the backstop.
+  const fixture = loadFixture<{ status: number; body: object }>(
+    'errors/403-unsupported-authentication.json',
+  );
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: (p: string) => p.startsWith('/2/tweets?'), method: 'GET' })
+    .reply(fixture.status, fixture.body);
+  const composition = composeFor(mock);
+  const client = await connect(composition);
+
+  const result = await call(client, 'x_post_get', { ids: ['1'] });
+  assert.equal(result.isError, true);
+  const err = textPayload<RenderedError>(result).error;
+  assert.equal(err.kind, 'auth');
+  assert.equal(err.retryable, false);
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
 });

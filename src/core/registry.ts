@@ -10,9 +10,9 @@
 //      policy class (MCP-4) and whose denied entries stay visible + annotated (POL-7).
 //
 //   2. The pipeline wrapper. Every `tools/call` runs the exact ordered gauntlet
-//      (docs/02 §6): zod-validate input -> policy check -> budget check -> rate-limit
-//      preflight -> invoke handler -> reserve credit -> attach ResultMeta. Nothing reaches
-//      a handler except through this function.
+//      (docs/02 §6): zod-validate input -> policy check -> credential-mode check (AUTH-17)
+//      -> rate-limit preflight -> budget check -> invoke handler -> reserve credit ->
+//      attach ResultMeta. Nothing reaches a handler except through this function.
 //
 // CANCELLATION (MCP-7, T-311): because the pipeline is the only path to a handler, it is also
 // the only place cancellation has to be wired. `buildToolContext` BINDS the call's
@@ -41,7 +41,7 @@ import type {
   ToolOutput,
   XApiRequest,
 } from './tooldef.js';
-import { apiError, networkError, validationError, XError } from './errors.js';
+import { apiError, authError, networkError, validationError, XError } from './errors.js';
 
 // --- Injected collaborators (built by sibling tasks; wired by the integrator) --------
 
@@ -110,11 +110,26 @@ export interface RateLimitGate {
   preflight(tool: AnyToolDef): void;
 }
 
-/** The three process-scoped gates the pipeline enforces through. */
+/**
+ * The credential type this process signs with: `app-only` for a bearer-only process, `user`
+ * for user-context OAuth (`oauth2`). The server runs ONE credential per process.
+ */
+export type CredentialMode = 'app-only' | 'user';
+
+/** The three process-scoped gates the pipeline enforces through, plus the credential mode. */
 export interface RegistryDeps {
   readonly policy: PolicyGate;
   readonly budget: BudgetGate;
   readonly rateLimit: RateLimitGate;
+  /**
+   * The process credential mode (AUTH-17, OD-1). When it is set, a tool whose endpoint cannot
+   * accept this credential is refused at step 2b. That covers a `user-only` tool under an
+   * app-only bearer, and a `credential: 'app-only'` tool under user-context OAuth. The refusal
+   * happens before the rate-limit preflight and the budget charge, so nothing is sent or
+   * charged. When it is unset, no local check runs, and X's own `unsupported-authentication`
+   * refusal (mapped by api/errors) is the only signal.
+   */
+  readonly credentialMode?: CredentialMode;
 }
 
 // --- Per-call and projection shapes --------------------------------------------------
@@ -267,6 +282,17 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
       throw deps.policy.denyError(tool);
     }
 
+    // (2b) credential mode (AUTH-17, OD-1). One credential per process, so a tool whose
+    //      endpoint rejects that credential type is a guaranteed failure. It is refused here,
+    //      before steps 3-4: no request, no rate-limit slot, no budget reservation ("charge
+    //      before refuse is a bug"). Policy runs first, so a denied tool still reports `policy`.
+    if (deps.credentialMode !== undefined) {
+      const needed = requiredCredential(tool);
+      if (needed !== undefined && needed !== deps.credentialMode) {
+        throw credentialModeError(tool, needed);
+      }
+    }
+
     // (3) rate-limit preflight — a known-exhausted window -> typed `rate-limit` error. It runs
     //     BEFORE the budget because a call refused here never reaches X (RATE-2), so it must
     //     not be charged; the shipped budget gate charges at `check` (INT-2).
@@ -323,6 +349,38 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     listForMcp,
     call,
   };
+}
+
+// --- Credential mode (AUTH-17, OD-1) -------------------------------------------------
+
+/**
+ * The only credential type a tool's endpoint accepts, or `undefined` when it accepts either.
+ * A `user-only` tool needs user context. A tool marked `credential: 'app-only'` needs the
+ * app-only bearer (full-archive counts, usage; OpenAPI 2.174 `security`, reviews/12 F-1).
+ */
+export function requiredCredential(tool: AnyToolDef): CredentialMode | undefined {
+  if (tool.credential === 'app-only') return 'app-only';
+  if (tool.availability === 'user-only') return 'user';
+  return undefined;
+}
+
+/**
+ * The typed local refusal for a credential mismatch. It is the `auth` class (operator fix,
+ * not retryable), the same class as X's own AUTH-17 mapping, and it names the mode to run.
+ * It also says that nothing was sent or charged.
+ */
+export function credentialModeError(tool: AnyToolDef, needed: CredentialMode): XError {
+  const message =
+    needed === 'app-only'
+      ? `"${tool.name}" accepts only an app-only bearer token, and this process signs with a ` +
+        'user-context token (`X_MCP_AUTH_MODE=oauth2`). Refused locally (AUTH-17): nothing was ' +
+        'sent or charged, and retrying will not help. Run a process with ' +
+        '`X_MCP_AUTH_MODE=app-only` and `X_MCP_BEARER_TOKEN` for this tool.'
+      : `"${tool.name}" needs a user-context token, and this process signs with an app-only ` +
+        'bearer token (`X_MCP_AUTH_MODE=app-only`). Refused locally (AUTH-17): nothing was ' +
+        'sent or charged, and retrying will not help. Run a process in the default ' +
+        '`X_MCP_AUTH_MODE=oauth2` mode (after the `authorize` subcommand) for this tool.';
+  return authError(message);
 }
 
 // --- Internals -----------------------------------------------------------------------

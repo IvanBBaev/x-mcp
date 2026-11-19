@@ -31,7 +31,7 @@ import { parseConfig } from '../../src/core/config.js';
 import { composeServer } from '../../src/mcp/compose.js';
 import type { Composition } from '../../src/mcp/compose.js';
 
-import { mockHttp, loadFixture } from '../helpers/index.js';
+import { mockHttp, loadFixture, userContextEnv, userTokenStore } from '../helpers/index.js';
 import type { MockHttp } from '../helpers/index.js';
 
 /** The media_id a successful x_media_upload would have handed to step 3. */
@@ -47,14 +47,14 @@ const ID3 = '1900000000000000103';
 
 // --- Harness (mirrors test/mcp/server.test.ts) ------------------------------------
 
-function appOnlyEnv(extra: Record<string, string> = {}): Record<string, string> {
-  return { X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'AAAA', ...extra };
-}
-
-/** The walkthrough's precondition: the `publish` preset opens `write:content`. */
+/**
+ * The walkthrough's preconditions: the `publish` preset opens `write:content`, and writes
+ * need a user-context token (`user-only`; AUTH-17 refuses them under an app-only bearer).
+ */
 function composeFor(mock: MockHttp, extraEnv: Record<string, string> = {}): Composition {
-  return composeServer(parseConfig(appOnlyEnv({ X_MCP_POLICY: 'publish', ...extraEnv })), {
+  return composeServer(parseConfig(userContextEnv({ X_MCP_POLICY: 'publish', ...extraEnv })), {
     dispatcher: mock.dispatcher,
+    tokens: userTokenStore(),
   });
 }
 
@@ -220,9 +220,14 @@ test('walkthrough A steps 1-2 (MEDIA-1/MEDIA-3): one upload call does INIT -> AP
   // The operator's media directory has to survive the trip Config -> composeServer -> the
   // tool's closure; registering the unbound default-deny instances instead would refuse
   // this upload while blaming the operator for a directory they did configure.
-  const config = parseConfig(appOnlyEnv({ X_MCP_POLICY: 'publish', X_MCP_MEDIA_DIR: mediaRoot }));
+  const config = parseConfig(
+    userContextEnv({ X_MCP_POLICY: 'publish', X_MCP_MEDIA_DIR: mediaRoot }),
+  );
   assert.equal(config.mediaDir, mediaRoot, 'config parsed the media dir');
-  const composition = composeServer(config, { dispatcher: mock.dispatcher });
+  const composition = composeServer(config, {
+    dispatcher: mock.dispatcher,
+    tokens: userTokenStore(),
+  });
 
   const client = await connect(composition);
   try {

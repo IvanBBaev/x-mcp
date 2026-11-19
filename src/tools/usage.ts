@@ -249,6 +249,10 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
       'resets when the server restarts. Use it to check headroom before a high-volume read.',
     policy: 'read:account',
     availability: 'app+user',
+    // `GET /2/usage/tweets` accepts ONLY an app-only bearer (OpenAPI 2.174 `security`,
+    // reviews/12 F-1). Under `oauth2` the registry refuses the call locally, before the
+    // charge (AUTH-17, OD-1).
+    credential: 'app-only',
     // The endpoint authenticates with the app bearer token on an approved developer account
     // and names no user-level OAuth scope, so none is declared rather than inventing one.
     scopes: [],

@@ -360,6 +360,9 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
       const bucket = TOOL_BUCKETS[tool.name];
       return bucket == null ? null : rateLimitKey(bucket, authContext);
     }),
+    // AUTH-17 / OD-1: a call whose endpoint cannot take this process's credential is refused
+    // locally, before the budget charge. The tools stay registered (no surface change).
+    credentialMode: config.authMode === 'app-only' ? 'app-only' : 'user',
   });
 
   const resolver = {

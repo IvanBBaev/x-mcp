@@ -185,7 +185,15 @@ says so. A live capture belongs to H2.
 
 **`tools/list` byte delta: 0 B.** No tool name, description or schema changed.
 
-**Not fixed (owner decision OD-1)**:
+**Resolved 2026-11-19 (OD-1, owner approved: refuse locally before the charge).** The
+registry now checks the process credential mode after the policy check and before the
+rate-limit preflight and the budget charge. A `credential: 'app-only'` tool under `oauth2`,
+or a `user-only` tool under an app-only bearer, gets the typed AUTH-17 `auth` refusal
+naming the mode to run, with no request and no reservation. The tools stay registered:
+no availability class, no registration change, `tools/list` +0 B. The X-side mapping above
+stays the fallback. The original finding follows.
+
+**Not fixed at the time (owner decision OD-1)**:
 - Under `oauth2`, the two app-only-only tools are still registered.
 - A call to either is still sent, and X refuses it.
 - Because the request was sent, its budget reservation is kept (`registry.ts`
@@ -273,7 +281,7 @@ so they were not changed here.
 
 | ID | Decision | Origin |
 |---|---|---|
-| OD-1 | App-only-only tools under `oauth2`. Options: add an `app-only` availability class, register by mode, or refuse locally before the charge. Today the request is sent and refused, and its reservation is kept. | F-1 |
+| OD-1 | App-only-only tools under `oauth2`. Options: add an `app-only` availability class, register by mode, or refuse locally before the charge. **Resolved 2026-11-19:** refuse locally before the charge. The registry's credential-mode check returns the AUTH-17 `auth` refusal with no request and no reservation; it also covers `user-only` tools under an app-only bearer. Tools stay registered (+0 B). | F-1 |
 | OD-2 | A live check of like, follow and quote-posts on a pay-per-use account. It decides whether the tools stay, and the README wording. | review 11 F-5; F-5 |
 | OD-3 | Video upload cap: 512 MiB versus the 8 GB / 16 GB platform limit. | review 11 F-3 |
 | OD-4 | Bookmark Folders (post-1.0). The surface now includes a **write**, `POST /2/users/{id}/bookmarks/folders`, which needs a policy cell and pricing. | review 11 F-2; row 30 |
