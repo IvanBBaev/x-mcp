@@ -158,6 +158,10 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > (2026-11-13) added 69 B, to **76,885 B**, `x_thread_create`'s resume `reply_to_id`
 > 120 B more, to **77,005 B**, and `since_id` on the four search/timeline reads 464 B
 > more, to **77,469 B** (2,531 B of headroom).
+>
+> Headroom analysis (2026-11-19, Q07): at **77,885 B** (2,115 B of headroom), where the bytes go
+> and what frees room for the Phase 4 candidates —
+> [reviews/13-context-budget-headroom-2026-11-19.md](reviews/13-context-budget-headroom-2026-11-19.md).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
