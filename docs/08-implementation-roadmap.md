@@ -162,6 +162,10 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > Headroom analysis (2026-11-19, Q07): at **77,885 B** (2,115 B of headroom), where the bytes go
 > and what frees room for the Phase 4 candidates —
 > [reviews/13-context-budget-headroom-2026-11-19.md](reviews/13-context-budget-headroom-2026-11-19.md).
+>
+> Default-field trims (2026-11-20, Q08, 99d1a11, review 13 H1 + H2): dropping the inputSchema
+> `$schema` and the spec-default `openWorldHint: true` freed 3,022 B, to **74,863 B** (5,137 B
+> of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
