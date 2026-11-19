@@ -291,6 +291,9 @@ above; this is the single list to walk before tagging:
       2026-11-10; one drift fixed (F-1: counts/all and usage are app-only bearer only,
       user search user-token only, mapped as AUTH-17); owner decisions OD-1–OD-7
       listed; the dated release-week run remains open.*
+      *OD-1 resolved 2026-11-19 (Q05): credential-mode mismatches are refused locally
+      in the registry, before the rate-limit preflight and the budget charge (AUTH-17
+      `auth`, no request, no reservation); tools stay registered, `tools/list` +0 B.*
 - [ ] npm provenance badge + MCP registry listing verified; `server.json` lockstep
       guard green. *Guard green: `npm run gate:manifest`
       (`scripts/server-json-guard.mjs`) verifies version lockstep across all three
