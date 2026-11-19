@@ -497,6 +497,13 @@ Note the count side:
    The baseline in `scripts/context-gate.mjs` was updated.
 2. **c1, `meta`.** May `meta` leave the 42 outputSchemas (−8,106 B, `structuredContent`
    unchanged, documented once) before the 1.0 tag? After 1.0 it needs a semver call.
+   **Answered 2026-11-19 (owner): yes, option c1.** Landed 2026-11-20 as Q09: −8,106 B, exactly
+   the estimate, 74,863 → 66,757 B (13,243 B of headroom). `meta` left both `properties` and
+   the envelope's `required`. The root stays open, and a test validates real
+   `structuredContent` with `meta` (with and without `budget_warning`) against every served
+   outputSchema using the SDK's own Ajv validator. `meta` is documented once in docs/03
+   "Result shape" and the README; the CHANGELOG flags it as a declared-schema change. The
+   baseline in `scripts/context-gate.mjs` was updated.
 3. **Gate scope.** Keep the 80,000 B wire cap and add a model-visible sub-measure (e1)
    and a tool-count warning (e3)? Or raise the wire cap (e2), and to what figure?
 4. **Candidate order.** Which candidate takes the freed headroom first? This report

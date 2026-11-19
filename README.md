@@ -83,7 +83,9 @@ model picks the tool. Three representative asks:
   `fix: "agent" | "operator"`, so the model retries what is retryable and escalates what is
   not.
 - **Structured output.** Every tool advertises a JSON-Schema `outputSchema` and returns
-  `structuredContent` alongside the text block.
+  `structuredContent` alongside the text block. Every result also carries a `meta` cost
+  block (`cost_usd`, `session_total_usd`, optional `budget_warning`); it is documented once
+  in the [result shape](docs/03-tool-catalog.md#conventions) rather than in each schema.
 - **Availability class-gating**, live per-endpoint rate-limit tracking (including the
   24-hour app cap on post creation), cursor pagination, and compact result rendering.
 

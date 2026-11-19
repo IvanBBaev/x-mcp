@@ -3,10 +3,15 @@
 // per-tool `outputSchema` map covers every registered tool, and the schemas are PUBLIC
 // API pinned by the contract fixture (test/fixtures/structured/output-schemas.json).
 // Truthfulness is proven against REAL renderer output (core/render, api/ratelimit) using
-// a minimal in-test JSON-Schema validator — no new dependency.
+// a minimal in-test JSON-Schema validator, and against the schemas the server actually
+// SERVES over tools/list using the SDK's own Ajv validator (the one SDK clients use).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 import { createRateLimitTracker } from '../../src/api/ratelimit.js';
 import { parseConfig } from '../../src/core/config.js';
@@ -36,10 +41,39 @@ import {
   renderStructuredResult,
   toolOutputSchema,
 } from '../../src/mcp/structured.js';
+import type { UsageReport } from '../../src/tools/usage.js';
 
 import { loadFixture } from '../helpers/index.js';
 
 const META: ResultMeta = { cost_usd: 0.005, session_total_usd: 0.015 };
+/** The same block at the warn threshold: the optional field rides along undeclared too. */
+const META_WARN: ResultMeta = { ...META, budget_warning: 'session credit 90% consumed' };
+
+// --- The SERVED contract (Q09) -----------------------------------------------------
+// `meta` is not declared in any outputSchema (review 13 c1); conformance of a result that
+// carries it rests on the open schema root. Prove that against what tools/list really
+// serves, with the validator SDK clients run on every structured result.
+
+async function servedOutputSchemas(): Promise<ReadonlyMap<string, Record<string, unknown>>> {
+  const config = parseConfig({ X_MCP_AUTH_MODE: 'app-only', X_MCP_BEARER_TOKEN: 'AAAA' });
+  const composition = composeServer(config);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'structured-test', version: '0.0.0' });
+  await Promise.all([client.connect(clientTransport), composition.server.connect(serverTransport)]);
+  const { tools } = await client.listTools();
+  await client.close();
+  const served = new Map<string, Record<string, unknown>>();
+  for (const tool of tools) {
+    assert.ok(tool.outputSchema !== undefined, `${tool.name} serves no outputSchema`);
+    served.set(tool.name, tool.outputSchema);
+  }
+  return served;
+}
+
+const SERVED = await servedOutputSchemas();
+const AJV = new AjvJsonSchemaValidator();
+/** Tools whose served schema accepted a real render carrying `meta` (coverage check below). */
+const VALIDATED_WITH_META = new Set<string>();
 
 // --- Minimal JSON-Schema validator ------------------------------------------------
 // Supports exactly the subset the T-310 schemas use: type, enum, properties, required,
@@ -118,15 +152,29 @@ function validate(schema: Schema, value: unknown, root: Schema, path: string): s
   return errors;
 }
 
-/** Render `{ data, summary?, meta }` through the REAL renderer and validate it. */
+/**
+ * Render `{ data, summary?, meta }` through the REAL renderer and validate it — with the
+ * in-test validator against the source schema, and with the SDK's Ajv validator against the
+ * schema tools/list serves, once per `meta` variant (with and without `budget_warning`).
+ */
 function assertConforms(toolName: string, data: unknown, summary?: string): void {
   const schema = toolOutputSchema(toolName);
   assert.ok(schema !== undefined, `no outputSchema for ${toolName}`);
-  const rendered = renderStructuredResult(
-    summary !== undefined ? { data, summary, meta: META } : { data, meta: META },
-  );
-  const root = schema as unknown as Schema;
-  assert.deepEqual(validate(root, rendered.structuredContent, root, '$'), [], toolName);
+  const served = SERVED.get(toolName);
+  assert.ok(served !== undefined, `${toolName} is not served by tools/list`);
+  const check = AJV.getValidator(served);
+  for (const meta of [META, META_WARN]) {
+    const rendered = renderStructuredResult(
+      summary !== undefined ? { data, summary, meta } : { data, meta },
+    );
+    const content = rendered.structuredContent as Record<string, unknown>;
+    assert.equal(content['meta'], meta, `${toolName}: structuredContent must carry meta`);
+    const root = schema as unknown as Schema;
+    assert.deepEqual(validate(root, content, root, '$'), [], toolName);
+    const verdict = check(content);
+    assert.ok(verdict.valid, `${toolName} (served, Ajv): ${verdict.errorMessage ?? ''}`);
+  }
+  VALIDATED_WITH_META.add(toolName);
 }
 
 // --- REND-11: one render object, two views ----------------------------------------
@@ -157,16 +205,13 @@ test('REND-11: optional summary is omitted (never null) in both views', () => {
   assert.deepEqual(Object.keys(JSON.parse(block.text) as object), ['data', 'meta']);
 });
 
-test('REND-11: budget_warning in meta flows through the shared payload and conforms', () => {
-  const meta: ResultMeta = { ...META, budget_warning: 'session credit 80% consumed' };
-  const result = renderStructuredResult({ data: {}, meta });
+test('REND-11: budget_warning in meta flows through the shared payload unchanged', () => {
+  const result = renderStructuredResult({ data: {}, meta: META_WARN });
   const structured = result.structuredContent as { meta: ResultMeta };
-  assert.equal(structured.meta.budget_warning, 'session credit 80% consumed');
-  // The envelope's meta subschema declares budget_warning, so the warning conforms.
-  const root = TOOL_OUTPUT_SCHEMAS['x_post_create'] as unknown as Schema;
-  const metaSchema = (root['properties'] as Record<string, Schema>)['meta'];
-  assert.ok(metaSchema !== undefined);
-  assert.deepEqual(validate(metaSchema, structured.meta, root, '$.meta'), []);
+  assert.equal(structured.meta.budget_warning, 'session credit 90% consumed');
+  const block = result.content[0];
+  assert.ok(block !== undefined && block.type === 'text');
+  assert.deepEqual((JSON.parse(block.text) as { meta: ResultMeta }).meta, META_WARN);
 });
 
 // --- Coverage: every registered tool advertises a schema (fail-at-startup) --------
@@ -182,7 +227,11 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
     const schema = toolOutputSchema(name);
     assert.ok(schema !== undefined, name);
     assert.equal(schema.type, 'object', `${name}: structuredContent must be an object`);
-    assert.deepEqual(schema.required, ['data', 'meta'], name);
+    assert.deepEqual(schema.required, ['data'], name);
+    // Q09 (review 13 c1): `meta` is documented once (docs/03), not declared per tool, and the
+    // root stays open so the `meta` every result carries still conforms.
+    assert.ok(!('meta' in (schema.properties ?? {})), `${name} declares meta`);
+    assert.ok(!('additionalProperties' in schema), `${name}: the envelope root must stay open`);
   }
 });
 
@@ -465,6 +514,41 @@ test('REND-11/MEDIA-3: media upload and status result shapes conform', () => {
   assertConforms('x_media_status', { media_id: '7100', processing_state: 'succeeded' });
 });
 
+test('REND-11/Q09: the remaining reads and writes conform with meta attached', () => {
+  // Post pages: bookmarks and list timelines share the timeline page shape (and raw branch).
+  const page = renderPostPage(loadFixture<RawListResponse<RawTweet>>('search/recent-page.json'));
+  for (const name of ['x_bookmarks_list', 'x_list_timeline']) {
+    assertConforms(name, page);
+    assertConforms(name, loadFixture<object>('search/recent-page.json'));
+  }
+  assertConforms('x_post_hide_reply', {
+    post_id: '1',
+    url: 'https://x.com/i/status/1',
+    action: 'hide',
+    hidden: true,
+  });
+  // A full thread, and a mid-thread failure (`ok: false` + `failed_at`).
+  assertConforms('x_thread_create', {
+    ok: true,
+    posts: [
+      { id: '1', url: 'https://x.com/i/status/1' },
+      { id: '2', url: 'https://x.com/i/status/2' },
+    ],
+  });
+  assertConforms('x_thread_create', {
+    ok: false,
+    posts: [{ id: '1', url: 'https://x.com/i/status/1' }],
+    failed_at: 1,
+  });
+  const usage: UsageReport = {
+    platform: { project_id: '1', posts_read: 125_000, cap: 2_000_000, percent_used: 6.3 },
+    session_budget: { spent_usd: 0.02, mode: 'warn', by_tool: { x_post_get: 0.02 } },
+    note: 'platform = X read counts; session_budget = local estimate.',
+  };
+  assertConforms('x_usage_get', usage, 'usage report');
+  assertConforms('x_usage_get', loadFixture<object>('usage/usage-tweets.json')); // raw
+});
+
 // --- The validator has teeth (guards the truthfulness tests above) ----------------
 
 test('T-310: the in-test validator rejects non-conforming payloads', () => {
@@ -483,13 +567,17 @@ test('T-310: the in-test validator rejects non-conforming payloads', () => {
     'type violation must be caught',
   );
 
-  // A payload missing the required `meta` envelope field must fail for every tool.
+  // A payload missing the required `data` envelope field must fail for every tool.
   const create = TOOL_OUTPUT_SCHEMAS['x_post_create'] as unknown as Schema;
   assert.ok(
-    validate(create, { data: { id: '1', url: 'u' } }, create, '$').some((e) =>
-      e.includes('$.meta: required property missing'),
+    validate(create, { meta: META }, create, '$').some((e) =>
+      e.includes('$.data: required property missing'),
     ),
   );
+  // The SDK's Ajv validator on the SERVED schema has teeth too: the bad payload above fails.
+  const servedLike = SERVED.get('x_like_set');
+  assert.ok(servedLike !== undefined);
+  assert.equal(AJV.getValidator(servedLike)(bad).valid, false);
   // Non-object data fails BOTH anyOf branches (compact and raw) of a raw-capable tool.
   const postGet = TOOL_OUTPUT_SCHEMAS['x_post_get'] as unknown as Schema;
   const scalarData = renderStructuredResult({ data: 42, meta: META }).structuredContent;
@@ -509,4 +597,14 @@ test('T-310: the in-test validator rejects non-conforming payloads', () => {
     ),
     'a compact post without text must not conform to the compact branch',
   );
+});
+
+// --- Q09: every served schema accepted a real render that carries meta ------------
+// Runs last (node:test runs a file's top-level tests in order): every tool the server
+// serves must have gone through `assertConforms` above at least once.
+
+test('Q09/REND-11: real structuredContent with meta conforms to EVERY served outputSchema', () => {
+  assert.equal(SERVED.size, 42);
+  const unchecked = [...SERVED.keys()].filter((name) => !VALIDATED_WITH_META.has(name)).sort();
+  assert.deepEqual(unchecked, [], 'tools with no real-render conformance check');
 });

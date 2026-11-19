@@ -174,6 +174,10 @@ test('MCP-2: tools/list exposes the registered tools with object input schemas',
     assert.ok(!('$schema' in tool.inputSchema), `${tool.name} inputSchema carries $schema`);
     if (tool.outputSchema !== undefined) {
       assert.ok(!('$schema' in tool.outputSchema), `${tool.name} outputSchema carries $schema`);
+      // Q09 (review 13 c1): `meta` is documented once, not declared per tool; the open root
+      // keeps every result (which still carries meta) conforming.
+      assert.ok(!('meta' in (tool.outputSchema.properties ?? {})), `${tool.name} declares meta`);
+      assert.ok(!('additionalProperties' in tool.outputSchema), `${tool.name} closes the root`);
     }
   }
 
@@ -332,6 +336,9 @@ test('MCP-2: tools/call round-trips a read tool through the full composed pipeli
   assert.ok(payload.meta.cost_usd > 0);
   assert.equal(payload.meta.session_total_usd, payload.meta.cost_usd);
   assert.equal(composition.budget.total(), payload.meta.cost_usd);
+  // Q09: structuredContent still carries meta, and the SDK client (which validates it against
+  // the cached, meta-less outputSchema on every call) accepted it.
+  assert.deepEqual((result.structuredContent as unknown as Rendered).meta, payload.meta);
 
   mock.assertDone();
   await client.close();

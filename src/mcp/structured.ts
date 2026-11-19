@@ -42,13 +42,6 @@ const STR: SchemaNode = { type: 'string' };
 const NUM: SchemaNode = { type: 'number' };
 const BOOL: SchemaNode = { type: 'boolean' };
 
-/** ResultMeta (core/tooldef, COST-3): advisory credit accounting on every result. */
-const META: SchemaNode = {
-  type: 'object',
-  properties: { cost_usd: NUM, session_total_usd: NUM, budget_warning: STR },
-  required: ['cost_usd', 'session_total_usd'],
-};
-
 /** The `raw: true` branch (REND-9/REND-10): the exact, uncompacted X API envelope. */
 const RAW_ENVELOPE: SchemaNode = {
   type: 'object',
@@ -96,12 +89,19 @@ function batchOf(item: SchemaNode): SchemaNode {
  * Wrap a tool's `data` schema in the registry result envelope `{ data, summary?, meta }`
  * (docs/02 §5) — the exact object `renderStructuredResult` emits. `$defs` (shared shapes
  * referenced from `data`) sit at the schema root so `#/$defs/...` refs resolve.
+ *
+ * `meta` (ResultMeta, core/tooldef, COST-3: `cost_usd`, `session_total_usd`, optional
+ * `budget_warning`) is on EVERY result but is deliberately NOT declared here (Q09, review 13
+ * c1): the identical block cost ~8 kB of the `tools/list` context budget across 42 tools. It
+ * is documented once in docs/03 ("Result shape"). The root stays open (no
+ * `additionalProperties: false`), so `structuredContent` carrying `meta` still conforms —
+ * never close this object without declaring `meta` again.
  */
 function envelope(data: SchemaNode, defs?: Readonly<Record<string, SchemaNode>>): OutputSchema {
   return {
     type: 'object',
-    properties: { data, summary: STR, meta: META },
-    required: ['data', 'meta'],
+    properties: { data, summary: STR },
+    required: ['data'],
     ...(defs !== undefined ? { $defs: defs } : {}),
   };
 }

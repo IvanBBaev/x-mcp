@@ -60,6 +60,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- **Declared output schema change, for programmatic consumers:** no tool's `outputSchema`
+  declares `meta` any more, and the envelope's `required` is now `["data"]` instead of
+  `["data", "meta"]` (review 13 c1). The data is unchanged: every successful result still
+  carries `meta` (`cost_usd`, `session_total_usd`, optional `budget_warning`) in both the text
+  block and `structuredContent`, and still conforms, because the schema root stays open. The
+  block is now documented once, in docs/03 "Result shape", instead of 42 times. Clients that
+  generated types from `outputSchema` should take `meta`'s shape from there. `tools/list` is
+  8,106 B smaller (74,863 → 66,757 B worst case).
 - `tools/list` is 3,022 B smaller (77,885 → 74,863 B worst case, review 13 H1 + H2). Every
   `inputSchema` drops the converter's `"$schema": "http://json-schema.org/draft-07/schema#"`
   stamp, which MCP makes optional (the outputSchemas never had it). The annotations drop

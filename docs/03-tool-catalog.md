@@ -105,6 +105,20 @@ Every catalogued tool is registered.
   - `w:post` $0.015 (**$0.20 when the post contains a URL**) · `w:dm` $0.015 ·
     `w:list` $0.010 (list create) · `w:action` per-write (engagement/graph/moderation
     writes and deletes; see 01 §3).
+- **Result shape**: every successful call returns one object, `{ data, summary?, meta }`,
+  both as the JSON text block and as `structuredContent` (the same object, REND-11).
+  `data` is the tool's compact result and `summary` is an optional one-line digest.
+  `meta` is the per-call cost block, present on **every** result (COST-3):
+  - `cost_usd` (number) — USD this call reserved (`0` for `local` tools);
+  - `session_total_usd` (number) — running session spend after this call;
+  - `budget_warning` (string, optional) — present once the session reaches the
+    credit-budget warning threshold.
+
+  Each tool's `outputSchema` declares `data` and `summary` only. `meta` is documented
+  here once rather than repeated in 42 schemas (−8,106 B of the `tools/list` budget, Q09,
+  [reviews/13](reviews/13-context-budget-headroom-2026-11-19.md) c1). The schema root is
+  open (no `additionalProperties: false`), so `structuredContent` carrying `meta`
+  conforms. Errors are text-only (`isError: true`, no `structuredContent`).
 - **Phase** column — the roadmap phase a tool ships in (docs/08). `P1` read-only
   core, `P2` auth + writes, `P3` full surface. Registration is gated by phase and by
   availability independently. Retagged 2026-07-31 (exit-gate-2 audit, T-214):

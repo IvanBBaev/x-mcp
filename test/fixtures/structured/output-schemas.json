@@ -58,24 +58,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_block_set": {
       "type": "object",
@@ -98,24 +83,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_bookmark_set": {
       "type": "object",
@@ -141,24 +111,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_bookmarks_list": {
       "type": "object",
@@ -194,24 +149,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -337,24 +277,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_dm": {
           "type": "object",
@@ -427,24 +352,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_dm": {
           "type": "object",
@@ -517,24 +427,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_dm": {
           "type": "object",
@@ -601,24 +496,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_follow_set": {
       "type": "object",
@@ -644,24 +524,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_followers_list": {
       "type": "object",
@@ -697,24 +562,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_user": {
           "type": "object",
@@ -805,24 +655,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_user": {
           "type": "object",
@@ -903,24 +738,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_create": {
       "type": "object",
@@ -942,24 +762,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_delete": {
       "type": "object",
@@ -978,24 +783,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_follow_set": {
       "type": "object",
@@ -1018,24 +808,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_get": {
       "type": "object",
@@ -1053,24 +828,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_list": {
           "type": "object",
@@ -1125,24 +885,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_members": {
       "type": "object",
@@ -1178,24 +923,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_user": {
           "type": "object",
@@ -1273,24 +1003,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_list_timeline": {
       "type": "object",
@@ -1326,24 +1041,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -1460,24 +1160,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_lists_owned": {
       "type": "object",
@@ -1513,24 +1198,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_list": {
           "type": "object",
@@ -1584,24 +1254,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_media_upload": {
       "type": "object",
@@ -1652,24 +1307,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_mute_set": {
       "type": "object",
@@ -1692,24 +1332,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_post_counts_archive": {
       "type": "object",
@@ -1757,24 +1382,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_post_counts_recent": {
       "type": "object",
@@ -1822,24 +1432,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_post_create": {
       "type": "object",
@@ -1861,24 +1456,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_post_delete": {
       "type": "object",
@@ -1903,24 +1483,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_post_get": {
       "type": "object",
@@ -1953,24 +1518,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -2117,24 +1667,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_rate_limit_status": {
       "type": "object",
@@ -2193,24 +1728,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_repost_set": {
       "type": "object",
@@ -2236,24 +1756,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_search_archive": {
       "type": "object",
@@ -2289,24 +1794,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -2440,24 +1930,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -2589,24 +2064,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_timeline_home": {
       "type": "object",
@@ -2642,24 +2102,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -2793,24 +2238,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -2944,24 +2374,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_post": {
           "type": "object",
@@ -3162,24 +2577,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"]
+      "required": ["data"]
     },
     "x_user_get": {
       "type": "object",
@@ -3212,24 +2612,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_user": {
           "type": "object",
@@ -3343,24 +2728,9 @@
         },
         "summary": {
           "type": "string"
-        },
-        "meta": {
-          "type": "object",
-          "properties": {
-            "cost_usd": {
-              "type": "number"
-            },
-            "session_total_usd": {
-              "type": "number"
-            },
-            "budget_warning": {
-              "type": "string"
-            }
-          },
-          "required": ["cost_usd", "session_total_usd"]
         }
       },
-      "required": ["data", "meta"],
+      "required": ["data"],
       "$defs": {
         "compact_user": {
           "type": "object",
