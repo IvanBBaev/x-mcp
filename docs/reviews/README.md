@@ -20,6 +20,11 @@ release-week pre-run of the 1.0 checklist's final platform fact-check, and
 [12-platform-fact-check-2026-11-15.md](12-platform-fact-check-2026-11-15.md), its
 pre-H5 refresh (credential types per endpoint, AUTH-17; owner decisions OD-1–OD-7).
 
+Budget analyses, outside both series:
+[13-context-budget-headroom-2026-11-19.md](13-context-budget-headroom-2026-11-19.md), the
+`tools/list` context-budget headroom analysis (bytes per field, tool and fragment; options
+to free headroom; costing of Bookmark Folders, News and Articles; owner questions).
+
 ## Verdicts
 
 | # | Review | Role | Verdict | Highlights |
