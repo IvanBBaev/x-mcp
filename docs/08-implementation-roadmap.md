@@ -166,6 +166,10 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > Default-field trims (2026-11-20, Q08, 99d1a11, review 13 H1 + H2): dropping the inputSchema
 > `$schema` and the spec-default `openWorldHint: true` freed 3,022 B, to **74,863 B** (5,137 B
 > of headroom).
+>
+> meta trim (2026-11-20, Q09, 112f8d5, review 13 c1): no outputSchema declares the `meta`
+> cost block any more. The data is unchanged and `meta` is documented once in docs/03 "Result
+> shape". This freed 8,106 B, to **66,757 B** (13,243 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
