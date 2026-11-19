@@ -181,6 +181,11 @@ server.json), and the bundle attached as a release asset by `publish.yml`. The M
 is a devDependency only; no runtime deps, +0 B `tools/list`. Open for the owner: the Desktop
 install walk-through under H3 (OAuth still needs a terminal `authorize`).
 
+**Streamable HTTP transport — design proposed 2026-11-19 (queue Q06, 435e048):**
+[decisions/0003](decisions/0003-streamable-http-transport.md). Proposed, awaiting owner. It
+recommends deferring the build because no real use-case exists yet, and because the current
+MCP spec (2026-07-28) is ahead of both SDK lines (2025-11-25). Candidate stays unbuilt.
+
 ---
 
 ## 1.0 acceptance checklist
