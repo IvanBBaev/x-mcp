@@ -48,7 +48,10 @@
 // to **77,005 bytes**, and `since_id` on the four search/timeline reads 464 B, to
 // **77,469 bytes**. The optional `paid_partnership` flag (x_post_create input + the
 // compact-post output field inlined into every post-returning schema) then cost 416 B:
-// **77,885 bytes** — ~2,115 B of headroom. The
+// **77,885 bytes** — ~2,115 B of headroom. Q08 (review 13 H1 + H2) then dropped the
+// converter's `$schema` stamp from every inputSchema (−2,184 B) and the spec-default
+// `openWorldHint: true` from the annotations (−882 B; the two closed-world tools keep an
+// explicit `false`, +44 B): **74,863 bytes** — ~5,137 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -68,7 +71,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 77_885;
+const BASELINE_BYTES = 74_863;
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;

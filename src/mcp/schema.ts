@@ -36,5 +36,10 @@ function stripSafeIntSentinels(node: unknown): void {
 export function toolInputSchema(tool: AnyToolDef): Tool['inputSchema'] {
   const schema = toJsonSchemaCompat(tool.input as Parameters<typeof toJsonSchemaCompat>[0]);
   stripSafeIntSentinels(schema);
+  // The converter stamps `"$schema": "http://json-schema.org/draft-07/schema#"` on every
+  // input (2,184 B across the catalog). MCP 2025-11-25 makes `$schema` optional and defines
+  // the dialect of a schema without one; nothing in these schemas depends on draft-07, and
+  // the outputSchemas never carried it, so dropping it is free (review 13 H1).
+  delete (schema as Record<string, unknown>)['$schema'];
   return schema as Tool['inputSchema'];
 }

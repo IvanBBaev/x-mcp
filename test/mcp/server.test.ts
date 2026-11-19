@@ -156,6 +156,9 @@ const WRITE_TOOLS = [
 // The destructive:* cells → destructiveHint (MCP-4).
 const DESTRUCTIVE_TOOLS = new Set(['x_block_set', 'x_list_delete', 'x_post_delete']);
 
+// Tools that declare `openWorldHint: false` (local state only) and must keep it on the wire.
+const CLOSED_WORLD_TOOLS = new Set(['x_auth_status', 'x_rate_limit_status']);
+
 const ALL_TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].sort();
 
 test('MCP-2: tools/list exposes the registered tools with object input schemas', async () => {
@@ -167,6 +170,11 @@ test('MCP-2: tools/list exposes the registered tools with object input schemas',
   for (const tool of tools) {
     assert.equal(tool.inputSchema.type, 'object', `${tool.name} must advertise an object schema`);
     assert.ok(tool.description !== undefined && tool.description.length > 0);
+    // Q08 (review 13 H1): no `$schema` dialect stamp on either schema — it is optional in MCP.
+    assert.ok(!('$schema' in tool.inputSchema), `${tool.name} inputSchema carries $schema`);
+    if (tool.outputSchema !== undefined) {
+      assert.ok(!('$schema' in tool.outputSchema), `${tool.name} outputSchema carries $schema`);
+    }
   }
 
   await client.close();
@@ -179,14 +187,19 @@ test('MCP-4: listed annotations are derived from the policy class', async () => 
 
   const { tools } = await client.listTools();
   const byName = new Map(tools.map((t) => [t.name, t]));
-  // Read-surface tools sit in read:* / meta cells -> readOnlyHint, and MCP-4 stamps
-  // openWorldHint on every tool regardless of its own declared hints.
+  // Read-surface tools sit in read:* / meta cells -> readOnlyHint. `openWorldHint` is the
+  // spec default (true) and left out, except on the closed-world tools that declare false.
+  // Read-only tools keep an explicit `destructiveHint: false` (Q08, owner call on review 13 H3).
   for (const name of READ_TOOLS) {
     const tool = byName.get(name);
     assert.ok(tool?.annotations, `${name} must carry annotations`);
     assert.equal(tool.annotations.readOnlyHint, true, name);
-    assert.equal(tool.annotations.openWorldHint, true, name);
-    assert.notEqual(tool.annotations.destructiveHint, true, name);
+    assert.equal(
+      tool.annotations.openWorldHint,
+      CLOSED_WORLD_TOOLS.has(name) ? false : undefined,
+      name,
+    );
+    assert.equal(tool.annotations.destructiveHint, false, name);
   }
   // Write-surface tools must never claim to be read-only; only destructive:* cells carry
   // destructiveHint.
@@ -194,7 +207,7 @@ test('MCP-4: listed annotations are derived from the policy class', async () => 
     const tool = byName.get(name);
     assert.ok(tool?.annotations, `${name} must carry annotations`);
     assert.notEqual(tool.annotations.readOnlyHint, true, name);
-    assert.equal(tool.annotations.openWorldHint, true, name);
+    assert.ok(!('openWorldHint' in tool.annotations), name);
     assert.equal(tool.annotations.destructiveHint, DESTRUCTIVE_TOOLS.has(name), name);
   }
   assert.equal(byName.get('x_post_get')?.annotations?.title, 'Get posts');

@@ -185,32 +185,49 @@ test('MCP-4: annotations derive from the policy class, overriding a tool’s dec
     title: 'Get',
     readOnlyHint: true,
     destructiveHint: false,
-    openWorldHint: true,
   });
   assert.deepEqual(deriveAnnotations(del), {
     title: 'x_list_delete',
     readOnlyHint: false,
     destructiveHint: true,
-    openWorldHint: true,
     idempotentHint: false, // destructive:* is destructive & NON-idempotent
   });
   assert.deepEqual(deriveAnnotations(bookmark), {
     title: 'x_bookmark_set',
     readOnlyHint: false,
     destructiveHint: false,
-    openWorldHint: true,
     idempotentHint: true, // a merged `*_set` write is idempotent
   });
   assert.deepEqual(deriveAnnotations(write), {
     title: 'x_post_create',
     readOnlyHint: false,
     destructiveHint: false,
-    openWorldHint: true,
   });
 
-  // openWorldHint is universal, and listForMcp surfaces the DERIVED set.
-  const reg = createRegistry([read, del, bookmark, write], deps());
-  for (const rt of reg.listForMcp()) assert.equal(rt.annotations.openWorldHint, true);
+  // openWorldHint is the spec default (true) and left out; a tool that DECLARES false keeps
+  // it (Q08). A declared `true` changes nothing. listForMcp surfaces the DERIVED set.
+  const local = makeTool({
+    name: 'x_rate_limit_status',
+    policy: 'read:account',
+    annotations: { title: 'Rate', openWorldHint: false },
+  });
+  const openDeclared = makeTool({
+    name: 'x_user_get',
+    policy: 'read:user',
+    annotations: { title: 'User', openWorldHint: true },
+  });
+  assert.deepEqual(deriveAnnotations(local), {
+    title: 'Rate',
+    readOnlyHint: true,
+    destructiveHint: false,
+    openWorldHint: false,
+  });
+  assert.ok(!('openWorldHint' in deriveAnnotations(openDeclared)));
+  const reg = createRegistry([read, del, bookmark, write, local], deps());
+  for (const rt of reg.listForMcp()) {
+    if (rt.name === 'x_rate_limit_status') assert.equal(rt.annotations.openWorldHint, false);
+    else assert.ok(!('openWorldHint' in rt.annotations), rt.name);
+  }
 });
 
 // --- Destructive-classification consistency (POL-5) ----------------------------------

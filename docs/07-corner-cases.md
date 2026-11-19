@@ -618,8 +618,10 @@ credits, not tiers, for post-2026-02-06 developers.)*
 
 - **MCP-4 — Tool annotations match classification** `P1` `[ARCH-F2, DX-R3]`
   `read:*` → `readOnlyHint: true`; `destructive:*` → `destructiveHint: true`;
-  idempotent merged `*_set` tools → `idempotentHint: true`; all →
-  `openWorldHint: true`. Generated from the registry, asserted by test.
+  idempotent merged `*_set` tools → `idempotentHint: true`; read-only tools keep
+  an explicit `destructiveHint: false`. `openWorldHint` is left out (spec default
+  `true`) except on tools that declare `false` (local-state reads), which keep it
+  (Q08, review 13 H2). Generated from the registry, asserted by test.
 
 - **MCP-5 — Server `instructions` carry the conventions** `P1` `[DX-R2]`
   The initialize response's `instructions` string states: accepted identifier

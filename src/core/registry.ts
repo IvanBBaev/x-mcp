@@ -181,7 +181,14 @@ export interface RegisteredTool {
  *   - `read:*`        -> readOnlyHint: true
  *   - `destructive:*` -> destructiveHint: true, idempotentHint: false (destructive & non-idempotent)
  *   - a merged `*_set` write -> idempotentHint: true (setting a state to a value is idempotent)
- *   - every tool -> openWorldHint: true (the X API is an open world)
+ *   - `openWorldHint` is left out: the spec default is `true` and the X API is an open
+ *     world, so restating it on every tool only spends `tools/list` bytes (review 13 H2).
+ *     The one exception is a tool that DECLARES `openWorldHint: false` (a local-state
+ *     read such as `x_rate_limit_status`): it keeps the explicit `false`, because leaving
+ *     the key out would advertise the opposite.
+ * `destructiveHint: false` stays on read-only tools on purpose (owner call on review 13 H3):
+ * a client that reads `destructiveHint` without checking `readOnlyHint` would otherwise see
+ * the spec default `true` on a read.
  */
 export function deriveAnnotations(tool: AnyToolDef): ToolAnnotations {
   const op = tool.policy.slice(0, tool.policy.indexOf(':')) as Operation;
@@ -189,7 +196,7 @@ export function deriveAnnotations(tool: AnyToolDef): ToolAnnotations {
     title: tool.annotations.title,
     readOnlyHint: op === 'read',
     destructiveHint: op === 'destructive',
-    openWorldHint: true,
+    ...(tool.annotations.openWorldHint === false ? { openWorldHint: false } : {}),
   };
   if (op === 'destructive') return { ...base, idempotentHint: false };
   if (tool.name.endsWith('_set')) return { ...base, idempotentHint: true };

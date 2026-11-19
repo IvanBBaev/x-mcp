@@ -72,7 +72,8 @@ Every catalogued tool is registered.
   `dm` / `moderation` / `account`. `read:*` tools (except `read:dm`) work in the
   read-only preset; everything else needs opt-in. MCP tool annotations
   (`readOnlyHint`, `destructiveHint`, `idempotentHint`) are generated from this
-  column (corner case MCP-4).
+  column (corner case MCP-4). `openWorldHint` is omitted (spec default `true`); only
+  the local-state tools `x_auth_status` and `x_rate_limit_status` advertise `false`.
 - **Availability** column — replaces the retired Free/Basic/Pro tier column
   (X moved to pay-per-use 2026-02-06; platform review FINDING-1). Values:
   - `app+user` — reachable with an app-only bearer token **and** with user context.

@@ -489,6 +489,12 @@ Note the count side:
 
 1. **Hygiene set A.** Take all of H1 + H2 + H3 (−3,642 B), or H1 + H2 only (−3,066 B) to
    avoid any client misreading `destructiveHint` on read-only tools?
+   **Answered 2026-11-19 (owner): H1 + H2 only; H3 is skipped, so read-only tools keep
+   `destructiveHint: false`.** Landed 2026-11-20 as Q08: −3,022 B, 77,885 → 74,863 B.
+   That is 44 B less than the −3,066 B estimate because `x_auth_status` and
+   `x_rate_limit_status` declare `openWorldHint: false`. They now advertise that `false`;
+   the registry used to override it with a blanket `true`, which this report did not catch.
+   The baseline in `scripts/context-gate.mjs` was updated.
 2. **c1, `meta`.** May `meta` leave the 42 outputSchemas (−8,106 B, `structuredContent`
    unchanged, documented once) before the 1.0 tag? After 1.0 it needs a semver call.
 3. **Gate scope.** Keep the 80,000 B wire cap and add a model-visible sub-measure (e1)

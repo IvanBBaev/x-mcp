@@ -60,6 +60,14 @@ development chronology lives in `WORKLOG.md`.
 
 ### Changed
 
+- `tools/list` is 3,022 B smaller (77,885 → 74,863 B worst case, review 13 H1 + H2). Every
+  `inputSchema` drops the converter's `"$schema": "http://json-schema.org/draft-07/schema#"`
+  stamp, which MCP makes optional (the outputSchemas never had it). The annotations drop
+  `openWorldHint: true`, the spec default. `x_auth_status` and `x_rate_limit_status`, which
+  read local state, now advertise their declared `openWorldHint: false` instead of the
+  previous blanket `true`. Read-only tools keep `destructiveHint: false`, for clients that
+  read it without checking `readOnlyHint`. The input contract and tool behaviour are
+  unchanged.
 - A call whose endpoint cannot accept the process credential is now refused locally, before
   anything is sent or charged: `x_post_counts_archive` and `x_usage_get` (app-only bearer
   only) under `oauth2`, and every `user-only` tool under `app-only`. The refusal is the same
