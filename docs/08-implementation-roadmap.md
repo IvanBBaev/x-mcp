@@ -170,6 +170,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 > meta trim (2026-11-20, Q09, 112f8d5, review 13 c1): no outputSchema declares the `meta`
 > cost block any more. The data is unchanged and `meta` is documented once in docs/03 "Result
 > shape". This freed 8,106 B, to **66,757 B** (13,243 B of headroom).
+>
+> Bookmark folders (2026-11-20, Q10, 0f4c1a4, OD-4 / review 13 §6 Q4): the three new tools
+> add 3,160 B, to **69,917 B** (10,083 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -197,6 +200,14 @@ install walk-through under H3 (OAuth still needs a terminal `authorize`).
 [decisions/0003](decisions/0003-streamable-http-transport.md). Proposed, awaiting owner. It
 recommends deferring the build because no real use-case exists yet, and because the current
 MCP spec (2026-07-28) is ahead of both SDK lines (2025-11-25). Candidate stays unbuilt.
+
+**Bookmark folders shipped 2026-11-20 (queue Q10, 0f4c1a4; OD-4):** `x_bookmark_folders_list`
+(r:list), `x_bookmark_folder_posts` (r:post) and the user-only write `x_bookmark_folder_create`
+(w:action at the bookmark rate). Folder posts are a separate tool, not a `folder_id` on
+`x_bookmarks_list`, because that endpoint returns post ids only and takes no fields or
+expansions. The create route is documented only in the OpenAPI spec, and X publishes no price
+for the folder endpoints, so the cost classes are assumptions. Existing bookmark scopes only;
+docs/07 BKF-1..6. Fixtures are hand-written, pending H2 capture. +3,160 B, to **69,917 B**.
 
 ---
 
