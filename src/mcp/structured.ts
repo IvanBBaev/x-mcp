@@ -542,6 +542,24 @@ const POST_ID_PAGE_OR_RAW = compactOrRaw(
   pageOf({ type: 'object', properties: { id: STR, url: STR }, required: ['id', 'url'] }),
 );
 
+/** One compact news story (Q11, tools/search `CompactNews`); only `id` is guaranteed. */
+const COMPACT_NEWS: SchemaNode = {
+  type: 'object',
+  properties: {
+    id: STR,
+    name: STR,
+    summary: STR,
+    hook: STR,
+    category: STR,
+    disclaimer: STR,
+    updated_at: STR,
+    post_ids: { type: 'array', items: STR },
+  },
+  required: ['id'],
+};
+
+const NEWS_DEFS: Readonly<Record<string, SchemaNode>> = { compact_news: COMPACT_NEWS };
+
 /** A page of compact lists or the raw envelope — `x_lists_owned`. */
 const LIST_PAGE_OR_RAW = compactOrRaw(pageOf({ $ref: '#/$defs/compact_list' }));
 
@@ -631,6 +649,9 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
     properties: { folder_id: STR, name: STR },
     required: ['folder_id', 'name'],
   }),
+  // Phase 4 news (Q11): an unpaginated page of stories, and one story by id.
+  x_news_search: envelope(compactOrRaw(pageOf({ $ref: '#/$defs/compact_news' })), NEWS_DEFS),
+  x_news_get: envelope(compactOrRaw({ $ref: '#/$defs/compact_news' }), NEWS_DEFS),
 });
 
 /** The static `outputSchema` for one tool, or `undefined` for an unknown name. */

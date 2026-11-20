@@ -1,0 +1,20 @@
+{
+  "_provenance": "Synthetic: hand-written to the docs.x.com x-api/news introduction example and the OpenAPI 2.175 200 response schema for GET /2/news/{id} (getNews; fetched 2026-11-20) — a single News object; it uses the introduction example's `last_updated_at_ms` (an ISO string) instead of the spec's `updated_at` to pin docs/07 NEWS-3. Fictional story, NOT a live capture (pending the H2 live fixture capture). Authored 2026-11-20. Exercises: x_news_get.",
+  "data": {
+    "id": "1989418137272422538",
+    "name": "Open-source model release draws developer attention",
+    "summary": "Developers on X are discussing a newly released open-weight language model and its benchmark results.",
+    "hook": "A new open-weight model is trending among developers.",
+    "category": "Technology",
+    "disclaimer": "This story is a summary of posts on X and may evolve over time.",
+    "last_updated_at_ms": "2025-11-17T16:21:41.000Z",
+    "cluster_posts_results": [{ "post_id": "1989400000000000001" }, { "post_id": "not-a-post-id" }],
+    "contexts": {
+      "sports": [],
+      "entities": { "organizations": ["Example Labs"] },
+      "topics": ["Artificial intelligence"],
+      "finance": { "tickers": [] }
+    },
+    "keywords": { "terms": ["open weights"] }
+  }
+}

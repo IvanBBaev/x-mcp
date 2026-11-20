@@ -24,14 +24,14 @@ import { PAGE_TOKEN_DESC, RAW_HISTOGRAM_DESC, RAW_PAGE_DESC } from '../../src/to
  * docs/reference/tools.md (regenerate with `npm run docs:gen`), the docs/03-tool-catalog.md
  * reconciliation, and the context budget in scripts/context-gate.mjs.
  */
-const REGISTERED_TOOLS = 45;
+const REGISTERED_TOOLS = 47;
 
 /** The registry packages (`src/tools/<package>.ts`) and how many tools each contributes. */
 const PACKAGE_SIZES: ReadonlyArray<readonly [string, number]> = [
   ['auth', 2],
   ['posts', 5],
   ['users', 1],
-  ['search', 2],
+  ['search', 4],
   ['engagement', 7],
   ['timelines', 3],
   ['graph', 6],
@@ -142,5 +142,5 @@ test('context budget: recurring parameters use the shared wording from src/tools
     }
   }
   // Pinned so a new paged tool is counted here, not silently skipped.
-  assert.deepEqual(seen, { page_token: 19, max_results: 17, raw: 16 });
+  assert.deepEqual(seen, { page_token: 19, max_results: 18, raw: 16 });
 });

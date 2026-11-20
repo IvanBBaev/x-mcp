@@ -321,8 +321,8 @@ T-206):
 ## 5. Tool surface principles
 
 1. **Curated, not generated.** Tools map to *agent intents* (post something, find
-   posts about T, who follows me), not to raw endpoints. 45 tools in 12 packages
-   (all unconditional; a `read-only` deployment lists 45 and can call 23 —
+   posts about T, who follows me), not to raw endpoints. 47 tools in 12 packages
+   (all unconditional; a `read-only` deployment lists 47 and can call 25 —
    [03-tool-catalog.md](03-tool-catalog.md)). Curation cuts both ways: nine designed rows
    were dropped rather than shipped once they proved to be either answerable by an existing
    tool or out of shape for a text-only server ([decisions/0002](decisions/0002-remaining-catalogued-tools.md)).

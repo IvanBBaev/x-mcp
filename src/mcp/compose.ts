@@ -121,6 +121,10 @@ const TOOL_BUCKETS: Readonly<Record<string, string | null>> = {
   x_bookmark_folders_list: 'bookmark-folders',
   x_bookmark_folder_posts: 'bookmark-folder-posts',
   x_bookmark_folder_create: 'bookmark-folders-create',
+  // Q11 news: search and lookup are separate X rate-limit families (200 / 15 min per app
+  // each; search also 200 / 15 min per user — docs.x.com rate-limits page, 2026-11-20).
+  x_news_search: 'news-search',
+  x_news_get: 'news-lookup',
 };
 
 /** Test seams: override any port; production passes nothing and gets the real adapters. */

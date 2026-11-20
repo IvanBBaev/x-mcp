@@ -1,5 +1,6 @@
 // Typed endpoint wrappers for X API v2 search & counts (docs/01 "Search & counts";
-// docs/03 `x_search_recent`, `x_post_counts_recent`). Owned by the T-123 search slice.
+// docs/03 `x_search_recent`, `x_post_counts_recent`, `x_news_search`, `x_news_get`). Owned
+// by the T-123 search slice; the news wrappers were added by Q11.
 //
 // Each wrapper maps typed args to a single `XApiRequest` and returns the raw response
 // envelope for the tool layer to compact. Nothing here owns transport, auth, retries, or
@@ -8,7 +9,7 @@
 // blank field never becomes an empty `?key=` parameter.
 
 import type { EndpointInvoker } from '../../core/tooldef.js';
-import type { RawListResponse, RawTweet } from '../../core/render.js';
+import type { RawListResponse, RawSingleResponse, RawTweet } from '../../core/render.js';
 
 // The tweet compaction field set, shared with the post read tools so search results carry
 // author handles, engagement metrics, references, media, and long-form note bodies.
@@ -104,5 +105,75 @@ export async function countsRecent(
     path: '/2/tweets/counts/recent',
     query,
     scopes: ['tweet.read'],
+  });
+}
+
+// --- News (Q11) --------------------------------------------------------------------
+//
+// `GET /2/news/search` and `GET /2/news/{id}` (docs.x.com x-api/news, OpenAPI 2.175 —
+// operationIds searchNews / getNews, fetched 2026-11-20). Both accept an app-only bearer or a
+// user token (OAuth2 scopes `tweet.read users.read`). Every request asks for the full
+// `news.fields` set the spec enumerates; the tool layer decides what the compact shape keeps.
+
+/** Every `news.fields` value the OpenAPI 2.175 enum lists. */
+const NEWS_FIELDS =
+  'category,cluster_posts_results,contexts,disclaimer,hook,id,keywords,name,summary,updated_at';
+
+/**
+ * One news story. Every field is optional and read defensively (DRIFT-1). `updated_at` is
+ * the spec's name; the docs' introduction example and changelog call the same ISO value
+ * `last_updated_at_ms`, so both are modelled (docs/07 NEWS-3). `contexts` / `keywords` have
+ * no documented shape, so they stay `unknown` and only ever reach the caller via `raw`.
+ */
+export interface RawNews {
+  readonly id?: string;
+  readonly name?: string;
+  readonly summary?: string;
+  readonly hook?: string;
+  readonly category?: string;
+  readonly disclaimer?: string;
+  readonly updated_at?: string;
+  readonly last_updated_at_ms?: string | number;
+  readonly cluster_posts_results?: readonly { readonly post_id?: string }[];
+  readonly contexts?: unknown;
+  readonly keywords?: unknown;
+}
+
+/** Parameters for {@link searchNews}. */
+export interface SearchNewsParams {
+  readonly query: string;
+  readonly maxResults?: number;
+  readonly maxAgeHours?: number;
+}
+
+/** `GET /2/news/search` — news stories matching a query; unpaginated (docs/03 `x_news_search`). */
+export async function searchNews(
+  http: EndpointInvoker,
+  params: SearchNewsParams,
+): Promise<RawListResponse<RawNews>> {
+  const query: Record<string, QueryValue> = {
+    query: params.query,
+    'news.fields': NEWS_FIELDS,
+    ...(params.maxResults !== undefined ? { max_results: params.maxResults } : {}),
+    ...(params.maxAgeHours !== undefined ? { max_age_hours: params.maxAgeHours } : {}),
+  };
+  return http.send<RawListResponse<RawNews>>({
+    method: 'GET',
+    path: '/2/news/search',
+    query,
+    scopes: ['tweet.read', 'users.read'],
+  });
+}
+
+/** `GET /2/news/{id}` — one news story by id (docs/03 `x_news_get`). */
+export async function getNews(
+  http: EndpointInvoker,
+  newsId: string,
+): Promise<RawSingleResponse<RawNews>> {
+  return http.send<RawSingleResponse<RawNews>>({
+    method: 'GET',
+    path: `/2/news/${encodeURIComponent(newsId)}`,
+    query: { 'news.fields': NEWS_FIELDS },
+    scopes: ['tweet.read', 'users.read'],
   });
 }

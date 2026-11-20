@@ -10,6 +10,16 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- News (two new read-only tools in the `search` package, 45 → 47): `x_news_search` searches
+  the news stories X curates from posts (`query`, optional `max_age_hours` 1-720, one page —
+  X returns no cursor) and `x_news_get` reads one story by id. Stories come back as
+  `{id, name, summary, hook, category, disclaimer, updated_at, post_ids}`, all text
+  sanitized and marked untrusted; the undocumented `contexts` / `keywords` objects only with
+  `raw: true`. App-only bearer or user token, existing `tweet.read users.read` scopes — no
+  new OAuth scope. X publishes no price for news, so each story is budgeted at the post-read
+  rate. An empty or over-long query, an out-of-range `max_age_hours` or a malformed
+  `news_id` is refused at validation and never charged. `tools/list` grows by 2,675 B, to
+  72,592 of 80,000 B.
 - Bookmark folders (three new tools, 42 → 45): `x_bookmark_folders_list` lists the
   authenticated user's folders as `{id, name}` (names sanitized, marked untrusted);
   `x_bookmark_folder_posts` lists one folder's posts as `{id, url}`, since X returns ids only

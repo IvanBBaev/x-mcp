@@ -515,6 +515,10 @@ Note the count side:
    returns post ids only and takes no `fields`/`expansions`, so it cannot share
    `x_bookmarks_list`'s compact-post shape. +3,160 B, 66,757 → 69,917 B (10,083 B of
    headroom). News and Articles remain open.
+   **News landed 2026-11-20 as Q11 (owner go):** two read-only tools, `x_news_search` and
+   `x_news_get`, in the `search` package. News search is unpaginated, so the search tool
+   carries no `page_token`. +2,675 B (1,593 + 1,080 with the list framing), inside the
+   modelled 1.9–3.8 kB, 69,917 → 72,592 B (7,408 B of headroom). Articles remain open.
 5. **Off-by-default packages.** Is d1 (`X_MCP_PACKAGES`, default = today's 12 packages)
    acceptable as the mechanism for any package beyond the three candidates? Or does
    "full surface" (decisions/0002) have to stay "everything listed by default"?

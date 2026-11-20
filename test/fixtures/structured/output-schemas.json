@@ -1451,6 +1451,134 @@
       },
       "required": ["data"]
     },
+    "x_news_get": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/compact_news"
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"],
+      "$defs": {
+        "compact_news": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "hook": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "disclaimer": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            },
+            "post_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["id"]
+        }
+      }
+    },
+    "x_news_search": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/compact_news"
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"],
+      "$defs": {
+        "compact_news": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "hook": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "disclaimer": {
+              "type": "string"
+            },
+            "updated_at": {
+              "type": "string"
+            },
+            "post_ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["id"]
+        }
+      }
+    },
     "x_post_counts_archive": {
       "type": "object",
       "properties": {

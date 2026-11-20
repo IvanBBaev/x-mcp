@@ -1,0 +1,28 @@
+{
+  "_provenance": "Synthetic: hand-written to the OpenAPI 2.175 200 response schema for GET /2/news/search (searchNews; docs.x.com x-api/news/search-news, fetched 2026-11-20) — `data` of News objects with the spec's `updated_at`, plus `meta.result_count`; no `next_token` (the endpoint is unpaginated). Fictional stories, NOT a live capture (pending the H2 live fixture capture). Authored 2026-11-20. Exercises: x_news_search.",
+  "data": [
+    {
+      "id": "1989418137272422538",
+      "name": "Open-source model release draws developer attention",
+      "summary": "Developers on X are discussing a newly released open-weight language model and its benchmark results.",
+      "hook": "A new open-weight model is trending among developers.",
+      "category": "Technology",
+      "disclaimer": "This story is a summary of posts on X and may evolve over time.",
+      "updated_at": "2026-11-20T09:15:00.000Z",
+      "cluster_posts_results": [
+        { "post_id": "1989400000000000001" },
+        { "post_id": "1989400000000000002" }
+      ],
+      "contexts": { "topics": ["Artificial intelligence"] },
+      "keywords": { "terms": ["open weights", "benchmarks"] }
+    },
+    {
+      "id": "1989418137272422539",
+      "name": "City marathon results",
+      "summary": "Runners and spectators share results from the weekend city marathon.",
+      "category": "Sports",
+      "updated_at": "2026-11-19T18:02:11.000Z"
+    }
+  ],
+  "meta": { "result_count": 2 }
+}

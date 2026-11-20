@@ -371,7 +371,7 @@ test('no X-calling tool prices a w:action write through the $0 table fallback', 
     ...dmTools,
     ...archiveTools,
   ];
-  assert.equal(tools.length, 42);
+  assert.equal(tools.length, 44);
   const staticActions = tools.filter((tool) => tool.cost === 'w:action').map((tool) => tool.name);
   assert.deepEqual(staticActions, []);
 });

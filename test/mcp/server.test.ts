@@ -119,6 +119,8 @@ const READ_TOOLS = [
   'x_list_timeline',
   'x_lists_owned',
   'x_media_status',
+  'x_news_get',
+  'x_news_search',
   'x_post_counts_archive',
   'x_post_counts_recent',
   'x_post_get',

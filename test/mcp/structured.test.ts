@@ -222,7 +222,7 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
   const names = composeServer(config)
     .registry.listForMcp()
     .map((tool) => tool.name);
-  assert.equal(names.length, 45, 'the Phase-1/2/3 catalog registers 45 tools');
+  assert.equal(names.length, 47, 'the Phase-1/2/3/4 catalog registers 47 tools');
   assertOutputSchemaCoverage(names); // must not throw
   for (const name of names) {
     const schema = toolOutputSchema(name);
@@ -627,12 +627,33 @@ test('REND-11/Q10: bookmark folder pages, raw envelopes and the create result co
   assertConforms('x_bookmark_folder_create', { folder_id: '', name: 'Later' });
 });
 
+// --- Q11: news (docs/07 §18 NEWS) ----------------------------------------------------
+
+test('REND-11/Q11: news pages, single stories and their raw envelopes conform', () => {
+  const story = {
+    id: '1989418137272422538',
+    name: 'Open-source model release draws developer attention',
+    summary: 'Developers on X are discussing a newly released open-weight model.',
+    category: 'Technology',
+    updated_at: '2026-11-20T09:15:00.000Z',
+    post_ids: ['1989400000000000001'],
+  };
+  // NEWS-1: an unpaginated page of stories, always with the untrusted note.
+  assertConforms('x_news_search', buildPage([story], { untrusted: true }));
+  assertConforms('x_news_search', buildPage([], { untrusted: true }));
+  assertConforms('x_news_search', loadFixture<object>('search/news-search.json'));
+  // A sparse story (DRIFT-1) keeps only its id.
+  assertConforms('x_news_get', { id: '1989418137272422539' });
+  assertConforms('x_news_get', story);
+  assertConforms('x_news_get', loadFixture<object>('search/news-get.json'));
+});
+
 // --- Q09: every served schema accepted a real render that carries meta ------------
 // Runs last (node:test runs a file's top-level tests in order): every tool the server
 // serves must have gone through `assertConforms` above at least once.
 
 test('Q09/REND-11: real structuredContent with meta conforms to EVERY served outputSchema', () => {
-  assert.equal(SERVED.size, 45);
+  assert.equal(SERVED.size, 47);
   const unchecked = [...SERVED.keys()].filter((name) => !VALIDATED_WITH_META.has(name)).sort();
   assert.deepEqual(unchecked, [], 'tools with no real-render conformance check');
 });

@@ -731,3 +731,49 @@ pending the H2 live capture.
   `GET /2/users/:id/bookmarks`. The folders read bills as `r:list` and the folder-posts
   read as `r:post` (per resource, never `owned`); the create bills at the "Bookmark"
   write rate (`w:action`, `BOOKMARK_USD`). An advisory budget must never under-count.
+
+## 18. NEWS — News stories *(Q11, Phase 4)*
+
+Platform fact-check 2026-11-20 (docs.x.com `x-api/news` introduction, `search-news`,
+`get-news-stories-by-id`, the rate-limits page and the OpenAPI spec 2.175). `[Q11]` = the
+Q11 news item (owner go 2026-11-20, [review 13](reviews/13-context-budget-headroom-2026-11-19.md)
+§6 Q4). Both endpoints are generally available, take an app-only bearer or a user token and
+need only the existing `tweet.read users.read` scopes (OD-7). All fixtures are hand-written,
+pending the H2 live capture.
+
+- **NEWS-1 — News search is one page** `P3` `[Q11]`
+  `GET /2/news/search` documents no `pagination_token` and no `meta.next_token`, so
+  `x_news_search` takes no `page_token` (refused as an unknown key) and never returns a
+  `next_token`. `max_results` is clamped into 1-100 with a note (PAGE-3); `raw: true`
+  caps the wire at 25 like every other raw read (REND-10).
+
+- **NEWS-2 — Locally-invalid news input is refused before any charge** `P3` `[Q11]`
+  An empty or over-2,048-character `query`, a `max_age_hours` outside 1-720 or not an
+  integer, and a `news_id` that is not 1-19 ASCII digits (a URL included) fail in the zod
+  schema — the budget is never checked and no request is sent (charge-before-refuse).
+
+- **NEWS-3 — Two names for the update time** `P3` `[Q11]`
+  The spec's News object names the field `updated_at`; the docs' introduction example and
+  changelog show `last_updated_at_ms` (an ISO string despite the name). Both map to the
+  compact `updated_at`, normalized to ISO-8601; `updated_at` wins when both are present.
+
+- **NEWS-4 — Story text is untrusted third-party text** `P3` `[Q11]`
+  `name`, `summary`, `hook`, `category` and `disclaimer` are sanitized (bidi overrides
+  and zero-width characters stripped, capped per field) and every result carries the
+  untrusted-content note (REND-6); a field that sanitizes to nothing is omitted.
+  Source post ids that are not 1-19 digits are dropped from `post_ids`.
+
+- **NEWS-5 — Unpublished news pricing is billed per story** `P3` `[Q11]`
+  No pricing row exists for either news endpoint. The reads bill as `r:post` per story
+  returned — the rate X charges for the `news.new` webhook event — so a search settles at
+  `data.length` units (an empty page is free) and a lookup at one. An advisory budget must
+  never under-count.
+
+- **NEWS-6 — `contexts` and `keywords` are raw-only** `P3` `[Q11]`
+  The spec types both as free-form objects with no documented shape, so the compact story
+  leaves them out; `raw: true` returns the exact envelope, both included.
+
+- **NEWS-7 — A data-less lookup is `not-found`** `P3` `[Q11]`
+  `GET /2/news/:id` for an unknown or expired story answers `200` with `errors[]` and no
+  `data`. `x_news_get` fails with a typed `not-found` error carrying only the X error kind,
+  never X's free-text `detail`.

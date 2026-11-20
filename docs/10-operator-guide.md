@@ -379,13 +379,13 @@ Run `authorize` once with the same values, then:
 
 Presets are the main safety dial. Each one is a superset of the one above it:
 
-| `X_MCP_POLICY` | Adds | Callable tools (of 45) |
+| `X_MCP_POLICY` | Adds | Callable tools (of 47) |
 |---|---|--:|
-| `read-only` *(default)* | reads except DM reads | 23 |
-| `engage` | `write:engagement` — like / repost / bookmark / list follow & pin, bookmark folder create | 29 |
-| `publish` | `write:content`, `write:moderation` — post create, media upload, list create/update/members, hide reply, thread create | 36 |
-| `manage` | `destructive:content` — post delete, list delete | 38 |
-| `full` | `write:social-graph`, `destructive:social-graph` — follow, mute, block | 41 |
+| `read-only` *(default)* | reads except DM reads | 25 |
+| `engage` | `write:engagement` — like / repost / bookmark / list follow & pin, bookmark folder create | 31 |
+| `publish` | `write:content`, `write:moderation` — post create, media upload, list create/update/members, hide reply, thread create | 38 |
+| `manage` | `destructive:content` — post delete, list delete | 40 |
+| `full` | `write:social-graph`, `destructive:social-graph` — follow, mute, block | 43 |
 
 Prefer a low preset plus a targeted allow over jumping a level:
 
@@ -423,7 +423,7 @@ name them:
 ```
 
 Adds the three DM event-lookup tools. `"read:dm,write:dm"` also enables `x_dm_send`
-(4 tools, total 45 callable when combined with `full`). DM tools are `user-only` — they
+(4 tools, total 47 callable when combined with `full`). DM tools are `user-only` — they
 need OAuth 2.0 user context, not a bearer token. DM content is private third-party data;
 read [12-privacy.md](12-privacy.md) before enabling this.
 

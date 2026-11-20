@@ -1,11 +1,11 @@
 # 03 — Tool catalog
 
-**45 tools in 10 packages** (the frozen tool-name contract other tasks build against).
+**47 tools in 10 packages** (the frozen tool-name contract other tasks build against).
 
-- **All 45 are unconditional** — always registered once their phase has shipped. The one
+- **All 47 are unconditional** — always registered once their phase has shipped. The one
   conditional entry, `x_usage_get`, was resolved **GO on 2026-07-31** (WP-3.11 / T-317)
   on the T-010 fact-check in docs/01 §3.5; it now ships as a normal Phase-3 tool.
-- Phase 3 has shipped, so a **default deployment registers all 45**. A deployment held
+- Phase 3 has shipped, so a **default deployment registers all 47**. A deployment held
   at Phase 1+2 registers **14** (6 Phase-1 reads + 8 Phase-2 auth/write tools);
   `X_MCP_AVAILABILITY` gates nothing further, because no shipped tool is `pilot`,
   `premium-user`, or `enterprise`.
@@ -13,8 +13,9 @@
 > Count reconciliation (T-019, closed 2026-08-09 by [decisions/0002](decisions/0002-remaining-catalogued-tools.md)):
 > the reviews and roadmap once quoted "~46 full / ~28 typical" against a 50-row design
 > catalogue. That catalogue was a *design* surface; the shipped surface is
-> **45 / 45 / ~14** (rows / unconditional / registered at Phase 1+2). The three bookmark-folder
-> tools (Q10, 2026-11-20) are the first post-catalogue additions. The nine rows
+> **47 / 47 / ~14** (rows / unconditional / registered at Phase 1+2). The three bookmark-folder
+> tools (Q10, 2026-11-20) are the first post-catalogue additions; the two news reads (Q11,
+> 2026-11-20) the second. The nine rows
 > that never became tools were cut, not deferred — see
 > [Deliberate omissions](#deliberate-omissions).
 > **Availability note:** full-archive search/counts and profile search are `app+user`
@@ -30,7 +31,7 @@
 
 ### Registered surface
 
-**45 of the 45 catalogued tools are registered today**, in 12 registry packages
+**47 of the 47 catalogued tools are registered today**, in 12 registry packages
 (`src/tools/<package>.ts`). Per-tool detail — titles, input fields, scopes, MCP hints — is
 in the generated [`reference/tools.md`](reference/tools.md).
 
@@ -39,7 +40,7 @@ in the generated [`reference/tools.md`](reference/tools.md).
 | `auth` | 2 | `x_auth_status`, `x_rate_limit_status` |
 | `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
 | `users` | 1 | `x_user_get` |
-| `search` | 2 | `x_search_recent`, `x_post_counts_recent` |
+| `search` | 4 | `x_search_recent`, `x_post_counts_recent`, `x_news_search`, `x_news_get` |
 | `engagement` | 7 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list`, `x_bookmark_folders_list`, `x_bookmark_folder_posts`, `x_bookmark_folder_create` |
 | `timelines` | 3 | `x_timeline_home`, `x_timeline_mentions`, `x_timeline_user` |
 | `graph` | 6 | `x_follow_set`, `x_mute_set`, `x_block_set`, `x_followers_list`, `x_following_list`, `x_user_search` |
@@ -53,7 +54,7 @@ Callable tools per `X_MCP_POLICY` preset (denied tools stay registered and refus
 
 | `read-only` | `engage` | `publish` | `manage` | `full` | `full` + DM allow |
 |--:|--:|--:|--:|--:|--:|
-| 23 | 29 | 36 | 38 | 41 | 45 |
+| 25 | 31 | 38 | 40 | 43 | 47 |
 
 Every catalogued tool is registered.
 
@@ -102,7 +103,9 @@ Every catalogued tool is registered.
   - `owned` — own-data read, ~$0.001/resource.
   - `r:post` ~$0.005/post · `r:user` ~$0.010/user · `r:follows` ~$0.010 ·
     `r:list` ~$0.005 (list metadata/timelines) · `r:engage` ~$0.001 (like/mute/block
-    reads) · `r:dm` ~$0.010/event.
+    reads) · `r:dm` ~$0.010/event. The news reads (`x_news_search`, `x_news_get`) have no
+    published price; they bill as `r:post` per story, the rate of X's `news.new` webhook
+    event (NEWS-5).
   - `w:post` $0.015 (**$0.20 when the post contains a URL**) · `w:dm` $0.015 ·
     `w:list` $0.010 (list create) · `w:action` per-write (engagement/graph/moderation
     writes and deletes; see 01 §3).
@@ -173,6 +176,8 @@ Every catalogued tool is registered.
 | `x_search_archive` | read:content | app+user | r:post | P3 | X (Twitter): full-archive search since 2006. `max_results` 10–500. High-volume read — guard with the credit budget (renamed from `search_all`) |
 | `x_post_counts_recent` | read:content | app+user | r:post | P1 | X (Twitter): volume histogram for a query, last 7 days, granularity minute/hour/day |
 | `x_post_counts_archive` | read:content | app+user | r:post | P3 | X (Twitter): full-archive volume histogram (renamed from `post_counts_all`). **App-only bearer only** — `GET /2/tweets/counts/all` takes no user token, so it needs `X_MCP_AUTH_MODE=app-only`; under the default `oauth2` mode the registry refuses it locally, before any request or charge (AUTH-17 `auth` error). Classed `app+user` with a `credential: 'app-only'` marker ([reviews/12](reviews/12-platform-fact-check-2026-11-15.md) F-1, owner decision OD-1, resolved 2026-11-19) |
+| `x_news_search` | read:content | app+user | r:post | P3 | X (Twitter): search the news stories X curates from posts — `{query}` (1–2048 characters), optional `max_age_hours` 1–720 (X's default 168). `max_results` 1–100. One page only: X returns no cursor (NEWS-1). Compact `{id, name, summary, hook, category, disclaimer, updated_at, post_ids}` items, all text sanitized and marked untrusted; `contexts`/`keywords` only with `raw` (NEWS-6). No pricing row (fact-check 2026-11-20): billed per story at the post-read rate (NEWS-5) |
+| `x_news_get` | read:content | app+user | r:post | P3 | X (Twitter): one news story by id — `{news_id}` (1–19 digits). Same compact shape as `x_news_search`; a data-less `200` is a typed `not-found` (NEWS-7). Billed as one story |
 
 ## timelines
 

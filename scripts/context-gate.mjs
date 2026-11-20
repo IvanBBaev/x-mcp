@@ -56,7 +56,10 @@
 // still carries it, documented once in docs/03 "Result shape"): **66,757 bytes** — ~13,243 B
 // of headroom. Q10 (OD-4, review 13 §6 Q4) then added the three bookmark-folder tools —
 // x_bookmark_folders_list 1,147 B, x_bookmark_folder_posts 1,308 B, x_bookmark_folder_create
-// 702 B (+3,160 B with the list framing): **69,917 bytes** — ~10,083 B of headroom. The
+// 702 B (+3,160 B with the list framing): **69,917 bytes** — ~10,083 B of headroom. Q11
+// (owner go 2026-11-20) then added the two read-only news tools — x_news_search 1,593 B,
+// x_news_get 1,080 B (+2,675 B with the list framing): **72,592 bytes** — ~7,408 B of
+// headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -76,7 +79,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 69_917;
+const BASELINE_BYTES = 72_592;
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;
