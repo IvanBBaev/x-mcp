@@ -176,6 +176,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 >
 > News (2026-11-20, Q11, fef5278, review 13 §6 Q4): the two news reads add 2,675 B, to
 > **72,592 B** (7,408 B of headroom).
+>
+> Articles (2026-11-20, Q12, 70d3e08, review 13 §6 Q4): the two Article writes add 2,198 B,
+> to **74,790 B** (5,210 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -219,6 +222,15 @@ package, `x_news_search` and `x_news_get` (both `read:content`, `app+user`, exis
 webhook rate), which is an assumption. The `updated_at` / `last_updated_at_ms` naming drift
 is handled; docs/07 NEWS-1..7. Fixtures are hand-written, pending H2 capture. +2,675 B, to
 **72,592 B**.
+
+**Articles shipped 2026-11-20 (queue Q12, 70d3e08):** two writes in the `posts` package,
+`x_article_draft_create` and `x_article_publish` (both `write:content`, `user-only`, existing
+`tweet.read tweet.write users.read` scopes). The Phase 4 fact-check (review 12 addendum,
+2026-11-20) found only draft create and publish; there is no draft update, get, list or
+delete endpoint. X documents no price, rate limit or account eligibility for Articles, so
+both bill as `w:post`, which is an assumption. The 10,000 weighted-character limit is
+checked locally as a lower bound; docs/07 ART-1..6. Fixtures are hand-written, pending H2
+capture. +2,198 B, to **74,790 B**.
 
 ---
 
