@@ -355,7 +355,7 @@ console.log("tools",t.length,
 "| annotations",t.filter(x=>x.annotations).length);});'
 ```
 
-**Expected output, exactly:** `tools 42 | outputSchema 42 | annotations 42`.
+**Expected output, exactly:** `tools 45 | outputSchema 45 | annotations 45`.
 
 The `2>/dev/null` is required — npm deprecation warnings otherwise mix into the JSON.
 
