@@ -87,6 +87,121 @@
       },
       "required": ["data"]
     },
+    "x_bookmark_folder_create": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "folder_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": ["folder_id", "name"]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"]
+    },
+    "x_bookmark_folder_posts": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "url"]
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"]
+    },
+    "x_bookmark_folders_list": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "name"]
+                  }
+                },
+                "result_count": {
+                  "type": "number"
+                },
+                "next_token": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["items", "result_count"]
+            },
+            {
+              "type": "object",
+              "description": "Uncompacted X API envelope (raw: true)."
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"]
+    },
     "x_bookmark_set": {
       "type": "object",
       "properties": {

@@ -509,6 +509,12 @@ Note the count side:
 4. **Candidate order.** Which candidate takes the freed headroom first? This report
    assumes Bookmark Folders with the OD-4 write (merged reads or two tools?), then News,
    then Articles. Each still needs its own Phase 4 fact-check and real use case.
+   **Answered 2026-11-20 (owner): Bookmark Folders first, with the OD-4 write.** Landed
+   2026-11-20 as Q10, as three tools rather than merged reads: `x_bookmark_folders_list`,
+   `x_bookmark_folder_posts` and `x_bookmark_folder_create`. The folder-posts endpoint
+   returns post ids only and takes no `fields`/`expansions`, so it cannot share
+   `x_bookmarks_list`'s compact-post shape. +3,160 B, 66,757 → 69,917 B (10,083 B of
+   headroom). News and Articles remain open.
 5. **Off-by-default packages.** Is d1 (`X_MCP_PACKAGES`, default = today's 12 packages)
    acceptable as the mechanism for any package beyond the three candidates? Or does
    "full surface" (decisions/0002) have to stay "everything listed by default"?

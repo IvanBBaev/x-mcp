@@ -1,0 +1,8 @@
+{
+  "_provenance": "Synthetic: hand-written to the OpenAPI 2.175 response schema for GET /2/users/:id/bookmarks/folders/:folder_id (docs.x.com/x-api/bookmarks/get-bookmarks-by-folder-id, fetched 2026-11-20) — `data[]` of post `{id}` only, no `meta` documented; fictional ids, NOT a live capture (pending the H2 live fixture capture). Authored 2026-11-20. Exercises: BKF-1, BKF-2.",
+  "data": [
+    { "id": "1460323737035677698" },
+    { "id": "1460323737035677699" },
+    { "id": "1460323737035677700" }
+  ]
+}

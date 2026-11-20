@@ -175,7 +175,7 @@ test('MCPB: the unpacked bundle boots from its own directory with the substitute
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`);
   const list = (await response(2)) as { result?: { tools?: unknown[] } };
-  assert.equal(list.result?.tools?.length, 42);
+  assert.equal(list.result?.tools?.length, 45);
 
   child.stdin.end();
   const [code] = (await once(child, 'exit')) as [number | null];

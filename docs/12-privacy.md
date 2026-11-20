@@ -87,7 +87,9 @@ Mitigations that *are* in the server:
 curation of **public** posts, classified `read:content` and therefore available in the
 default preset (decision 0002). What it reveals is the owner's reading interests, not
 third-party private content; the listed posts get the same untrusted-content marking as
-any other read.
+any other read. The bookmark-folder reads (`x_bookmark_folders_list`,
+`x_bookmark_folder_posts`) are the same class: folder names are the owner's own labels
+(sanitized and marked untrusted), and a folder's posts come back as ids only.
 
 **Third-party data.** Posts, profiles and especially DMs are other people's personal data.
 If you enable `read:dm`, you are routing private correspondence — including messages

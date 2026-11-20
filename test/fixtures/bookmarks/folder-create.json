@@ -1,0 +1,4 @@
+{
+  "_provenance": "Synthetic: hand-written to the OpenAPI 2.175 201 response schema for POST /2/users/:id/bookmarks/folders (createUsersBookmarkFolder; in the spec but not in the docs.x.com page index, fetched 2026-11-20) — `data` of `{id, name}`; fictional folder, NOT a live capture (pending the H2 live fixture capture). Authored 2026-11-20. Exercises: x_bookmark_folder_create.",
+  "data": { "id": "1146654567674912771", "name": "Reading list" }
+}

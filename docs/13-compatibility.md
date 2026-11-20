@@ -49,7 +49,7 @@ independently of any client.
 | Capabilities | Exactly `{"tools":{},"prompts":{}}`. No `listChanged`, no resources, logging, completions, sampling, elicitation or roots. | `protocol-verified` — [`src/mcp/server.ts`](../src/mcp/server.ts), [`test/mcp/prompts.test.ts`](../test/mcp/prompts.test.ts) |
 | Prompts | `prompts/list` returns up to 4 workflow templates over the existing tools (`x_mentions_triage`, `x_thread_draft`, `x_topic_digest`, `x_account_overview`); a prompt whose required tools are denied by the policy is not listed. `prompts/get` returns one `user` message; an unknown or hidden prompt, a missing required argument, an unknown argument or an over-long value is `-32602 Invalid params`. Not part of `tools/list` — no context-budget bytes. | `protocol-verified` — [`test/mcp/prompts.test.ts`](../test/mcp/prompts.test.ts) |
 | `instructions` | 944 characters returned on `initialize`. | `protocol-verified` — [`test/mcp/server.test.ts:179`](../test/mcp/server.test.ts) |
-| `tools/list` | 42 tools, delivered in one response (~80 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:129`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
+| `tools/list` | 45 tools, delivered in one response (~70 KB), `nextCursor` absent. Every tool carries `inputSchema`, `outputSchema` and `annotations`. | `protocol-verified` — [`test/mcp/spawn.test.ts:129`](../test/mcp/spawn.test.ts) (count), [`test/mcp/server.test.ts:134`](../test/mcp/server.test.ts) (schemas), [`test/mcp/structured.test.ts:174`](../test/mcp/structured.test.ts) (output-schema coverage) |
 | `tools/call` success | `content[0]` is a JSON text block **and** `structuredContent` is the same object. | `protocol-verified` — [`test/mcp/structured.test.ts:134`](../test/mcp/structured.test.ts) |
 | `tools/call` failure | Text-only result with `isError: true`. No `structuredContent` — deliberate, since the spec exempts error results from `outputSchema` conformance. | `protocol-verified` — [`test/mcp/server.test.ts:300`](../test/mcp/server.test.ts) |
 | Unknown tool name | A typed `validation` **tool result**, not a JSON-RPC error. Clients that only surface protocol errors still see the message. | `protocol-verified` — [`test/mcp/server.test.ts:529`](../test/mcp/server.test.ts) |
@@ -311,7 +311,7 @@ likely to be mistaken for a server bug.
   what tells the model about presets, budgets and confirmation tokens. If a client ignores
   it, the model may attempt denied tools and get policy refusals it does not understand —
   a UX problem, not a correctness one.
-- **A large `tools/list` costs context.** 42 tools with descriptions is ~80 KB of JSON.
+- **A large `tools/list` costs context.** 45 tools with descriptions is ~70 KB of JSON.
   Clients that inject the whole tool list into the prompt will feel it. Use
   `X_MCP_HIDE_DENIED=1` with a narrow preset to shrink the list to the callable set.
 

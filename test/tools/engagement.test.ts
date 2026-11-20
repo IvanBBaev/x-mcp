@@ -1,5 +1,7 @@
 // Tests for the engagement tools (T-211): the writes x_like_set / x_repost_set /
-// x_bookmark_set, plus the own-bookmarks read x_bookmarks_list. Each network test builds a
+// x_bookmark_set, the own-bookmarks read x_bookmarks_list, and the bookmark-folder tools
+// (Q10, docs/07 BKF): x_bookmark_folders_list / x_bookmark_folder_posts /
+// x_bookmark_folder_create. Each network test builds a
 // REAL http client (api/http) over an undici MockAgent and drives the handler end to end:
 // post-ref normalization -> GET /2/users/me (the AUTH-15 "who am I" seam) -> the engagement
 // call -> compact output. Interceptors pin exact paths, methods, queries and JSON bodies, so
@@ -15,12 +17,17 @@ import {
   INTERACTION_DELETE_USD,
   USER_INTERACTION_CREATE_USD,
 } from '../../src/core/budget.js';
-import { XError } from '../../src/core/errors.js';
+import { XError, apiError } from '../../src/core/errors.js';
+import { createRegistry } from '../../src/core/registry.js';
+import type { Registry } from '../../src/core/registry.js';
 import { UNTRUSTED_CONTENT_NOTE } from '../../src/core/render.js';
 import type { RawListResponse, RawTweet } from '../../src/core/render.js';
-import type { ToolContext } from '../../src/core/tooldef.js';
+import type { AnyToolDef, ToolContext } from '../../src/core/tooldef.js';
 import {
   engagementTools,
+  xBookmarkFolderCreate,
+  xBookmarkFolderPosts,
+  xBookmarkFoldersList,
   xBookmarkSet,
   xBookmarksList,
   xLikeSet,
@@ -87,7 +94,15 @@ interface CompactPageResult {
 // --- Contract axes ---------------------------------------------------------------
 
 test('engagementTools exposes the three *_set tools with identical write axes', () => {
-  assert.deepEqual(engagementTools, [xLikeSet, xRepostSet, xBookmarkSet, xBookmarksList]);
+  assert.deepEqual(engagementTools, [
+    xLikeSet,
+    xRepostSet,
+    xBookmarkSet,
+    xBookmarksList,
+    xBookmarkFoldersList,
+    xBookmarkFolderPosts,
+    xBookmarkFolderCreate,
+  ]);
   assert.equal(xLikeSet.name, 'x_like_set');
   assert.equal(xRepostSet.name, 'x_repost_set');
   assert.equal(xBookmarkSet.name, 'x_bookmark_set');
@@ -642,4 +657,395 @@ test('bookmarks list: a me-response without an id reads NOTHING and says so', as
   // assertDone: the me-interceptor was the ONLY request — no bookmarks call went out.
   mock.assertDone();
   await mock.close();
+});
+
+// --- Bookmark folders (Q10, docs/07 BKF) ------------------------------------------
+
+/**
+ * A registry with permissive gates that counts budget checks (pipeline step 4), so a test
+ * can prove a local refusal happens at schema validation (step 1) and is never charged.
+ * Mirrors `test/tools/lists.test.ts`'s helper of the same name.
+ */
+function chargeCountingRegistry(tool: AnyToolDef): { reg: Registry; budgetChecks: () => number } {
+  let checks = 0;
+  const reg = createRegistry([tool], {
+    policy: {
+      preset: 'publish',
+      hideDenied: false,
+      isAllowed: () => true,
+      denyError: () => apiError('unused'),
+    },
+    budget: {
+      check: () => {
+        checks += 1;
+      },
+      reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+    },
+    rateLimit: { preflight: () => {} },
+  });
+  return { reg, budgetChecks: () => checks };
+}
+
+/** The compact folder page x_bookmark_folders_list returns (narrowed for asserts). */
+interface FolderPageResult {
+  readonly items: readonly { readonly id: string; readonly name: string }[];
+  readonly result_count: number;
+  readonly next_token?: string;
+  readonly note?: string;
+}
+
+/** The compact id page x_bookmark_folder_posts returns (narrowed for asserts). */
+interface FolderPostsPageResult {
+  readonly items: readonly { readonly id: string; readonly url: string }[];
+  readonly result_count: number;
+  readonly next_token?: string;
+  readonly note?: string;
+}
+
+const FOLDER_ID = '1146654567674912769';
+const FOLDER_POSTS_PATH = `/2/users/9/bookmarks/folders/${FOLDER_ID}`;
+
+test('bookmark folder tools declare their axes: two read:content reads, one engagement write', () => {
+  assert.equal(xBookmarkFoldersList.name, 'x_bookmark_folders_list');
+  assert.equal(xBookmarkFolderPosts.name, 'x_bookmark_folder_posts');
+  assert.equal(xBookmarkFolderCreate.name, 'x_bookmark_folder_create');
+  for (const tool of [xBookmarkFoldersList, xBookmarkFolderPosts]) {
+    assert.equal(tool.policy, 'read:content');
+    assert.equal(tool.availability, 'user-only');
+    assert.equal(tool.phase, 3);
+    assert.equal(tool.annotations.readOnlyHint, true);
+    assert.equal(tool.annotations.openWorldHint, true);
+    assert.match(tool.description, /^X \(Twitter\): /);
+  }
+  // Existing bookmark scopes only (OD-7): no new scope for the folder surface.
+  assert.deepEqual([...xBookmarkFoldersList.scopes], ['users.read', 'bookmark.read']);
+  assert.deepEqual([...xBookmarkFolderPosts.scopes], ['tweet.read', 'users.read', 'bookmark.read']);
+  assert.equal(xBookmarkFolderCreate.policy, 'write:engagement');
+  assert.equal(xBookmarkFolderCreate.availability, 'user-only');
+  assert.equal(xBookmarkFolderCreate.phase, 3);
+  assert.deepEqual([...xBookmarkFolderCreate.scopes], ['users.read', 'bookmark.write']);
+  assert.equal(xBookmarkFolderCreate.annotations.readOnlyHint, false);
+  assert.equal(xBookmarkFolderCreate.annotations.destructiveHint, false);
+  // A second create with the same name makes a second folder: not idempotent.
+  assert.equal(xBookmarkFolderCreate.annotations.idempotentHint, false);
+  assert.equal(xBookmarkFolderCreate.annotations.openWorldHint, true);
+});
+
+test('BKF-6: unpublished folder pricing is billed conservatively, never as owned', () => {
+  // No pricing row for any folder endpoint (fetched 2026-11-20): the reads take the
+  // per-resource read rates instead of `owned`, the create takes the "Bookmark" write rate.
+  assert.equal(xBookmarkFoldersList.cost, 'r:list');
+  assert.equal(xBookmarkFolderPosts.cost, 'r:post');
+  const createCost = xBookmarkFolderCreate.cost;
+  assert.ok(typeof createCost === 'function', 'x_bookmark_folder_create cost must be a resolver');
+  assert.deepEqual(createCost({ name: 'Reading list' }), { class: 'w:action', usd: BOOKMARK_USD });
+});
+
+test('BKF-4: folders list renders sanitized names with the untrusted-content note', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks/folders', method: 'GET', query: {} })
+    .reply(200, loadFixture<Record<string, unknown>>('bookmarks/folders.json'));
+
+  const out = await xBookmarkFoldersList.handler({}, contextFor(mock));
+  const page = out.data as FolderPageResult;
+
+  assert.equal(page.result_count, 2);
+  assert.equal(out.units, 2); // COST-3: billed per folder returned
+  assert.deepEqual(page.items[0], { id: '1146654567674912769', name: 'Reading list' });
+  assert.equal(page.items[1]?.id, '1146654567674912770');
+  // The bidi override and the zero-width space are stripped from the user-chosen name.
+  assert.equal(page.items[1]?.name, 'AI agents');
+  assert.doesNotMatch(page.items[1]?.name ?? '', /[\u202e\u200b]/);
+  assert.ok(page.note);
+  assert.match(page.note, /third-party text/);
+  // BKF-2: the folder reads document no meta — no meta is the final page, not an error.
+  assert.equal(page.next_token, undefined);
+  assert.equal(out.summary, '2 result(s).');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('BKF-2: a folder page with meta.next_token passes the cursor through', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks/folders', method: 'GET', query: {} })
+    .reply(200, {
+      data: [{ id: '1146654567674912769', name: 'Reading list' }],
+      meta: { result_count: 1, next_token: 'folders-2' },
+    });
+
+  const out = await xBookmarkFoldersList.handler({}, contextFor(mock));
+  assert.equal((out.data as FolderPageResult).next_token, 'folders-2');
+  assert.equal(out.summary, '1 result(s), more available.');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('folders list: PAGE-1 cursor bridge and PAGE-3 clamp reach the wire', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({
+      path: '/2/users/9/bookmarks/folders',
+      method: 'GET',
+      query: { max_results: '100', pagination_token: 'folders-2' },
+    })
+    .reply(200, loadFixture<Record<string, unknown>>('bookmarks/folders.json'));
+
+  const out = await xBookmarkFoldersList.handler(
+    { max_results: 500, page_token: 'folders-2' },
+    contextFor(mock),
+  );
+  const page = out.data as FolderPageResult;
+  assert.ok(page.note);
+  assert.match(page.note, /max_results adjusted to 100/);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('folders list: REND-10 raw returns the exact envelope with max_results capped at 25', async () => {
+  const fixture = loadFixture<Record<string, unknown>>('bookmarks/folders.json');
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({
+      path: '/2/users/9/bookmarks/folders',
+      method: 'GET',
+      query: { max_results: '25' },
+    })
+    .reply(200, fixture);
+
+  const out = await xBookmarkFoldersList.handler({ max_results: 100, raw: true }, contextFor(mock));
+  assert.deepEqual(out.data, fixture);
+  assert.equal(out.units, 2);
+  assert.match(out.summary ?? '', /raw/i);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('folders list: entries without an id are dropped; a data-less 200 is an empty page', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks/folders', method: 'GET', query: {} })
+    .reply(200, { data: [{ name: 'orphan' }, { id: '7', name: 'Kept' }] });
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: '/2/users/9/bookmarks/folders', method: 'GET', query: {} })
+    .reply(200, {});
+
+  const first = await xBookmarkFoldersList.handler({}, contextFor(mock));
+  assert.deepEqual((first.data as FolderPageResult).items, [{ id: '7', name: 'Kept' }]);
+  // Billing follows what X sent, not what rendering kept (COST-3).
+  assert.equal(first.units, 2);
+
+  const second = await xBookmarkFoldersList.handler({}, contextFor(mock));
+  assert.equal((second.data as FolderPageResult).result_count, 0);
+  assert.equal(second.units, 0);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('BKF-1: folder posts are ids only, rendered as {id, url} without an untrusted note', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: FOLDER_POSTS_PATH, method: 'GET', query: {} })
+    .reply(200, loadFixture<Record<string, unknown>>('bookmarks/folder-posts.json'));
+
+  const out = await xBookmarkFolderPosts.handler({ folder_id: FOLDER_ID }, contextFor(mock));
+  const page = out.data as FolderPostsPageResult;
+
+  assert.equal(page.result_count, 3);
+  assert.equal(out.units, 3);
+  assert.deepEqual(page.items[0], {
+    id: '1460323737035677698',
+    url: 'https://x.com/i/status/1460323737035677698',
+  });
+  assert.ok(page.items.every((item) => Object.keys(item).length === 2));
+  // Ids carry no third-party text, so the REND-6 note does not apply.
+  assert.doesNotMatch(page.note ?? '', /third-party text/);
+  assert.equal(page.next_token, undefined); // BKF-2
+  assert.equal(out.summary, '3 result(s).');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('folder posts: PAGE-1 / PAGE-3 reach the wire on the folder route', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({
+      path: FOLDER_POSTS_PATH,
+      method: 'GET',
+      query: { max_results: '1', pagination_token: 'p-2' },
+    })
+    .reply(200, {
+      data: [{ id: '1460323737035677698' }],
+      meta: { result_count: 1, next_token: 'p-3' },
+    });
+
+  const out = await xBookmarkFolderPosts.handler(
+    { folder_id: FOLDER_ID, max_results: 0, page_token: 'p-2' },
+    contextFor(mock),
+  );
+  const page = out.data as FolderPostsPageResult;
+  assert.equal(page.next_token, 'p-3');
+  assert.ok(page.note);
+  assert.match(page.note, /max_results adjusted to 1/);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('folder posts: raw returns the exact envelope', async () => {
+  const fixture = loadFixture<Record<string, unknown>>('bookmarks/folder-posts.json');
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({ path: FOLDER_POSTS_PATH, method: 'GET', query: { max_results: '10' } })
+    .reply(200, fixture);
+
+  const out = await xBookmarkFolderPosts.handler(
+    { folder_id: FOLDER_ID, raw: true },
+    contextFor(mock),
+  );
+  assert.deepEqual(out.data, fixture);
+  assert.equal(out.units, 3);
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('BKF-3: a malformed folder_id is refused in the schema, before any charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xBookmarkFolderPosts);
+  for (const folderId of ['', 'abc', '12a', '-1', '1'.repeat(20), ' 123', '../9']) {
+    await assert.rejects(
+      () => reg.call('x_bookmark_folder_posts', { folder_id: folderId }, noHttpCtx()),
+      (err: unknown) => {
+        assert.ok(XError.is(err), `folder_id ${JSON.stringify(folderId)} must be refused`);
+        assert.equal(err.kind, 'validation');
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    () => reg.call('x_bookmark_folder_posts', {}, noHttpCtx()),
+    (err: unknown) => XError.is(err) && err.kind === 'validation',
+  );
+  assert.equal(budgetChecks(), 0);
+  assert.equal(xBookmarkFolderPosts.input.safeParse({ folder_id: '1'.repeat(19) }).success, true);
+});
+
+test('BKF-3: an empty, blank or over-long folder name is refused before any charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xBookmarkFolderCreate);
+  for (const name of ['', '   ', '\t\n', 'x'.repeat(26)]) {
+    await assert.rejects(
+      () => reg.call('x_bookmark_folder_create', { name }, noHttpCtx()),
+      (err: unknown) => {
+        assert.ok(XError.is(err), `name ${JSON.stringify(name)} must be refused`);
+        assert.equal(err.kind, 'validation');
+        return true;
+      },
+    );
+  }
+  await assert.rejects(
+    () => reg.call('x_bookmark_folder_create', { name: 'ok', extra: 1 }, noHttpCtx()),
+    (err: unknown) => XError.is(err) && err.kind === 'validation',
+  );
+  assert.equal(budgetChecks(), 0);
+  assert.equal(xBookmarkFolderCreate.input.safeParse({ name: 'x'.repeat(25) }).success, true);
+});
+
+test('folder reads: input schemas reject unknown keys and non-integer sizes', () => {
+  assert.equal(xBookmarkFoldersList.input.safeParse({}).success, true);
+  assert.equal(xBookmarkFoldersList.input.safeParse({ max_results: 10.5 }).success, false);
+  assert.equal(xBookmarkFoldersList.input.safeParse({ user: 'me' }).success, false);
+  assert.equal(
+    xBookmarkFolderPosts.input.safeParse({ folder_id: FOLDER_ID, fields: 'x' }).success,
+    false,
+  );
+});
+
+test('folder create: POST /2/users/:id/bookmarks/folders sends {name} and returns the id', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({
+      path: '/2/users/9/bookmarks/folders',
+      method: 'POST',
+      body: JSON.stringify({ name: 'Reading list' }),
+    })
+    .reply(201, loadFixture<Record<string, unknown>>('bookmarks/folder-create.json'));
+
+  const out = await xBookmarkFolderCreate.handler({ name: 'Reading list' }, contextFor(mock));
+  assert.deepEqual(out.data, { folder_id: '1146654567674912771', name: 'Reading list' });
+  assert.equal(out.summary, 'Created bookmark folder "Reading list" (id 1146654567674912771).');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('BKF-5: a 201 without data still reports the requested name (DRIFT-1)', async () => {
+  const mock = mockHttp();
+  interceptMe(mock);
+  mock.pool
+    .intercept({
+      path: '/2/users/9/bookmarks/folders',
+      method: 'POST',
+      body: JSON.stringify({ name: 'Later\u200b' }),
+    })
+    .reply(201, {});
+
+  const out = await xBookmarkFolderCreate.handler({ name: 'Later\u200b' }, contextFor(mock));
+  // The echoed name is sanitized like any other text the planner reads.
+  assert.deepEqual(out.data, { folder_id: '', name: 'Later' });
+  assert.equal(out.summary, 'Created bookmark folder "Later".');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('bookmark folder tools: a me-response without an id addresses no folder endpoint', async () => {
+  const cases = [
+    {
+      run: (ctx: ToolContext) => xBookmarkFoldersList.handler({}, ctx),
+      message: /bookmark folders endpoint cannot be addressed; nothing was read/,
+    },
+    {
+      run: (ctx: ToolContext) => xBookmarkFolderPosts.handler({ folder_id: FOLDER_ID }, ctx),
+      message: /bookmark folder endpoint cannot be addressed; nothing was read/,
+    },
+    {
+      run: (ctx: ToolContext) => xBookmarkFolderCreate.handler({ name: 'Reading list' }, ctx),
+      message: /bookmark folders endpoint cannot be addressed; the folder was not created/,
+    },
+  ];
+  for (const { run, message } of cases) {
+    const mock = mockHttp();
+    mock.pool
+      .intercept({ path: '/2/users/me', method: 'GET', query: { 'user.fields': 'username,name' } })
+      .reply(200, { data: {} });
+    await assert.rejects(
+      () => run(contextFor(mock)),
+      (err: unknown) => {
+        assert.ok(XError.is(err));
+        assert.equal(err.kind, 'api');
+        assert.match(err.message, message);
+        return true;
+      },
+    );
+    // assertDone: the me-interceptor was the ONLY request.
+    mock.assertDone();
+    await mock.close();
+  }
 });

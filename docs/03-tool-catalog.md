@@ -1,11 +1,11 @@
 # 03 — Tool catalog
 
-**42 tools in 10 packages** (the frozen tool-name contract other tasks build against).
+**45 tools in 10 packages** (the frozen tool-name contract other tasks build against).
 
-- **All 42 are unconditional** — always registered once their phase has shipped. The one
+- **All 45 are unconditional** — always registered once their phase has shipped. The one
   conditional entry, `x_usage_get`, was resolved **GO on 2026-07-31** (WP-3.11 / T-317)
   on the T-010 fact-check in docs/01 §3.5; it now ships as a normal Phase-3 tool.
-- Phase 3 has shipped, so a **default deployment registers all 42**. A deployment held
+- Phase 3 has shipped, so a **default deployment registers all 45**. A deployment held
   at Phase 1+2 registers **14** (6 Phase-1 reads + 8 Phase-2 auth/write tools);
   `X_MCP_AVAILABILITY` gates nothing further, because no shipped tool is `pilot`,
   `premium-user`, or `enterprise`.
@@ -13,7 +13,8 @@
 > Count reconciliation (T-019, closed 2026-08-09 by [decisions/0002](decisions/0002-remaining-catalogued-tools.md)):
 > the reviews and roadmap once quoted "~46 full / ~28 typical" against a 50-row design
 > catalogue. That catalogue was a *design* surface; the shipped surface is
-> **42 / 42 / ~14** (rows / unconditional / registered at Phase 1+2). The nine rows
+> **45 / 45 / ~14** (rows / unconditional / registered at Phase 1+2). The three bookmark-folder
+> tools (Q10, 2026-11-20) are the first post-catalogue additions. The nine rows
 > that never became tools were cut, not deferred — see
 > [Deliberate omissions](#deliberate-omissions).
 > **Availability note:** full-archive search/counts and profile search are `app+user`
@@ -29,7 +30,7 @@
 
 ### Registered surface
 
-**42 of the 42 catalogued tools are registered today**, in 12 registry packages
+**45 of the 45 catalogued tools are registered today**, in 12 registry packages
 (`src/tools/<package>.ts`). Per-tool detail — titles, input fields, scopes, MCP hints — is
 in the generated [`reference/tools.md`](reference/tools.md).
 
@@ -39,7 +40,7 @@ in the generated [`reference/tools.md`](reference/tools.md).
 | `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
 | `users` | 1 | `x_user_get` |
 | `search` | 2 | `x_search_recent`, `x_post_counts_recent` |
-| `engagement` | 4 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list` |
+| `engagement` | 7 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list`, `x_bookmark_folders_list`, `x_bookmark_folder_posts`, `x_bookmark_folder_create` |
 | `timelines` | 3 | `x_timeline_home`, `x_timeline_mentions`, `x_timeline_user` |
 | `graph` | 6 | `x_follow_set`, `x_mute_set`, `x_block_set`, `x_followers_list`, `x_following_list`, `x_user_search` |
 | `lists` | 10 | `x_list_create`, `x_list_update`, `x_list_delete`, `x_list_get`, `x_lists_owned`, `x_list_member_set`, `x_list_members`, `x_list_timeline`, `x_list_follow_set`, `x_list_pin_set` |
@@ -52,7 +53,7 @@ Callable tools per `X_MCP_POLICY` preset (denied tools stay registered and refus
 
 | `read-only` | `engage` | `publish` | `manage` | `full` | `full` + DM allow |
 |--:|--:|--:|--:|--:|--:|
-| 21 | 26 | 33 | 35 | 38 | 42 |
+| 23 | 29 | 36 | 38 | 41 | 45 |
 
 Every catalogued tool is registered.
 
@@ -115,7 +116,7 @@ Every catalogued tool is registered.
     credit-budget warning threshold.
 
   Each tool's `outputSchema` declares `data` and `summary` only. `meta` is documented
-  here once rather than repeated in 42 schemas (−8,106 B of the `tools/list` budget, Q09,
+  here once rather than repeated in every schema (−8,106 B of the `tools/list` budget at 42 tools, Q09,
   [reviews/13](reviews/13-context-budget-headroom-2026-11-19.md) c1). The schema root is
   open (no `additionalProperties: false`), so `structuredContent` carrying `meta`
   conforms. Errors are text-only (`isError: true`, no `structuredContent`).
@@ -189,6 +190,9 @@ Every catalogued tool is registered.
 | `x_repost_set` | write:engagement | user-only | w:action | P2 | X (Twitter): repost or undo repost — `{post, action:"repost"\|"unrepost"}` (merged from `repost_create`/`repost_delete`) |
 | `x_bookmark_set` | write:engagement | user-only | w:action | P2 | X (Twitter): add or remove a bookmark (private to the user) — `{post, action:"add"\|"remove"}` (merged from `bookmark_create`/`bookmark_delete`) |
 | `x_bookmarks_list` | read:content | user-only | owned | P3 | X (Twitter): own bookmarks. `max_results` 1–100 |
+| `x_bookmark_folders_list` | read:content | user-only | r:list | P3 | X (Twitter): own bookmark folders — `{id, name}` items, names sanitized as untrusted user text. `max_results` 1–100. No pricing row (fact-check 2026-11-20): billed per folder, not as an owned read (docs/07 BKF-6) |
+| `x_bookmark_folder_posts` | read:content | user-only | r:post | P3 | X (Twitter): the posts in one bookmark folder — `{folder_id}`. X returns post ids only (no `fields`/`expansions`), so items are `{id, url}` and this is a separate tool, not a `folder_id` on `x_bookmarks_list` (BKF-1). `max_results` 1–100 |
+| `x_bookmark_folder_create` | write:engagement | user-only | w:action | P3 | X (Twitter): create a bookmark folder — `{name}` (1–25 characters). `POST /2/users/:id/bookmarks/folders` is in the OpenAPI spec only (2.175), not in the docs page index; billed at the "Bookmark" write rate (BKF-5, BKF-6) |
 
 ## users
 

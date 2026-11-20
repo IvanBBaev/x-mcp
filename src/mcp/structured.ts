@@ -532,6 +532,16 @@ const POST_PAGE_OR_RAW = compactOrRaw(pageOf({ $ref: '#/$defs/compact_post' }));
 /** A page of compact users or the raw envelope — graph lists, user search, list members. */
 const USER_PAGE_OR_RAW = compactOrRaw(pageOf({ $ref: '#/$defs/compact_user' }));
 
+/** A page of bookmark folders `{id, name}` or the raw envelope — `x_bookmark_folders_list`. */
+const FOLDER_PAGE_OR_RAW = compactOrRaw(
+  pageOf({ type: 'object', properties: { id: STR, name: STR }, required: ['id', 'name'] }),
+);
+
+/** A page of post ids `{id, url}` or the raw envelope — `x_bookmark_folder_posts`. */
+const POST_ID_PAGE_OR_RAW = compactOrRaw(
+  pageOf({ type: 'object', properties: { id: STR, url: STR }, required: ['id', 'url'] }),
+);
+
 /** A page of compact lists or the raw envelope — `x_lists_owned`. */
 const LIST_PAGE_OR_RAW = compactOrRaw(pageOf({ $ref: '#/$defs/compact_list' }));
 
@@ -612,6 +622,15 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   // Phase 3 roadmap convenience (docs/06): a thread posted as one x_post_create call per
   // post; a mid-thread failure reports what published so far instead of throwing (POST-9).
   x_thread_create: envelope(THREAD_CREATE_DATA),
+  // Phase 4 bookmark folders (Q10, OD-4): the folder list, a folder's post ids (X returns
+  // ids only), and the folder-create confirmation.
+  x_bookmark_folders_list: envelope(FOLDER_PAGE_OR_RAW),
+  x_bookmark_folder_posts: envelope(POST_ID_PAGE_OR_RAW),
+  x_bookmark_folder_create: envelope({
+    type: 'object',
+    properties: { folder_id: STR, name: STR },
+    required: ['folder_id', 'name'],
+  }),
 });
 
 /** The static `outputSchema` for one tool, or `undefined` for an unknown name. */

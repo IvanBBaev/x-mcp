@@ -4,7 +4,7 @@
 
 | | | | | | |
 |:--:|:--:|:--:|:--:|:--:|:--:|
-| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-42-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
+| [![npm](https://img.shields.io/npm/v/x-mcp-ai?style=flat-square)](https://www.npmjs.com/package/x-mcp-ai) | [![CI](https://img.shields.io/github/actions/workflow/status/IvanBBaev/x-mcp/ci.yml?branch=main&style=flat-square)](https://github.com/IvanBBaev/x-mcp/actions/workflows/ci.yml) | [![tools](https://img.shields.io/badge/tools-45-blue?style=flat-square)](#tools) | [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen?style=flat-square)](https://nodejs.org) | [![MCP](https://img.shields.io/badge/MCP-server-orange?style=flat-square)](https://modelcontextprotocol.io) | [![license](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE) |
 
 </div>
 
@@ -16,7 +16,7 @@ pay-per-use pricing so an agent can never quietly overspend.
 > **Status: pre-1.0, under active development, published on npm as
 > [`x-mcp-ai`](https://www.npmjs.com/package/x-mcp-ai)** (currently `0.8.0`, published from
 > CI with npm provenance). Pin an exact version while the project is on `0.x`
-> ([Setup](#setup)). **42 tools across 12 packages** are registered today; the full designed
+> ([Setup](#setup)). **45 tools across 12 packages** are registered today; the full designed
 > surface lives in [`docs/03-tool-catalog.md`](docs/03-tool-catalog.md) and has landed
 > in full. The public API is unstable until `1.0.0`.
 
@@ -62,7 +62,7 @@ model picks the tool. Three representative asks:
 
 ## Features
 
-- **42 tools across 12 packages** over the X API v2 — read posts, users and timelines,
+- **45 tools across 12 packages** over the X API v2 — read posts, users and timelines,
   search (recent and full-archive), engage, publish, manage lists, upload media, walk the
   social graph, and read/send DMs behind an explicit opt-in.
 - **Two-axis policy model** (`operation:domain`) with five presets — `read-only` (default),
@@ -221,14 +221,14 @@ Every tool maps to one **policy cell** — an `operation:domain` pair. Operation
 
 | Preset | Grants | Callable tools |
 |---|---|--:|
-| `read-only` *(default)* | all `read:*` cells **except** `read:dm` | 21 |
-| `engage` | read-only **+** `write:engagement` | 26 |
-| `publish` | engage **+** `write:content`, `write:moderation` | 33 |
-| `manage` | publish **+** `destructive:content` | 35 |
-| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 38 |
+| `read-only` *(default)* | all `read:*` cells **except** `read:dm` | 23 |
+| `engage` | read-only **+** `write:engagement` | 29 |
+| `publish` | engage **+** `write:content`, `write:moderation` | 36 |
+| `manage` | publish **+** `destructive:content` | 38 |
+| `full` | every non-DM cell — adds `write:social-graph`, `destructive:social-graph` | 41 |
 
 > **DM cells are never in a preset — not even `full`.** `read:dm` and `write:dm` must be
-> granted explicitly via `X_MCP_POLICY_ALLOW` (all 42 tools callable). Their unlock hint is
+> granted explicitly via `X_MCP_POLICY_ALLOW` (all 45 tools callable). Their unlock hint is
 > deliberately withheld from policy errors, as it is for every other sensitive cell.
 > Denied tools stay registered but annotated `(disabled by policy <preset>)` unless
 > `X_MCP_HIDE_DENIED=1`.
@@ -296,7 +296,7 @@ gate.
 
 ## Tools
 
-The 42 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
+The 45 tools registered today. "Read-only" marks tools in a `read:*` policy cell — those
 callable under the default preset (DM reads excepted: they need an explicit allow).
 "User" marks `user-only` tools, which require OAuth 2.0 user context and are unreachable
 with an app-only bearer token. The designed surface is
@@ -326,6 +326,9 @@ schemas, scopes, cost class, availability — is
 | engagement | `x_repost_set` | write:engagement |  | ✅ | Repost (retweet) a post as the authenticated user, or undo that repost. |
 | engagement | `x_bookmark_set` | write:engagement |  | ✅ | Add a post to the authenticated user's bookmarks or remove it. |
 | engagement | `x_bookmarks_list` | read:content | ✅ | ✅ | The authenticated user's own bookmarks, newest first — the read half of `x_bookmark_set`. |
+| engagement | `x_bookmark_folders_list` | read:content | ✅ | ✅ | The authenticated user's bookmark folders (id + name). |
+| engagement | `x_bookmark_folder_posts` | read:content | ✅ | ✅ | The posts saved in one of the authenticated user's bookmark folders. |
+| engagement | `x_bookmark_folder_create` | write:engagement |  | ✅ | Create a bookmark folder for the authenticated user. |
 | timelines | `x_timeline_home` | read:content | ✅ | ✅ | Read the authenticated X (Twitter) user's home timeline in reverse-chronological order (accounts they follow, newest first). |
 | timelines | `x_timeline_mentions` | read:content | ✅ |  | Read posts mentioning an X (Twitter) user (default: authenticated user). |
 | timelines | `x_timeline_user` | read:content | ✅ |  | Read an X (Twitter) user's own posts, newest first, optionally excluding replies and/or reposts, within optional time bounds. |

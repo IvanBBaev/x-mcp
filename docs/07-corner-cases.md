@@ -692,3 +692,42 @@ credits, not tiers, for post-2026-02-06 developers.)*
   Every fixture records source + capture date; a scheduled monthly refresh runs
   the comparison, and each phase boundary re-runs the platform fact-check
   (`https://docs.x.com/x-api/llms.txt`) per the roadmap's standing task `[X-rec 8]`.
+
+## 17. BKF — Bookmark folders *(Q10, Phase 4)*
+
+Platform fact-check 2026-11-20 (docs.x.com `get-bookmark-folders`, `get-bookmarks-by-folder-id`
+and the official OpenAPI spec 2.175). `[Q10]` = the Q10 bookmark-folders item (OD-4,
+[review 12](reviews/12-platform-fact-check-2026-11-15.md) §6). All fixtures are hand-written,
+pending the H2 live capture.
+
+- **BKF-1 — Folder posts are post ids only** `P3` `[Q10]`
+  `GET /2/users/:id/bookmarks/folders/:folder_id` returns `data[]` of `{id}` and takes
+  no `fields`/`expansions`, so `x_bookmark_folder_posts` is a separate tool (not a
+  `folder_id` on `x_bookmarks_list`, whose items are full compact posts). Each item is
+  `{id, url}`; ids carry no third-party text, so the page has no untrusted-content note.
+
+- **BKF-2 — No `meta` is the final page** `P3` `[Q10]`
+  Neither folder read documents a `meta` object. A response without `meta.next_token` is
+  the last page — never an error; when X does send `meta.next_token`, it passes through as
+  `next_token`. `page_token` rides the wire as `pagination_token` (PAGE-1) and
+  `max_results` is clamped into 1-100 (PAGE-3).
+
+- **BKF-3 — Malformed folder input is refused before any charge** `P3` `[Q10]`
+  A `folder_id` that is not 1-19 ASCII digits, and a folder `name` that is empty, blank or
+  longer than 25 characters, fail in the zod schema — the budget is never checked and no
+  request is sent (charge-before-refuse).
+
+- **BKF-4 — Folder names are untrusted user text** `P3` `[Q10]`
+  Names are sanitized (bidi overrides and zero-width characters stripped, capped at the
+  name field length) and the folder page carries the untrusted-content note (REND-6).
+
+- **BKF-5 — A create without `data` still reports success** `P3` `[Q10]`
+  `POST /2/users/:id/bookmarks/folders` (in the OpenAPI spec only, not in the docs page
+  index) answers `201 {data: {id, name}}`. A 2xx without `data` (DRIFT-1) still created
+  the folder: the result carries `folder_id: ""` and the requested (sanitized) name.
+
+- **BKF-6 — Unpublished folder pricing is billed conservatively** `P3` `[Q10]`
+  No pricing row exists for any folder endpoint, and Owned Reads lists only
+  `GET /2/users/:id/bookmarks`. The folders read bills as `r:list` and the folder-posts
+  read as `r:post` (per resource, never `owned`); the create bills at the "Bookmark"
+  write rate (`w:action`, `BOOKMARK_USD`). An advisory budget must never under-count.

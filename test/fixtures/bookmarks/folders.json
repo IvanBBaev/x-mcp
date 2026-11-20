@@ -1,0 +1,7 @@
+{
+  "_provenance": "Synthetic: hand-written to the OpenAPI 2.175 response schema for GET /2/users/:id/bookmarks/folders (docs.x.com/x-api/bookmarks/get-bookmark-folders, fetched 2026-11-20) — `data[]` of `{id, name}`, no `meta` documented; fictional folders, NOT a live capture (pending the H2 live fixture capture). The second name carries a right-to-left override and a zero-width space to prove sanitization. Authored 2026-11-20. Exercises: BKF-2, BKF-4.",
+  "data": [
+    { "id": "1146654567674912769", "name": "Reading list" },
+    { "id": "1146654567674912770", "name": "AI‮ agents​" }
+  ]
+}

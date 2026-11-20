@@ -1,6 +1,7 @@
 // Endpoint wrappers for the engagement tools (T-211; docs/03 engagement §). Six thin
 // write builders — like/repost/bookmark, each with a create (POST) and a delete (DELETE)
-// form — plus the bookmarks READ (`GET /2/users/:id/bookmarks`), all producing a typed
+// form — plus the bookmarks READ (`GET /2/users/:id/bookmarks`) and the bookmark-folder
+// routes (Q10: list folders, list a folder's post ids, create a folder), all producing a typed
 // `XApiRequest` forwarded through the injected `EndpointInvoker`. Host-scoped auth, the
 // no-retry-on-writes rule (RATE-5/NET-4), and error mapping all live below in api/http
 // (T-114); nothing here does I/O.
@@ -46,6 +47,27 @@ const TWEET_EXPANSIONS =
   'author_id,referenced_tweets.id,referenced_tweets.id.author_id,attachments.media_keys';
 const TWEET_USER_FIELDS = 'username,name,verified';
 const MEDIA_FIELDS = 'type,url,preview_image_url,alt_text';
+
+/**
+ * One bookmark folder as `GET /2/users/:id/bookmarks/folders` and the folder-create 201
+ * return it (OpenAPI 2.175 `BookmarkFolder…`: `{ id, name }`). Optional per DRIFT-1.
+ */
+export interface RawBookmarkFolder {
+  readonly id?: string;
+  readonly name?: string;
+}
+
+/**
+ * One post in a bookmark folder. `GET /2/users/:id/bookmarks/folders/:folder_id` returns
+ * post IDS only (OpenAPI 2.175 `BookmarkFolderPostsResponse`) — no text, no expansions.
+ */
+export interface RawBookmarkFolderPost {
+  readonly id?: string;
+}
+
+/** Folder reads (`/bookmarks/folders…`) need `bookmark.read`, like the bookmarks read. */
+const BOOKMARK_FOLDER_READ_SCOPES: readonly OAuthScope[] = ['users.read', 'bookmark.read'];
+const BOOKMARK_FOLDER_WRITE_SCOPES: readonly OAuthScope[] = ['users.read', 'bookmark.write'];
 
 /** Page size + cursor for {@link listBookmarks}; keys are omitted when undefined. */
 export interface BookmarkPageParams {
@@ -159,4 +181,71 @@ export async function listBookmarks(
     scopes: BOOKMARK_READ_SCOPES,
   };
   return http.send<RawListResponse<RawTweet>>(req);
+}
+
+/** The paging query shared by the two folder reads; keys are omitted when undefined. */
+function folderPageQuery(params: BookmarkPageParams): Record<string, string | number> {
+  return {
+    ...(params.maxResults !== undefined ? { max_results: params.maxResults } : {}),
+    ...(params.paginationToken !== undefined ? { pagination_token: params.paginationToken } : {}),
+  };
+}
+
+/**
+ * `GET /2/users/:id/bookmarks/folders` — the acting user's bookmark folders (`{ id, name }`).
+ * The endpoint takes no `fields`/`expansions`; it pages with `pagination_token` like the
+ * bookmarks read (docs.x.com get-bookmark-folders, fetched 2026-11-20).
+ */
+export async function listBookmarkFolders(
+  http: EndpointInvoker,
+  userId: string,
+  params: BookmarkPageParams = {},
+): Promise<RawListResponse<RawBookmarkFolder>> {
+  const req: XApiRequest = {
+    method: 'GET',
+    path: `/2/users/${encodeURIComponent(userId)}/bookmarks/folders`,
+    query: folderPageQuery(params),
+    scopes: BOOKMARK_FOLDER_READ_SCOPES,
+  };
+  return http.send<RawListResponse<RawBookmarkFolder>>(req);
+}
+
+/**
+ * `GET /2/users/:id/bookmarks/folders/:folder_id` — the post ids saved in one folder
+ * (docs.x.com get-bookmarks-by-folder-id, fetched 2026-11-20). Ids only: hydrating text
+ * is a separate `x_post_get` call.
+ */
+export async function listBookmarkFolderPosts(
+  http: EndpointInvoker,
+  userId: string,
+  folderId: string,
+  params: BookmarkPageParams = {},
+): Promise<RawListResponse<RawBookmarkFolderPost>> {
+  const req: XApiRequest = {
+    method: 'GET',
+    path:
+      `/2/users/${encodeURIComponent(userId)}/bookmarks/folders/` + encodeURIComponent(folderId),
+    query: folderPageQuery(params),
+    scopes: BOOKMARK_READ_SCOPES,
+  };
+  return http.send<RawListResponse<RawBookmarkFolderPost>>(req);
+}
+
+/**
+ * `POST /2/users/:id/bookmarks/folders` — create a bookmark folder named `name` (1-25
+ * characters). Present in the official OpenAPI spec (2.175, `createUsersBookmarkFolder`)
+ * but not yet in the docs.x.com page index (fetched 2026-11-20) — H2 confirms it live.
+ */
+export async function createBookmarkFolder(
+  http: EndpointInvoker,
+  userId: string,
+  name: string,
+): Promise<RawSingleResponse<RawBookmarkFolder>> {
+  const req: XApiRequest = {
+    method: 'POST',
+    path: `/2/users/${encodeURIComponent(userId)}/bookmarks/folders`,
+    body: { name },
+    scopes: BOOKMARK_FOLDER_WRITE_SCOPES,
+  };
+  return http.send<RawSingleResponse<RawBookmarkFolder>>(req);
 }

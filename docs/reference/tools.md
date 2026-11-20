@@ -4,7 +4,7 @@
 
 # Tool reference (generated)
 
-**42 tools in 12 packages.** Every field on this page is read out of the registered
+**45 tools in 12 packages.** Every field on this page is read out of the registered
 `ToolDef` values, so this is the surface the server actually exposes — not the surface it
 was designed to have. The designed catalog, including tools that are not implemented yet,
 is [`../03-tool-catalog.md`](../03-tool-catalog.md).
@@ -17,7 +17,7 @@ is [`../03-tool-catalog.md`](../03-tool-catalog.md).
 | `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
 | `users` | 1 | `x_user_get` |
 | `search` | 2 | `x_search_recent`, `x_post_counts_recent` |
-| `engagement` | 4 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list` |
+| `engagement` | 7 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list`, `x_bookmark_folders_list`, `x_bookmark_folder_posts`, `x_bookmark_folder_create` |
 | `timelines` | 3 | `x_timeline_home`, `x_timeline_mentions`, `x_timeline_user` |
 | `graph` | 6 | `x_follow_set`, `x_mute_set`, `x_block_set`, `x_followers_list`, `x_following_list`, `x_user_search` |
 | `lists` | 10 | `x_list_create`, `x_list_update`, `x_list_delete`, `x_list_get`, `x_lists_owned`, `x_list_member_set`, `x_list_members`, `x_list_timeline`, `x_list_follow_set`, `x_list_pin_set` |
@@ -33,12 +33,12 @@ annotated; they refuse the call (POL-7). DM cells are in no preset, not even `fu
 
 | Preset | Callable | Denied |
 |---|--:|--:|
-| `read-only` *(default)* | 21 | 21 |
-| `engage` | 26 | 16 |
-| `publish` | 33 | 9 |
-| `manage` | 35 | 7 |
-| `full` | 38 | 4 |
-| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 42 | 0 |
+| `read-only` *(default)* | 23 | 22 |
+| `engage` | 29 | 16 |
+| `publish` | 36 | 9 |
+| `manage` | 38 | 7 |
+| `full` | 41 | 4 |
+| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 45 | 0 |
 
 ## Reading the tables
 
@@ -254,6 +254,47 @@ Takes no input fields.
 | `max_results` | integer |  | Page size 1-100 (clamped). |
 | `page_token` | string |  | next_token from a previous call. |
 | `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
+
+### `x_bookmark_folders_list`
+
+**List own bookmark folders** — The authenticated user's bookmark folders (id + name).
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `engagement` | `read:content` | `user-only` | `r:list` | 3 | read-only | `users.read`, `bookmark.read` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
+
+### `x_bookmark_folder_posts`
+
+**List posts in a bookmark folder** — The posts saved in one of the authenticated user's bookmark folders.
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `engagement` | `read:content` | `user-only` | `r:post` | 3 | read-only | `tweet.read`, `users.read`, `bookmark.read` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `folder_id` | string | ✅ | Numeric bookmark folder id (from x_bookmark_folders_list). |
+| `max_results` | integer |  | Page size 1-100 (clamped). |
+| `page_token` | string |  | next_token from a previous call. |
+| `raw` | boolean |  | Return raw API JSON (max 25 items), not the compact page. |
+
+### `x_bookmark_folder_create`
+
+**Create a bookmark folder** — Create a bookmark folder for the authenticated user.
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `engagement` | `write:engagement` | `user-only` | `w:action` | 3 | — | `users.read`, `bookmark.write` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `name` | string (1–25 chars) | ✅ | Folder name. |
 
 ## `timelines`
 

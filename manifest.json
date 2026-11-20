@@ -3,7 +3,7 @@
   "name": "x-mcp-ai",
   "display_name": "x-mcp-ai (X API v2)",
   "version": "0.8.0",
-  "description": "Safety-first X (Twitter) API v2 MCP server: 42 typed tools across 12 packages, policy-gated.",
+  "description": "Safety-first X (Twitter) API v2 MCP server: 45 typed tools across 12 packages, policy-gated.",
   "long_description": "Typed, policy-gated tools for the X (Twitter) API v2: posts, search, timelines, engagement, graph, lists, direct messages, media, archive and usage. A two-axis policy (read-only by default) decides which tools are offered, and a session spend budget caps pay-per-use cost.\n\nOAuth 2.0 user context needs a one-time `npx -y x-mcp-ai authorize` in a terminal, with the same client ID and token file as here; app-only mode needs only a bearer token. Setup: https://github.com/IvanBBaev/x-mcp/blob/main/docs/10-operator-guide.md\n\nx-mcp-ai is an independent, unofficial project and is not affiliated with, endorsed by, or sponsored by X Corp.",
   "author": {
     "name": "Ivan Baev",

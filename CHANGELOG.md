@@ -10,6 +10,15 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- Bookmark folders (three new tools, 42 → 45): `x_bookmark_folders_list` lists the
+  authenticated user's folders as `{id, name}` (names sanitized, marked untrusted);
+  `x_bookmark_folder_posts` lists one folder's posts as `{id, url}`, since X returns ids only
+  (pass them to `x_post_get`); `x_bookmark_folder_create` creates a folder (`name` 1-25
+  characters, `write:engagement`, so the `engage` preset and above). Existing bookmark scopes
+  only — no new OAuth scope. X publishes no price for the folder endpoints, so the reads are
+  budgeted per resource returned (not as owned reads) and the create at the bookmark write
+  rate. A malformed `folder_id` or folder name is refused at validation and never charged.
+  `tools/list` grows by 3,160 B, to 69,917 of 80,000 B.
 - Claude Desktop extension bundle (`.mcpb`, MCPB manifest 0.3): `manifest.json` maps every
   `X_MCP_*` variable of `server.json` to a Desktop setting (client secret and bearer token
   marked sensitive; an empty setting reaches the server as unset), and `npm run bundle`

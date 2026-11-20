@@ -116,6 +116,11 @@ const TOOL_BUCKETS: Readonly<Record<string, string | null>> = {
   // Phase 3 roadmap convenience: internally N calls to POST /2/tweets, the same family as
   // x_post_create, so its preflight and every per-post call share that bucket.
   x_thread_create: 'tweets-create',
+  // Q10 bookmark folders (OD-4): the two folder reads and the folder create are each their
+  // own X rate-limit family (the reads at 50 / 15 min per user, docs.x.com 2026-11-20).
+  x_bookmark_folders_list: 'bookmark-folders',
+  x_bookmark_folder_posts: 'bookmark-folder-posts',
+  x_bookmark_folder_create: 'bookmark-folders-create',
 };
 
 /** Test seams: override any port; production passes nothing and gets the real adapters. */

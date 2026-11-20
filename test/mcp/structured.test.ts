@@ -17,6 +17,7 @@ import { createRateLimitTracker } from '../../src/api/ratelimit.js';
 import { parseConfig } from '../../src/core/config.js';
 import { ZERO_RESULTS_NOTE } from '../../src/core/render-shapes.js';
 import {
+  buildPage,
   renderDmPage,
   renderList,
   renderListPage,
@@ -221,7 +222,7 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
   const names = composeServer(config)
     .registry.listForMcp()
     .map((tool) => tool.name);
-  assert.equal(names.length, 42, 'the Phase-1/2/3 catalog registers 42 tools');
+  assert.equal(names.length, 45, 'the Phase-1/2/3 catalog registers 45 tools');
   assertOutputSchemaCoverage(names); // must not throw
   for (const name of names) {
     const schema = toolOutputSchema(name);
@@ -599,12 +600,39 @@ test('T-310: the in-test validator rejects non-conforming payloads', () => {
   );
 });
 
+// --- Q10: bookmark folders (docs/07 BKF) ------------------------------------------
+
+test('REND-11/Q10: bookmark folder pages, raw envelopes and the create result conform', () => {
+  // Folder pages: the user-named folders carry the untrusted note; a mid-stream page has a
+  // cursor. Folder posts are ids only, with no note (BKF-1).
+  assertConforms(
+    'x_bookmark_folders_list',
+    buildPage([{ id: '1', name: 'Reading list' }], { untrusted: true, nextToken: 'n' }),
+  );
+  assertConforms('x_bookmark_folders_list', buildPage([], { untrusted: true }));
+  assertConforms('x_bookmark_folders_list', loadFixture<object>('bookmarks/folders.json'));
+  assertConforms(
+    'x_bookmark_folder_posts',
+    buildPage([{ id: '1460323737035677698', url: 'https://x.com/i/status/1460323737035677698' }], {
+      untrusted: false,
+    }),
+  );
+  assertConforms('x_bookmark_folder_posts', loadFixture<object>('bookmarks/folder-posts.json'));
+  assertConforms(
+    'x_bookmark_folder_create',
+    { folder_id: '1146654567674912771', name: 'Reading list' },
+    'Created bookmark folder "Reading list" (id 1146654567674912771).',
+  );
+  // DRIFT-1 fallback (BKF-5): the 201 lacked data, so the id is unknown.
+  assertConforms('x_bookmark_folder_create', { folder_id: '', name: 'Later' });
+});
+
 // --- Q09: every served schema accepted a real render that carries meta ------------
 // Runs last (node:test runs a file's top-level tests in order): every tool the server
 // serves must have gone through `assertConforms` above at least once.
 
 test('Q09/REND-11: real structuredContent with meta conforms to EVERY served outputSchema', () => {
-  assert.equal(SERVED.size, 42);
+  assert.equal(SERVED.size, 45);
   const unchecked = [...SERVED.keys()].filter((name) => !VALIDATED_WITH_META.has(name)).sort();
   assert.deepEqual(unchecked, [], 'tools with no real-render conformance check');
 });

@@ -106,6 +106,8 @@ function textPayload<T>(result: CallToolResult): T {
 // Read-surface tools: everything in a read:* / meta cell → readOnlyHint (MCP-4).
 const READ_TOOLS = [
   'x_auth_status',
+  'x_bookmark_folder_posts',
+  'x_bookmark_folders_list',
   'x_bookmarks_list',
   'x_dm_conversation_events_list',
   'x_dm_events_list',
@@ -134,6 +136,7 @@ const READ_TOOLS = [
 // Write-surface tools (Phases 2–3): must NOT advertise readOnlyHint.
 const WRITE_TOOLS = [
   'x_block_set',
+  'x_bookmark_folder_create',
   'x_bookmark_set',
   'x_dm_send',
   'x_follow_set',
