@@ -885,6 +885,21 @@ const DRAFT_AMBIGUITY_GUIDANCE =
   'this cannot be checked here. Do NOT auto-retry: re-issuing at worst leaves a second ' +
   'private, unpublished draft; ask the user before doing so.';
 
+/** COST-4 for Articles: the URL-rate note, worded for a draft rather than a post. */
+const ARTICLE_URL_PRICE_NOTE =
+  `The article contains a URL, so this call is counted at the $${URL_POST_USD.toFixed(2)} ` +
+  `URL-post rate instead of the $${BASE_POST_USD} base price (COST-4). X publishes no ` +
+  'Articles price; the higher rate is assumed so the session budget never under-counts.';
+
+/** COST-4 for Articles: does the title or any block carry something X could price as a URL? */
+function articleContainsUrl(input: {
+  readonly title?: string;
+  readonly blocks?: readonly { readonly text?: string }[];
+}): boolean {
+  const texts = [input.title ?? '', ...(input.blocks ?? []).map((b) => b.text ?? '')];
+  return texts.some((t) => containsUrl(t));
+}
+
 /**
  * `x_article_draft_create` — create a private Article draft (docs/03 posts §; ART-1..6).
  * The draft is never public; `x_article_publish` turns it into a post.
@@ -899,7 +914,13 @@ export const xArticleDraftCreate = defineTool({
   policy: 'write:content',
   availability: 'user-only',
   scopes: ['tweet.read', 'tweet.write', 'users.read'],
-  cost: 'w:post',
+  // COST-4 / ART-5: the draft is the only call that sees the article text, so a URL in the
+  // title or any block counts it at the $0.20 URL rate — erring toward over-counting until X
+  // prices Articles. Tolerates a partial input (the docs-gen costClass probe calls cost({})).
+  cost: (input) =>
+    articleContainsUrl(input)
+      ? { class: 'w:post', usd: URL_POST_USD, note: ARTICLE_URL_PRICE_NOTE }
+      : { class: 'w:post' },
   annotations: {
     title: ARTICLE_DRAFT_TITLE,
     readOnlyHint: false,

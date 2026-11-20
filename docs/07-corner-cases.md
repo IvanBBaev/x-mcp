@@ -818,8 +818,11 @@ H2 live capture.
   Both tools sit in the `publish` preset's `write:content` cell and are `user-only`, so an
   app-only bearer refuses locally with no request and no charge (AUTH-17). No pricing row
   exists for Articles; each call bills as one `w:post` ($0.015) — an assumption until X
-  prices them. Whether a published article that contains a link bills at the $0.20 URL rate
-  is unknown.
+  prices them. Whether an article that contains a link bills at the $0.20 URL rate is
+  unknown, so COST-4 is applied conservatively: a URL in the title or any block counts
+  `x_article_draft_create` at $0.20 and says why in the cost note. `x_article_publish` never
+  sees the body and stays at $0.015. Test: plain text → $0.015, a URL in the title or in one
+  block → $0.20 with the note, an empty input (the docs-gen probe) never throws.
 
 - **ART-6 — Drafts cannot be edited, read, listed or deleted** `P3` `[Q12]`
   X documents only `POST /2/articles/draft` and `POST /2/articles/{id}/publish`; the

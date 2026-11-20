@@ -1527,7 +1527,6 @@ test('ART-5: the article tools declare the docs/03 axes — publish cell, user-o
     assert.equal(tool.policy, 'write:content');
     assert.equal(tool.availability, 'user-only');
     assert.equal(tool.credential, undefined);
-    assert.equal(tool.cost, 'w:post');
     assert.equal(tool.phase, 3);
     assert.deepEqual([...tool.scopes], ['tweet.read', 'tweet.write', 'users.read']);
     assert.match(tool.description, /^X \(Twitter\): /);
@@ -1538,6 +1537,33 @@ test('ART-5: the article tools declare the docs/03 axes — publish cell, user-o
   }
   assert.equal(xArticleDraftCreate.name, 'x_article_draft_create');
   assert.equal(xArticlePublish.name, 'x_article_publish');
+  // Publish never sees the body, so it stays at the flat class price.
+  assert.equal(xArticlePublish.cost, 'w:post');
+});
+
+test('ART-5 / COST-4: a URL in the article title or any block counts the draft at $0.20', () => {
+  const spec = xArticleDraftCreate.cost;
+  assert.ok(typeof spec === 'function', 'x_article_draft_create cost must be a resolver');
+  const priced = (input: unknown) => spec(input as Parameters<typeof spec>[0]);
+
+  // Plain text -> class only; the budget layer prices it at the $0.015 table entry.
+  assert.deepEqual(priced({ title: 'Plain title', blocks: [{ text: 'no links here' }] }), {
+    class: 'w:post',
+  });
+
+  // A URL in the title, or in any one block, raises the estimate and carries the note.
+  for (const input of [
+    { title: 'See example.com', blocks: [{ text: 'plain' }] },
+    { title: 'Plain', blocks: [{ text: 'plain' }, { text: 'read https://example.com/a' }] },
+  ]) {
+    const cost = priced(input);
+    assert.equal(cost.class, 'w:post');
+    assert.equal(cost.usd, 0.2);
+    assert.match(cost.note ?? '', /\$0\.20.*\$0\.015/);
+  }
+
+  // A partial input (scripts/docs-gen.mjs costClass() calls cost({})) never throws.
+  assert.deepEqual(priced({}), { class: 'w:post' });
 });
 
 test('x_article_draft_create: sends the documented content_state body and returns the article id', async () => {

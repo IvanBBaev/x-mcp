@@ -16,7 +16,8 @@ development chronology lives in `WORKLOG.md`.
   draft by `article_id`, returning the post id and URL. Both are `write:content` (the
   `publish` preset), `user-only`, existing `tweet.read tweet.write users.read` scopes — no
   new OAuth scope. X publishes no price for Articles, so each call is budgeted as one post
-  write ($0.015). A blank title or body, an unknown block type or a body certainly over X's
+  write ($0.015); a draft whose title or blocks contain a URL is budgeted at the $0.20
+  URL-post rate (COST-4), so the session budget errs toward over-counting. A blank title or body, an unknown block type or a body certainly over X's
   10,000 weighted characters is refused at validation and never charged; an ambiguous
   failure is never auto-retried. X offers no endpoint to edit, list or delete drafts.
   `tools/list` grows by 2,198 B, to 74,790 of 80,000 B.
