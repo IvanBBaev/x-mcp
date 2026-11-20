@@ -1,11 +1,11 @@
 # 03 — Tool catalog
 
-**47 tools in 10 packages** (the frozen tool-name contract other tasks build against).
+**49 tools in 10 packages** (the frozen tool-name contract other tasks build against).
 
-- **All 47 are unconditional** — always registered once their phase has shipped. The one
+- **All 49 are unconditional** — always registered once their phase has shipped. The one
   conditional entry, `x_usage_get`, was resolved **GO on 2026-07-31** (WP-3.11 / T-317)
   on the T-010 fact-check in docs/01 §3.5; it now ships as a normal Phase-3 tool.
-- Phase 3 has shipped, so a **default deployment registers all 47**. A deployment held
+- Phase 3 has shipped, so a **default deployment registers all 49**. A deployment held
   at Phase 1+2 registers **14** (6 Phase-1 reads + 8 Phase-2 auth/write tools);
   `X_MCP_AVAILABILITY` gates nothing further, because no shipped tool is `pilot`,
   `premium-user`, or `enterprise`.
@@ -13,9 +13,9 @@
 > Count reconciliation (T-019, closed 2026-08-09 by [decisions/0002](decisions/0002-remaining-catalogued-tools.md)):
 > the reviews and roadmap once quoted "~46 full / ~28 typical" against a 50-row design
 > catalogue. That catalogue was a *design* surface; the shipped surface is
-> **47 / 47 / ~14** (rows / unconditional / registered at Phase 1+2). The three bookmark-folder
+> **49 / 49 / ~14** (rows / unconditional / registered at Phase 1+2). The three bookmark-folder
 > tools (Q10, 2026-11-20) are the first post-catalogue additions; the two news reads (Q11,
-> 2026-11-20) the second. The nine rows
+> 2026-11-20) the second; the two Article writes (Q12, 2026-11-20) the third. The nine rows
 > that never became tools were cut, not deferred — see
 > [Deliberate omissions](#deliberate-omissions).
 > **Availability note:** full-archive search/counts and profile search are `app+user`
@@ -31,14 +31,14 @@
 
 ### Registered surface
 
-**47 of the 47 catalogued tools are registered today**, in 12 registry packages
+**49 of the 49 catalogued tools are registered today**, in 12 registry packages
 (`src/tools/<package>.ts`). Per-tool detail — titles, input fields, scopes, MCP hints — is
 in the generated [`reference/tools.md`](reference/tools.md).
 
 | Registry package | Registered | Tools |
 |---|--:|---|
 | `auth` | 2 | `x_auth_status`, `x_rate_limit_status` |
-| `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
+| `posts` | 7 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create`, `x_article_draft_create`, `x_article_publish` |
 | `users` | 1 | `x_user_get` |
 | `search` | 4 | `x_search_recent`, `x_post_counts_recent`, `x_news_search`, `x_news_get` |
 | `engagement` | 7 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list`, `x_bookmark_folders_list`, `x_bookmark_folder_posts`, `x_bookmark_folder_create` |
@@ -54,7 +54,7 @@ Callable tools per `X_MCP_POLICY` preset (denied tools stay registered and refus
 
 | `read-only` | `engage` | `publish` | `manage` | `full` | `full` + DM allow |
 |--:|--:|--:|--:|--:|--:|
-| 25 | 31 | 38 | 40 | 43 | 47 |
+| 25 | 31 | 40 | 42 | 45 | 49 |
 
 Every catalogued tool is registered.
 
@@ -108,7 +108,9 @@ Every catalogued tool is registered.
     event (NEWS-5).
   - `w:post` $0.015 (**$0.20 when the post contains a URL**) · `w:dm` $0.015 ·
     `w:list` $0.010 (list create) · `w:action` per-write (engagement/graph/moderation
-    writes and deletes; see 01 §3).
+    writes and deletes; see 01 §3). The Article writes (`x_article_draft_create`,
+    `x_article_publish`) have no published price; each call bills as `w:post` $0.015 — an
+    assumption until X prices Articles (ART-5).
 - **Result shape**: every successful call returns one object, `{ data, summary?, meta }`,
   both as the JSON text block and as `structuredContent` (the same object, REND-11).
   `data` is the tool's compact result and `summary` is an optional one-line digest.
@@ -167,6 +169,8 @@ Every catalogued tool is registered.
 | `x_post_get` | read:content | app+user | r:post | P1 | X (Twitter): batch post lookup — `ids: string[]` (1–100), each an id or a status URL. Compact shape (author, text, metrics, refs, media) |
 | `x_post_hide_reply` | write:moderation | user-only | w:action | P3 | X (Twitter): hide / unhide a reply to own post (`PUT /2/tweets/:id/hidden`) |
 | `x_thread_create` | write:content | user-only | w:post | P3 | X (Twitter): post a thread — `posts: string[]` (2-25), each sent as a reply to the previous. Same per-post rate/cost/policy checks as `x_post_create`, run for every post before any call is sent. A mid-thread failure reports what already published and where it stopped (nothing is auto-deleted), so the agent resumes with `x_post_create`'s `reply_to_id` |
+| `x_article_draft_create` | write:content | user-only | w:post | P3 | X (Twitter): create a private Article (long-form) draft — `title`, `blocks[] {text, type?}` (1–1000; `unstyled` paragraph, `header-one`/`header-two`, ordered/unordered list item, `blockquote`), optional `cover_media_id` (an image from `x_media_upload`). A blank title or body, or a body that weighs over X's 10,000 weighted characters (URLs count as 23), is refused at validation, before any charge (ART-1, ART-2). Returns `article_id` for `x_article_publish`. X offers no endpoint to edit, list or delete drafts (fact-check 2026-11-20); an ambiguous failure is never auto-retried (ART-4). No pricing row: billed as `w:post` (ART-5) |
+| `x_article_publish` | write:content | user-only | w:post | P3 | X (Twitter): publish an Article draft by `article_id` (1–19 digits) — it becomes a public post. Returns `{article_id, post_id, url}`. An unknown id is a typed `not-found` (ART-3); an ambiguous failure points at `x_timeline_user` instead of retrying (ART-4). No pricing row: billed as `w:post` (ART-5) |
 
 ## search — discovery
 

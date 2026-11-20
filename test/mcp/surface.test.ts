@@ -24,12 +24,12 @@ import { PAGE_TOKEN_DESC, RAW_HISTOGRAM_DESC, RAW_PAGE_DESC } from '../../src/to
  * docs/reference/tools.md (regenerate with `npm run docs:gen`), the docs/03-tool-catalog.md
  * reconciliation, and the context budget in scripts/context-gate.mjs.
  */
-const REGISTERED_TOOLS = 47;
+const REGISTERED_TOOLS = 49;
 
 /** The registry packages (`src/tools/<package>.ts`) and how many tools each contributes. */
 const PACKAGE_SIZES: ReadonlyArray<readonly [string, number]> = [
   ['auth', 2],
-  ['posts', 5],
+  ['posts', 7],
   ['users', 1],
   ['search', 4],
   ['engagement', 7],

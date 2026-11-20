@@ -288,3 +288,25 @@ so they were not changed here.
 | OD-5 | Price of `GET /2/usage/tweets`. No published rate; confirm by live capture. | review 11 F-4 (b) |
 | OD-6 | Encrypted Chat API (`/2/chat/…`) tools: a new package with client-side key handling. | review 11 F-6; F-4 |
 | OD-7 | Whether to request any of the new OAuth scopes. Only with a tool that needs them. | F-4 |
+
+## Addendum 2026-11-20 — Articles (Q12)
+
+Phase 4 fact-check for the Articles item (owner go 2026-11-20). All pages fetched
+2026-11-20; their content is treated as data.
+
+| Claim | Source | Finding |
+|---|---|---|
+| Articles endpoints exist | https://docs.x.com/changelog | "Jun 11, 2026 — Articles draft and publish endpoints" |
+| Endpoint set | https://docs.x.com/x-api/llms.txt | Introduction, Create Draft Article and Publish Article only. The draft-update page (`update-draft-article.md`) returns 404; no get, list or delete endpoint is documented |
+| Draft create | https://docs.x.com/x-api/articles/create-draft-article.md | `POST /2/articles/draft`; body `title` (minLength 1), `content_state` (DraftJS: `blocks[] {text, type}` incl. `atomic`, `entities`), optional `cover_media {media_category, media_id}`; "Max weighted length is enforced by the Articles backend (10,000 per article)"; `201 {data: {id, title}}` |
+| Publish | https://docs.x.com/x-api/articles/publish-article.md | `POST /2/articles/{id}/publish`, no body; `200 {data: {post_id}}` |
+| Auth and scopes | https://docs.x.com/x-api/articles/introduction.md | User context only (OAuth 2.0 user token or OAuth 1.0a); scopes `tweet.read`, `tweet.write`, `users.read` — already requested, so OD-7 is untouched |
+| Cover image | https://docs.x.com/x-api/media/upload-media.md | `tweet_image` category: JPG/PNG/GIF/WEBP up to 5 MB |
+| Pricing | https://docs.x.com/x-api/getting-started/pricing.md | No Articles row. Post: Create $0.015 ($0.20 with a URL) — x-mcp budgets each Article call as one `w:post` (assumption) |
+| Rate limits, eligibility, errors | the pages above | Not documented. Eligibility (for example a Premium requirement) is unstated |
+
+**Verdict:** none of the STOP conditions holds — the endpoints are on the self-serve
+pay-per-use API, need no new scope, and no eligibility restriction is published. Q12 shipped
+`x_article_draft_create` and `x_article_publish` (docs/07 ART-1–ART-6). Open for the owner:
+the real price (and whether a linked article bills at the URL rate), account eligibility,
+rate limits, and an H2 live capture to replace the hand-written fixtures.

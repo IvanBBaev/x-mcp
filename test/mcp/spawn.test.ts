@@ -126,7 +126,7 @@ test('MCP-1/MCP-3: stdout carries only JSON-RPC frames and stdin EOF exits clean
   const listResponse = (await responseWithId(reader, 2)) as {
     result?: { tools?: unknown[] };
   };
-  assert.equal(listResponse.result?.tools?.length, 47, 'tools/list must expose all 47 tools');
+  assert.equal(listResponse.result?.tools?.length, 49, 'tools/list must expose all 49 tools');
 
   // MCP-3 — closing stdin (host is done) must exit 0 without being killed.
   child.stdin.end();
@@ -198,7 +198,7 @@ test('MCP-3: stdin EOF flushes a large buffered response instead of truncating i
     .map((line) => JSON.parse(line) as { id?: number; result?: { tools?: unknown[] } })
     .find((message) => message.id === 2);
   assert.ok(listResponse, 'the tools/list response never reached stdout');
-  assert.equal(listResponse.result?.tools?.length, 47);
+  assert.equal(listResponse.result?.tools?.length, 49);
 });
 
 // Windows has no POSIX signals: `child.kill('SIGTERM')` there is an unconditional

@@ -1,0 +1,6 @@
+{
+  "_provenance": "Synthetic: hand-written to the docs.x.com x-api/articles 'Publish Article' 200 response schema for POST /2/articles/{article_id}/publish (fetched 2026-11-20) — `data.post_id`, the post the article became. Fictional ids, NOT a live capture (pending the H2 live fixture capture). Authored 2026-11-20. Exercises: x_article_publish.",
+  "data": {
+    "post_id": "1991000000000000099"
+  }
+}

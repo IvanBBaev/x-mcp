@@ -652,6 +652,17 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   // Phase 4 news (Q11): an unpaginated page of stories, and one story by id.
   x_news_search: envelope(compactOrRaw(pageOf({ $ref: '#/$defs/compact_news' })), NEWS_DEFS),
   x_news_get: envelope(compactOrRaw({ $ref: '#/$defs/compact_news' }), NEWS_DEFS),
+  // Phase 4 articles (Q12): the private draft's id, and the post a published article became.
+  x_article_draft_create: envelope({
+    type: 'object',
+    properties: { article_id: STR, title: STR, note: STR },
+    required: ['article_id', 'title'],
+  }),
+  x_article_publish: envelope({
+    type: 'object',
+    properties: { article_id: STR, post_id: STR, url: STR },
+    required: ['article_id', 'post_id', 'url'],
+  }),
 });
 
 /** The static `outputSchema` for one tool, or `undefined` for an unknown name. */

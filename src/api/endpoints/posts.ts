@@ -185,3 +185,87 @@ export async function setReplyHidden(
   };
   return http.send<RawSingleResponse<RawHiddenState>>(req);
 }
+
+// --- Articles (Q12; X changelog 2026-06-11) ------------------------------------------
+
+/**
+ * The block types {@link createArticleDraft} sends. X's `content_state` is DraftJS-shaped
+ * and also documents `atomic`, but an atomic block only renders through an entity (image,
+ * embedded post, divider, …), which this minimal surface does not build — so the tool
+ * schema offers only the text blocks below. Single source of truth for the tool's `z.enum`.
+ */
+export const ARTICLE_BLOCK_TYPES = [
+  'unstyled',
+  'header-one',
+  'header-two',
+  'unordered-list-item',
+  'ordered-list-item',
+  'blockquote',
+] as const;
+export type ArticleBlockType = (typeof ARTICLE_BLOCK_TYPES)[number];
+
+/** Parameters for {@link createArticleDraft}; `coverMediaId` is an uploaded image's id. */
+export interface CreateArticleDraftParams {
+  readonly title: string;
+  readonly blocks: readonly { readonly text: string; readonly type: ArticleBlockType }[];
+  readonly coverMediaId?: string;
+}
+
+/** The `POST /2/articles/draft` success payload (201). Read defensively (DRIFT-1). */
+export interface RawArticleDraft {
+  readonly id?: string;
+  readonly title?: string;
+}
+
+/** The `POST /2/articles/:id/publish` success payload: the post the article became. */
+export interface RawArticlePublished {
+  readonly post_id?: string;
+}
+
+/**
+ * Create a private Article draft via `POST /2/articles/draft` (docs/03 `x_article_draft_create`).
+ * The body is `{title, content_state: {blocks, entities}, cover_media?}` (docs.x.com, fetched
+ * 2026-11-20). Blocks carry only the documented required `text` + `type` (keys, inline
+ * styles and entity ranges are optional and not built); `entities` is always empty. The
+ * cover goes out as `{media_category: 'tweet_image', media_id}` — X's cover is an image
+ * uploaded through the media upload endpoint. No validation lives here: the tool schema did it.
+ */
+export async function createArticleDraft(
+  http: EndpointInvoker,
+  params: CreateArticleDraftParams,
+): Promise<RawSingleResponse<RawArticleDraft>> {
+  const body: Record<string, unknown> = {
+    title: params.title,
+    content_state: {
+      blocks: params.blocks.map((b) => ({ text: b.text, type: b.type })),
+      entities: [],
+    },
+    ...(params.coverMediaId !== undefined
+      ? { cover_media: { media_category: 'tweet_image', media_id: params.coverMediaId } }
+      : {}),
+  };
+  const req: XApiRequest = {
+    method: 'POST',
+    path: '/2/articles/draft',
+    body,
+    scopes: POST_WRITE_SCOPES,
+  };
+  return http.send<RawSingleResponse<RawArticleDraft>>(req);
+}
+
+/**
+ * Publish an Article draft via `POST /2/articles/:article_id/publish` (docs/03
+ * `x_article_publish`). No request body; the response names the post the article became.
+ * `articleId` is an already-validated 1-19 digit id.
+ */
+export async function publishArticle(
+  http: EndpointInvoker,
+  params: { readonly articleId: string },
+): Promise<RawSingleResponse<RawArticlePublished>> {
+  const req: XApiRequest = {
+    method: 'POST',
+    path: `/2/articles/${encodeURIComponent(params.articleId)}/publish`,
+    scopes: POST_WRITE_SCOPES,
+  };
+  return http.send<RawSingleResponse<RawArticlePublished>>(req);
+}

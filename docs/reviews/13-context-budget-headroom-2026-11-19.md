@@ -519,6 +519,11 @@ Note the count side:
    `x_news_get`, in the `search` package. News search is unpaginated, so the search tool
    carries no `page_token`. +2,675 B (1,593 + 1,080 with the list framing), inside the
    modelled 1.9–3.8 kB, 69,917 → 72,592 B (7,408 B of headroom). Articles remain open.
+   **Articles landed 2026-11-20 as Q12 (owner go):** two writes in the `posts` package,
+   `x_article_draft_create` and `x_article_publish` (`write:content`, `user-only`). X
+   documents no draft update, get, list or delete endpoint, so the surface stops at create +
+   publish. +2,198 B (1,437 + 759 with the list framing), 72,592 → 74,790 B (5,210 B of
+   headroom). All three candidates have now landed.
 5. **Off-by-default packages.** Is d1 (`X_MCP_PACKAGES`, default = today's 12 packages)
    acceptable as the mechanism for any package beyond the three candidates? Or does
    "full surface" (decisions/0002) have to stay "everything listed by default"?

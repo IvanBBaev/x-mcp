@@ -12,13 +12,20 @@
 import { z } from 'zod';
 
 import {
+  ARTICLE_BLOCK_TYPES,
   REPLY_SETTINGS,
+  createArticleDraft,
   createPost,
   deletePost,
   getPosts,
+  publishArticle,
   setReplyHidden,
 } from '../api/endpoints/posts.js';
-import type { RawCreatedPost } from '../api/endpoints/posts.js';
+import type {
+  RawArticleDraft,
+  RawArticlePublished,
+  RawCreatedPost,
+} from '../api/endpoints/posts.js';
 import { WRITE_AMBIGUITY } from '../api/http.js';
 import { CONTENT_MANAGE_USD, POST_DELETE_USD } from '../core/budget.js';
 import { XError, forbiddenError, notFoundError, validationError } from '../core/errors.js';
@@ -775,5 +782,228 @@ export const xThreadCreate = defineTool({
   },
 });
 
+// --- Articles (Q12): x_article_draft_create, x_article_publish ----------------------
+//
+// X Articles: long-form posts drafted privately, then published as a post (X changelog
+// 2026-06-11; docs.x.com x-api/articles, fetched 2026-11-20). The API has exactly two
+// endpoints — create a draft, publish a draft. There is no draft update, get or list
+// endpoint, so a draft cannot be edited, found or checked through the API (docs/07 ART-6).
+// Both are user-context only (OAuth 2.0 user token or OAuth 1.0a) with the ordinary post
+// scopes, so the tools are `user-only` (the registry refuses them under app-only before any
+// charge, AUTH-17) and sit in the publish preset's `write:content` cell beside x_post_create.
+//
+// Price ASSUMPTION: the pricing page (fetched 2026-11-20) has no Articles row. Each call is
+// billed at the "Post: Create" rate (`w:post`, $0.015) — conservative for the draft, which
+// creates no public post, and the base rate for the publish (docs/07 ART-5).
+
+/** An article id: the spec's path pattern `^[0-9]{1,19}$` (also a media id's shape). */
+const ARTICLE_ID_RE = /^\d{1,19}$/;
+
+/** "Max weighted length is enforced by the Articles backend (10,000 per article)." */
+const ARTICLE_WEIGHTED_LIMIT = 10_000;
+
+/** Local guard on the block count — a bound for the payload, far above any real article. */
+const ARTICLE_MAX_BLOCKS = 1_000;
+
+const GRAPHEMES = new Intl.Segmenter('en', { granularity: 'grapheme' });
+
+/**
+ * ART-2: a LOWER BOUND on X's weighted length of one block, so the local refusal can never
+ * reject an article X would accept. X weighs a URL as 23 and every other character as 1 or
+ * more (twitter-text weighs CJK and emoji as 2); counting each URL-ish token as at most 23
+ * and every other grapheme as exactly 1 can only under-count. Sums of these floors over
+ * the blocks above 10,000 are certainly over the limit; anything below is X's to judge.
+ */
+function weightFloor(text: string): number {
+  const collapsed = text.replace(new RegExp(URL_PATTERN, 'giu'), (url) =>
+    'x'.repeat(Math.min([...url].length, URL_WEIGHT)),
+  );
+  return Array.from(GRAPHEMES.segment(collapsed)).length;
+}
+
+const ARTICLE_DRAFT_TITLE = 'Create article draft';
+
+const articleDraftInput = z
+  .object({
+    title: z.string().min(1).describe('Article title.'),
+    blocks: z
+      .array(
+        z
+          .object({
+            text: z.string().describe('Block text (plain; empty for a blank line).'),
+            type: z.enum(ARTICLE_BLOCK_TYPES).optional().describe('Default unstyled.'),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(ARTICLE_MAX_BLOCKS)
+      .describe('Body in order: paragraphs, headings, list items, quotes.'),
+    cover_media_id: z
+      .string()
+      .regex(ARTICLE_ID_RE)
+      .optional()
+      .describe('Cover image: a media id from x_media_upload.'),
+  })
+  .strict()
+  // ART-1 / ART-2 in the schema, not the handler: schema validation runs before the budget
+  // charge, so a locally refused draft is never billed. Refinements add no context bytes.
+  .superRefine((input, ctx) => {
+    if (input.title.trim() === '') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['title'],
+        message: 'Article title is whitespace-only. Provide a title (ART-1).',
+      });
+    }
+    if (input.blocks.every((b) => b.text.trim() === '')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks'],
+        message:
+          'Article body is empty: every block is blank or whitespace-only. Add text (ART-1).',
+      });
+    }
+    const floor = input.blocks.reduce((sum, b) => sum + weightFloor(b.text), 0);
+    if (floor > ARTICLE_WEIGHTED_LIMIT) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['blocks'],
+        message:
+          `Article body weighs at least ${floor} — over X's ${ARTICLE_WEIGHTED_LIMIT} weighted ` +
+          `limit per article (URLs count as ${URL_WEIGHT}). Shorten by at least ` +
+          `${floor - ARTICLE_WEIGHTED_LIMIT} characters (ART-2); the request was not sent.`,
+      });
+    }
+  });
+
+// ART-4: a transport failure or 5xx after the draft request left. Drafts are private, so
+// the worst case of re-issuing is a second unpublished draft — but X has no list endpoint
+// to check, and drafts cannot be deleted through the API either.
+const DRAFT_AMBIGUITY_GUIDANCE =
+  ' The draft may nevertheless have been created — the failure happened after the request ' +
+  'was sent, so the outcome is unknown (ART-4). X has no API to list or delete drafts, so ' +
+  'this cannot be checked here. Do NOT auto-retry: re-issuing at worst leaves a second ' +
+  'private, unpublished draft; ask the user before doing so.';
+
+/**
+ * `x_article_draft_create` — create a private Article draft (docs/03 posts §; ART-1..6).
+ * The draft is never public; `x_article_publish` turns it into a post.
+ */
+export const xArticleDraftCreate = defineTool({
+  name: 'x_article_draft_create',
+  title: ARTICLE_DRAFT_TITLE,
+  description:
+    'X (Twitter): create a private Article (long-form) draft — title, text blocks ' +
+    '(paragraph, heading, list item, quote; 10,000 weighted chars max), optional cover ' +
+    'image. Returns the article_id for x_article_publish. Drafts cannot be edited via the API.',
+  policy: 'write:content',
+  availability: 'user-only',
+  scopes: ['tweet.read', 'tweet.write', 'users.read'],
+  cost: 'w:post',
+  annotations: {
+    title: ARTICLE_DRAFT_TITLE,
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  phase: 3,
+  input: articleDraftInput,
+  handler: async (input, ctx) => {
+    let res: RawSingleResponse<RawArticleDraft>;
+    try {
+      res = await createArticleDraft(ctx.http, {
+        title: input.title,
+        blocks: input.blocks.map((b) => ({ text: b.text, type: b.type ?? 'unstyled' })),
+        ...(input.cover_media_id !== undefined ? { coverMediaId: input.cover_media_id } : {}),
+      });
+    } catch (err) {
+      if (XError.is(err) && isAmbiguousWriteFailure(err)) {
+        throw withAmbiguityGuidance(err, DRAFT_AMBIGUITY_GUIDANCE);
+      }
+      throw err;
+    }
+    const articleId = res.data?.id ?? '';
+    return {
+      data: {
+        article_id: articleId,
+        title: res.data?.title ?? input.title,
+        note: 'The draft is private. Publish it with x_article_publish; X offers no API to edit or list drafts.',
+      },
+      summary: `Article draft created: ${articleId}`,
+    };
+  },
+});
+
+const ARTICLE_PUBLISH_TITLE = 'Publish article';
+
+// ART-4: an ambiguous publish may have made the article public.
+const PUBLISH_AMBIGUITY_GUIDANCE =
+  ' The article may nevertheless have been published — the failure happened after the ' +
+  'request was sent, so the outcome is unknown (ART-4). Do NOT auto-retry: check the ' +
+  "account's own recent posts (x_timeline_user) for the article before re-issuing.";
+
+/**
+ * `x_article_publish` — publish an Article draft as a post (docs/03 posts §; ART-3/4/5).
+ * A separate tool from the draft create so a policy can allow drafting but not publishing.
+ */
+export const xArticlePublish = defineTool({
+  name: 'x_article_publish',
+  title: ARTICLE_PUBLISH_TITLE,
+  description:
+    'X (Twitter): publish an Article draft by article_id (from x_article_draft_create) — ' +
+    'it becomes a public post. Returns the post id + URL.',
+  policy: 'write:content',
+  availability: 'user-only',
+  scopes: ['tweet.read', 'tweet.write', 'users.read'],
+  cost: 'w:post',
+  annotations: {
+    title: ARTICLE_PUBLISH_TITLE,
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  phase: 3,
+  input: z
+    .object({
+      article_id: z.string().regex(ARTICLE_ID_RE).describe('The draft to publish.'),
+    })
+    .strict(),
+  handler: async (input, ctx) => {
+    let res: RawSingleResponse<RawArticlePublished>;
+    try {
+      res = await publishArticle(ctx.http, { articleId: input.article_id });
+    } catch (err) {
+      if (XError.is(err) && err.kind === 'not-found') {
+        // ART-3: no such draft for this account (never created, or another account's).
+        throw notFoundError(
+          `No Article draft ${input.article_id} for this account (ART-3). Check the id ` +
+            'returned by x_article_draft_create; drafts cannot be listed through the API.',
+          { data: err.data, cause: err },
+        );
+      }
+      if (XError.is(err) && isAmbiguousWriteFailure(err)) {
+        throw withAmbiguityGuidance(err, PUBLISH_AMBIGUITY_GUIDANCE);
+      }
+      throw err;
+    }
+    const postId = res.data?.post_id ?? '';
+    const url = postUrl(postId);
+    return {
+      data: { article_id: input.article_id, post_id: postId, url },
+      summary: `Article published: ${url}`,
+    };
+  },
+});
+
 /** Every tool this module contributes to the registry. */
-export const postsTools = [xPostGet, xPostCreate, xPostDelete, xPostHideReply, xThreadCreate];
+export const postsTools = [
+  xPostGet,
+  xPostCreate,
+  xPostDelete,
+  xPostHideReply,
+  xThreadCreate,
+  xArticleDraftCreate,
+  xArticlePublish,
+];

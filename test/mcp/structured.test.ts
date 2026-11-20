@@ -222,7 +222,7 @@ test('REND-11/T-310: every tool the real composition registers has an outputSche
   const names = composeServer(config)
     .registry.listForMcp()
     .map((tool) => tool.name);
-  assert.equal(names.length, 47, 'the Phase-1/2/3/4 catalog registers 47 tools');
+  assert.equal(names.length, 49, 'the Phase-1/2/3/4 catalog registers 49 tools');
   assertOutputSchemaCoverage(names); // must not throw
   for (const name of names) {
     const schema = toolOutputSchema(name);
@@ -648,12 +648,31 @@ test('REND-11/Q11: news pages, single stories and their raw envelopes conform', 
   assertConforms('x_news_get', loadFixture<object>('search/news-get.json'));
 });
 
+// --- Q12: articles (docs/07 §19 ART) -------------------------------------------------
+
+test('REND-11/Q12: article draft and publish results conform', () => {
+  const draft = loadFixture<{ data: { id: string; title: string } }>('posts/article-draft.json');
+  assertConforms('x_article_draft_create', {
+    article_id: draft.data.id,
+    title: draft.data.title,
+    note: 'The draft is private.',
+  });
+  // DRIFT-1: a degraded 201 without a body still renders the required keys.
+  assertConforms('x_article_draft_create', { article_id: '', title: 'Untitled' });
+  const published = loadFixture<{ data: { post_id: string } }>('posts/article-publish.json');
+  assertConforms('x_article_publish', {
+    article_id: draft.data.id,
+    post_id: published.data.post_id,
+    url: `https://x.com/i/status/${published.data.post_id}`,
+  });
+});
+
 // --- Q09: every served schema accepted a real render that carries meta ------------
 // Runs last (node:test runs a file's top-level tests in order): every tool the server
 // serves must have gone through `assertConforms` above at least once.
 
 test('Q09/REND-11: real structuredContent with meta conforms to EVERY served outputSchema', () => {
-  assert.equal(SERVED.size, 47);
+  assert.equal(SERVED.size, 49);
   const unchecked = [...SERVED.keys()].filter((name) => !VALIDATED_WITH_META.has(name)).sort();
   assert.deepEqual(unchecked, [], 'tools with no real-render conformance check');
 });

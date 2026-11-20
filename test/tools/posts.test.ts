@@ -14,6 +14,8 @@ import {
   xPostDelete,
   xPostHideReply,
   xThreadCreate,
+  xArticleDraftCreate,
+  xArticlePublish,
   postsTools,
 } from '../../src/tools/posts.js';
 import { CONTENT_MANAGE_USD, POST_DELETE_USD } from '../../src/core/budget.js';
@@ -58,7 +60,15 @@ function contextFor(mock: MockHttp): ToolContext {
 }
 
 test('registry array exposes the post tools', () => {
-  assert.deepEqual(postsTools, [xPostGet, xPostCreate, xPostDelete, xPostHideReply, xThreadCreate]);
+  assert.deepEqual(postsTools, [
+    xPostGet,
+    xPostCreate,
+    xPostDelete,
+    xPostHideReply,
+    xThreadCreate,
+    xArticleDraftCreate,
+    xArticlePublish,
+  ]);
   assert.equal(xPostGet.name, 'x_post_get');
   assert.equal(xPostGet.policy, 'read:content');
   assert.equal(xPostGet.availability, 'app+user');
@@ -1506,4 +1516,321 @@ test('COST-4: the cost resolver never throws on an empty/partial input (docs-gen
   assert.equal(result.class, 'w:post');
   assert.equal(result.usd, 0);
   assert.match(result.note ?? '', /aggregate/i);
+});
+
+// ---------------------------------------------------------------------------------------
+// Articles (Q12): x_article_draft_create / x_article_publish — docs/07 §19 ART.
+// ---------------------------------------------------------------------------------------
+
+test('ART-5: the article tools declare the docs/03 axes — publish cell, user-only, w:post', () => {
+  for (const tool of [xArticleDraftCreate, xArticlePublish]) {
+    assert.equal(tool.policy, 'write:content');
+    assert.equal(tool.availability, 'user-only');
+    assert.equal(tool.credential, undefined);
+    assert.equal(tool.cost, 'w:post');
+    assert.equal(tool.phase, 3);
+    assert.deepEqual([...tool.scopes], ['tweet.read', 'tweet.write', 'users.read']);
+    assert.match(tool.description, /^X \(Twitter\): /);
+    assert.equal(tool.annotations.readOnlyHint, false);
+    assert.equal(tool.annotations.destructiveHint, false);
+    assert.equal(tool.annotations.idempotentHint, false);
+    assert.equal(tool.annotations.openWorldHint, true);
+  }
+  assert.equal(xArticleDraftCreate.name, 'x_article_draft_create');
+  assert.equal(xArticlePublish.name, 'x_article_publish');
+});
+
+test('x_article_draft_create: sends the documented content_state body and returns the article id', async () => {
+  const mock = mockHttp();
+  const body = captureBody();
+  mock.pool
+    .intercept({ path: '/2/articles/draft', method: 'POST', body: body.matcher })
+    .reply(201, loadFixture<object>('posts/article-draft.json'));
+
+  const out = await xArticleDraftCreate.handler(
+    {
+      title: 'Notes on building an MCP server',
+      blocks: [
+        { text: 'Why', type: 'header-one' },
+        { text: 'Because tools.' },
+        { text: '' },
+        { text: 'Fast', type: 'unordered-list-item' },
+      ],
+      cover_media_id: '1880000000000000000',
+    },
+    contextFor(mock),
+  );
+
+  assert.deepEqual(JSON.parse(body.get()), {
+    title: 'Notes on building an MCP server',
+    content_state: {
+      blocks: [
+        { text: 'Why', type: 'header-one' },
+        { text: 'Because tools.', type: 'unstyled' },
+        { text: '', type: 'unstyled' },
+        { text: 'Fast', type: 'unordered-list-item' },
+      ],
+      entities: [],
+    },
+    cover_media: { media_category: 'tweet_image', media_id: '1880000000000000000' },
+  });
+  const data = out.data as { article_id: string; title: string; note: string };
+  assert.equal(data.article_id, '1991000000000000001');
+  assert.equal(data.title, 'Notes on building an MCP server');
+  assert.match(data.note, /private.*x_article_publish/);
+  assert.equal(out.summary, 'Article draft created: 1991000000000000001');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('x_article_draft_create: no cover omits cover_media; a body-less 201 falls back (DRIFT-1)', async () => {
+  const mock = mockHttp();
+  const body = captureBody();
+  mock.pool
+    .intercept({ path: '/2/articles/draft', method: 'POST', body: body.matcher })
+    .reply(201, {});
+
+  const out = await xArticleDraftCreate.handler(
+    { title: 'T', blocks: [{ text: 'x' }] },
+    contextFor(mock),
+  );
+  assert.equal('cover_media' in (JSON.parse(body.get()) as object), false);
+  assert.deepEqual(
+    { ...(out.data as object), note: undefined },
+    { article_id: '', title: 'T', note: undefined },
+  );
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('ART-1: a whitespace-only title or an all-blank body is refused before the budget charge or any HTTP', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xArticleDraftCreate);
+  await assert.rejects(
+    () =>
+      reg.call(
+        'x_article_draft_create',
+        { title: ' \t ', blocks: [{ text: 'body' }] },
+        noHttpCtx(),
+      ),
+    xErrorOf('validation', /title: Article title is whitespace-only/),
+  );
+  await assert.rejects(
+    () =>
+      reg.call(
+        'x_article_draft_create',
+        { title: 'T', blocks: [{ text: '' }, { text: ' \n ' }] },
+        noHttpCtx(),
+      ),
+    xErrorOf('validation', /blocks: Article body is empty/),
+  );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('ART-1: the schema is strict — closed block types (no atomic), 1-1000 blocks, digit-only ids', () => {
+  const schema = xArticleDraftCreate.input;
+  const ok = { title: 'T', blocks: [{ text: 'x' }] };
+  assert.equal(schema.safeParse(ok).success, true);
+  for (const type of ['header-one', 'header-two', 'blockquote', 'ordered-list-item']) {
+    assert.equal(schema.safeParse({ ...ok, blocks: [{ text: 'x', type }] }).success, true);
+  }
+  assert.equal(schema.safeParse({ ...ok, blocks: [{ text: 'x', type: 'atomic' }] }).success, false);
+  assert.equal(schema.safeParse({ ...ok, blocks: [] }).success, false);
+  const many = Array.from({ length: 1001 }, () => ({ text: 'x' }));
+  assert.equal(schema.safeParse({ ...ok, blocks: many }).success, false);
+  assert.equal(schema.safeParse({ ...ok, blocks: many.slice(1) }).success, true);
+  assert.equal(schema.safeParse({ ...ok, cover_media_id: 'abc' }).success, false);
+  assert.equal(schema.safeParse({ ...ok, cover_media_id: '1'.repeat(20) }).success, false);
+  assert.equal(schema.safeParse({ ...ok, title: '' }).success, false);
+  assert.equal(schema.safeParse({ ...ok, extra: 1 }).success, false);
+  assert.equal(schema.safeParse({ ...ok, blocks: [{ text: 'x', style: 'bold' }] }).success, false);
+});
+
+test('ART-2: a body certainly over 10,000 weighted characters is refused before the charge', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xArticleDraftCreate);
+  await assert.rejects(
+    () =>
+      reg.call(
+        'x_article_draft_create',
+        { title: 'T', blocks: [{ text: 'a'.repeat(6_000) }, { text: 'b'.repeat(4_001) }] },
+        noHttpCtx(),
+      ),
+    xErrorOf('validation', /weighs at least 10001 — over X's 10000 weighted limit.*by at least 1 /),
+  );
+  assert.equal(budgetChecks(), 0);
+});
+
+test('ART-2: the local length check is a lower bound — it never refuses what X may accept', () => {
+  const schema = xArticleDraftCreate.input;
+  // Exactly at the limit passes.
+  assert.equal(
+    schema.safeParse({ title: 'T', blocks: [{ text: 'a'.repeat(10_000) }] }).success,
+    true,
+  );
+  // A body whose raw length is over 10,000 only because of long URLs passes: X weighs each
+  // URL as 23, and so does the floor.
+  const url = `https://example.com/${'p'.repeat(100)}`;
+  const urls = Array.from({ length: 80 }, () => url).join(' ');
+  assert.ok(urls.length > 8_000);
+  assert.equal(
+    schema.safeParse({ title: 'T', blocks: [{ text: urls }, { text: 'a'.repeat(5_000) }] }).success,
+    true,
+  );
+  // A ZWJ family emoji is one grapheme (X weighs it 2), so 10,000 of them pass locally.
+  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}';
+  assert.equal(
+    schema.safeParse({ title: 'T', blocks: [{ text: family.repeat(10_000) }] }).success,
+    true,
+  );
+  // A short bare token the URL pattern over-matches (node.js) still counts its own length.
+  assert.equal(
+    schema.safeParse({ title: 'T', blocks: [{ text: 'node.js '.repeat(1_250) }] }).success,
+    true,
+  );
+});
+
+test('x_article_publish: POSTs to the draft publish path and returns the post id + URL', async () => {
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/articles/1991000000000000001/publish', method: 'POST' })
+    .reply(200, loadFixture<object>('posts/article-publish.json'));
+
+  const out = await xArticlePublish.handler(
+    { article_id: '1991000000000000001' },
+    contextFor(mock),
+  );
+  assert.deepEqual(out.data, {
+    article_id: '1991000000000000001',
+    post_id: '1991000000000000099',
+    url: 'https://x.com/i/status/1991000000000000099',
+  });
+  assert.equal(out.summary, 'Article published: https://x.com/i/status/1991000000000000099');
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('ART-3: a malformed article_id is refused before the charge; an unknown draft is not-found', async () => {
+  const { reg, budgetChecks } = chargeCountingRegistry(xArticlePublish);
+  for (const article_id of ['', 'abc', '12a', '1'.repeat(20), 'https://x.com/i/article/1']) {
+    await assert.rejects(
+      () => reg.call('x_article_publish', { article_id }, noHttpCtx()),
+      xErrorOf('validation', /article_id/),
+    );
+  }
+  assert.equal(budgetChecks(), 0);
+
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/articles/42/publish', method: 'POST' })
+    .reply(404, { title: 'Not Found Error', detail: 'Could not find article with id: [42].' });
+  await assert.rejects(
+    () => xArticlePublish.handler({ article_id: '42' }, contextFor(mock)),
+    xErrorOf('not-found', /No Article draft 42 for this account \(ART-3\)/),
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('ART-4: an ambiguous draft or publish failure is never auto-retried and says how to check', async () => {
+  const mock = mockHttp();
+  const timeout = Object.assign(new Error('simulated timeout'), { name: 'TimeoutError' });
+  // One interceptor each + assertDone proves exactly one attempt: writes never retry.
+  mock.pool.intercept({ path: '/2/articles/draft', method: 'POST' }).replyWithError(timeout);
+  mock.pool
+    .intercept({ path: '/2/articles/7/publish', method: 'POST' })
+    .reply(503, { title: 'Service Unavailable' });
+
+  await assert.rejects(
+    () => xArticleDraftCreate.handler({ title: 'T', blocks: [{ text: 'x' }] }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('network', /draft may nevertheless have been created/)(err);
+      const xerr = err as XError;
+      assert.match(xerr.message, /no API to list or delete drafts/);
+      assert.doesNotMatch(
+        xerr.message,
+        new RegExp(WRITE_AMBIGUITY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      );
+      assert.equal(xerr.retryable, false);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => xArticlePublish.handler({ article_id: '7' }, contextFor(mock)),
+    (err: unknown) => {
+      xErrorOf('api', /article may nevertheless have been published/)(err);
+      const xerr = err as XError;
+      assert.equal(xerr.data.http_status, 503);
+      assert.match(xerr.message, /x_timeline_user/);
+      assert.equal(xerr.retryable, false);
+      return true;
+    },
+  );
+
+  mock.assertDone();
+  await mock.close();
+});
+
+test('ART-4: a non-ambiguous failure passes through unchanged (e.g. a 403 on draft or publish)', async () => {
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/articles/draft', method: 'POST' })
+    .reply(403, { title: 'Forbidden', detail: 'You are not permitted to create Articles.' });
+  mock.pool
+    .intercept({ path: '/2/articles/8/publish', method: 'POST' })
+    .reply(403, { title: 'Forbidden', detail: 'You are not permitted to publish Articles.' });
+
+  await assert.rejects(
+    () => xArticleDraftCreate.handler({ title: 'T', blocks: [{ text: 'x' }] }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'forbidden');
+      assert.doesNotMatch(err.message, /nevertheless/);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => xArticlePublish.handler({ article_id: '8' }, contextFor(mock)),
+    (err: unknown) => {
+      assert.ok(XError.is(err));
+      assert.equal(err.kind, 'forbidden');
+      return true;
+    },
+  );
+  mock.assertDone();
+  await mock.close();
+});
+
+test('ART-6: no draft edit/get/list endpoint exists — the surface is create + publish and says so', async () => {
+  const articleTools = postsTools.filter((tool) => tool.name.startsWith('x_article_'));
+  assert.deepEqual(
+    articleTools.map((tool) => tool.name),
+    ['x_article_draft_create', 'x_article_publish'],
+  );
+  assert.match(xArticleDraftCreate.description, /cannot be edited via the API/);
+  const mock = mockHttp();
+  mock.pool
+    .intercept({ path: '/2/articles/draft', method: 'POST' })
+    .reply(201, { data: { id: '5', title: 'T' } });
+  const out = await xArticleDraftCreate.handler(
+    { title: 'T', blocks: [{ text: 'x' }] },
+    contextFor(mock),
+  );
+  assert.match((out.data as { note: string }).note, /no API to edit or list drafts/);
+  mock.assertDone();
+  await mock.close();
+});
+
+test('a non-XError rejection propagates unchanged through both article catches', async () => {
+  const boom = new Error('boom');
+  const ctx: ToolContext = { ports: makePorts(), http: { send: () => Promise.reject(boom) } };
+  await assert.rejects(
+    () => xArticleDraftCreate.handler({ title: 'T', blocks: [{ text: 'x' }] }, ctx),
+    (err: unknown) => err === boom,
+  );
+  await assert.rejects(
+    () => xArticlePublish.handler({ article_id: '1' }, ctx),
+    (err: unknown) => err === boom,
+  );
 });

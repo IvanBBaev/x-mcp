@@ -137,6 +137,8 @@ const READ_TOOLS = [
 
 // Write-surface tools (Phases 2–3): must NOT advertise readOnlyHint.
 const WRITE_TOOLS = [
+  'x_article_draft_create',
+  'x_article_publish',
   'x_block_set',
   'x_bookmark_folder_create',
   'x_bookmark_set',
@@ -973,6 +975,29 @@ test('AUTH-17/OD-1: under an app-only bearer a user-only tool stays listed but r
   const err = textPayload<RenderedError>(result).error;
   assert.equal(err.kind, 'auth');
   assert.match(err.message, /X_MCP_AUTH_MODE=oauth2/);
+  assert.equal(composition.budget.total(), 0);
+
+  mock.assertDone();
+  await client.close();
+  await mock.close();
+});
+
+test('ART-5/AUTH-17: under an app-only bearer the article writes refuse locally — no request, no charge', async () => {
+  const mock = mockHttp();
+  const composition = composeFor(mock, { X_MCP_POLICY: 'publish' });
+  const client = await connect(composition);
+
+  const calls: ReadonlyArray<readonly [string, object]> = [
+    ['x_article_draft_create', { title: 'T', blocks: [{ text: 'x' }] }],
+    ['x_article_publish', { article_id: '1' }],
+  ];
+  for (const [name, args] of calls) {
+    const result = await call(client, name, args);
+    assert.equal(result.isError, true);
+    const err = textPayload<RenderedError>(result).error;
+    assert.equal(err.kind, 'auth');
+    assert.match(err.message, /X_MCP_AUTH_MODE=oauth2/);
+  }
   assert.equal(composition.budget.total(), 0);
 
   mock.assertDone();

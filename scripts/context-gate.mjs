@@ -59,7 +59,9 @@
 // 702 B (+3,160 B with the list framing): **69,917 bytes** — ~10,083 B of headroom. Q11
 // (owner go 2026-11-20) then added the two read-only news tools — x_news_search 1,593 B,
 // x_news_get 1,080 B (+2,675 B with the list framing): **72,592 bytes** — ~7,408 B of
-// headroom. The
+// headroom. Q12 (owner go 2026-11-20) then added the two Article writes —
+// x_article_draft_create 1,437 B, x_article_publish 759 B (+2,198 B with the list framing):
+// **74,790 bytes** — ~5,210 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -79,7 +81,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 72_592;
+const BASELINE_BYTES = 74_790;
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;

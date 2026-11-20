@@ -10,6 +10,16 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- Articles (two new writes in the `posts` package, 47 → 49): `x_article_draft_create`
+  creates a private long-form draft from a `title`, 1-1000 text `blocks` (paragraph,
+  heading, list item, quote) and an optional cover image, and `x_article_publish` publishes a
+  draft by `article_id`, returning the post id and URL. Both are `write:content` (the
+  `publish` preset), `user-only`, existing `tweet.read tweet.write users.read` scopes — no
+  new OAuth scope. X publishes no price for Articles, so each call is budgeted as one post
+  write ($0.015). A blank title or body, an unknown block type or a body certainly over X's
+  10,000 weighted characters is refused at validation and never charged; an ambiguous
+  failure is never auto-retried. X offers no endpoint to edit, list or delete drafts.
+  `tools/list` grows by 2,198 B, to 74,790 of 80,000 B.
 - News (two new read-only tools in the `search` package, 45 → 47): `x_news_search` searches
   the news stories X curates from posts (`query`, optional `max_age_hours` 1-720, one page —
   X returns no cursor) and `x_news_get` reads one story by id. Stories come back as

@@ -1,6 +1,54 @@
 {
   "_provenance": "Contract baseline for the per-tool `outputSchema` map (T-310, REND-11): the schemas are PUBLIC API under semver, so any diff here must be an intentional, reviewed contract change. Regenerate by serializing TOOL_OUTPUT_SCHEMAS from src/mcp/structured.ts with sorted tool names.",
   "schemas": {
+    "x_article_draft_create": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "article_id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": ["article_id", "title"]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"]
+    },
+    "x_article_publish": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "object",
+          "properties": {
+            "article_id": {
+              "type": "string"
+            },
+            "post_id": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": ["article_id", "post_id", "url"]
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": ["data"]
+    },
     "x_auth_status": {
       "type": "object",
       "properties": {

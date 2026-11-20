@@ -777,3 +777,52 @@ pending the H2 live capture.
   `GET /2/news/:id` for an unknown or expired story answers `200` with `errors[]` and no
   `data`. `x_news_get` fails with a typed `not-found` error carrying only the X error kind,
   never X's free-text `detail`.
+
+## 19. ART — Articles *(Q12, Phase 4)*
+
+Platform fact-check 2026-11-20 (docs.x.com changelog entry "Jun 11, 2026 — Articles draft
+and publish endpoints", the `x-api/articles` introduction, `create-draft-article`,
+`publish-article` and the media-upload category list). `[Q12]` = the Q12 Articles item
+(owner go 2026-11-20, [review 13](reviews/13-context-budget-headroom-2026-11-19.md) §6 Q4).
+Both endpoints take a user token (OAuth 2.0 PKCE or OAuth 1.0a) and need only the existing
+`tweet.read tweet.write users.read` scopes (OD-7). X documents no rate limit, price,
+account eligibility or error codes for either. All fixtures are hand-written, pending the
+H2 live capture.
+
+- **ART-1 — A blank or malformed article is refused before any charge** `P3` `[Q12]`
+  A whitespace-only `title`, a body whose every block is blank, zero or more than 1,000
+  blocks, a block `type` outside the six exposed DraftJS types (`atomic` and entity blocks
+  are not exposed), an unknown key, or a `cover_media_id` that is not 1-19 digits fails in
+  the zod schema — the budget is never checked and no request is sent
+  (charge-before-refuse).
+
+- **ART-2 — The 10,000 weighted-character limit is checked as a lower bound** `P3` `[Q12]`
+  X enforces "10,000 per article" server-side and does not publish its weighting. The local
+  check counts each URL as at most 23 and every other grapheme (a ZWJ emoji included) as 1,
+  so it can only under-count: a body whose floor exceeds 10,000 is refused before the charge
+  with the minimum overshoot; anything under the floor is sent and left to X to judge.
+
+- **ART-3 — An unknown draft is `not-found`** `P3` `[Q12]`
+  A malformed `article_id` fails in the schema; a well-formed id X does not know for this
+  account (`404`) maps to a typed `not-found` that names the id and says drafts cannot be
+  listed through the API.
+
+- **ART-4 — Ambiguous Article writes are never auto-retried** `P3` `[Q12]`
+  A timeout or `5xx` after the request left may still have created the draft or published
+  the article. The error is non-retryable and replaces the generic write note: for a draft,
+  X has no API to list or delete drafts, so a retry can leave an orphan; for a publish, the
+  agent checks `x_timeline_user` before trying again. A non-ambiguous failure (a `403`, for
+  example) passes through unchanged.
+
+- **ART-5 — Article writes are `write:content`, `user-only`, billed as `w:post`** `P3` `[Q12]`
+  Both tools sit in the `publish` preset's `write:content` cell and are `user-only`, so an
+  app-only bearer refuses locally with no request and no charge (AUTH-17). No pricing row
+  exists for Articles; each call bills as one `w:post` ($0.015) — an assumption until X
+  prices them. Whether a published article that contains a link bills at the $0.20 URL rate
+  is unknown.
+
+- **ART-6 — Drafts cannot be edited, read, listed or deleted** `P3` `[Q12]`
+  X documents only `POST /2/articles/draft` and `POST /2/articles/{id}/publish`; the
+  draft-update page returns 404 (2026-11-20). The surface is create + publish, and the
+  draft result and descriptions say so. Inline styles, links and media blocks are not
+  exposed (plain text blocks only, `entities: []`).

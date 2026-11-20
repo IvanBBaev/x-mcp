@@ -4,7 +4,7 @@
 
 # Tool reference (generated)
 
-**47 tools in 12 packages.** Every field on this page is read out of the registered
+**49 tools in 12 packages.** Every field on this page is read out of the registered
 `ToolDef` values, so this is the surface the server actually exposes — not the surface it
 was designed to have. The designed catalog, including tools that are not implemented yet,
 is [`../03-tool-catalog.md`](../03-tool-catalog.md).
@@ -14,7 +14,7 @@ is [`../03-tool-catalog.md`](../03-tool-catalog.md).
 | Package | Tools | Registered tools |
 |---|--:|---|
 | `auth` | 2 | `x_auth_status`, `x_rate_limit_status` |
-| `posts` | 5 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create` |
+| `posts` | 7 | `x_post_get`, `x_post_create`, `x_post_delete`, `x_post_hide_reply`, `x_thread_create`, `x_article_draft_create`, `x_article_publish` |
 | `users` | 1 | `x_user_get` |
 | `search` | 4 | `x_search_recent`, `x_post_counts_recent`, `x_news_search`, `x_news_get` |
 | `engagement` | 7 | `x_like_set`, `x_repost_set`, `x_bookmark_set`, `x_bookmarks_list`, `x_bookmark_folders_list`, `x_bookmark_folder_posts`, `x_bookmark_folder_create` |
@@ -33,12 +33,12 @@ annotated; they refuse the call (POL-7). DM cells are in no preset, not even `fu
 
 | Preset | Callable | Denied |
 |---|--:|--:|
-| `read-only` *(default)* | 25 | 22 |
-| `engage` | 31 | 16 |
-| `publish` | 38 | 9 |
-| `manage` | 40 | 7 |
-| `full` | 43 | 4 |
-| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 47 | 0 |
+| `read-only` *(default)* | 25 | 24 |
+| `engage` | 31 | 18 |
+| `publish` | 40 | 9 |
+| `manage` | 42 | 7 |
+| `full` | 45 | 4 |
+| `full` + `X_MCP_POLICY_ALLOW=read:dm,write:dm` | 49 | 0 |
 
 ## Reading the tables
 
@@ -146,6 +146,34 @@ Takes no input fields.
 |---|---|:--:|---|
 | `posts` | string[] (2–25 items) | ✅ | Thread texts, in order (2-25); each replies to the previous. |
 | `reply_to_id` | string |  | Post the first one replies to (id or status URL); resumes a stopped thread. |
+
+### `x_article_draft_create`
+
+**Create article draft** — Create a private Article (long-form) draft — title, text blocks (paragraph, heading, list item, quote; 10,000 weighted chars max), optional cover image.
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `posts` | `write:content` | `user-only` | `w:post` | 3 | — | `tweet.read`, `tweet.write`, `users.read` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `title` | string (non-empty) | ✅ | Article title. |
+| `blocks` | object[] (1–1000 items) | ✅ | Body in order: paragraphs, headings, list items, quotes. |
+| `blocks[].text` | string | ✅ | Block text (plain; empty for a blank line). |
+| `blocks[].type` | `unstyled` \| `header-one` \| `header-two` \| `unordered-list-item` \| `ordered-list-item` \| `blockquote` |  | Default unstyled. |
+| `cover_media_id` | string |  | Cover image: a media id from x_media_upload. |
+
+### `x_article_publish`
+
+**Publish article** — Publish an Article draft by article_id (from x_article_draft_create) — it becomes a public post.
+
+| Package | Cell | Availability | Cost | Phase | MCP hints | OAuth scopes |
+|---|---|---|---|---|---|---|
+| `posts` | `write:content` | `user-only` | `w:post` | 3 | — | `tweet.read`, `tweet.write`, `users.read` |
+
+| Field | Type | Required | Description |
+|---|---|:--:|---|
+| `article_id` | string | ✅ | The draft to publish. |
 
 ## `users`
 

@@ -125,6 +125,11 @@ const TOOL_BUCKETS: Readonly<Record<string, string | null>> = {
   // each; search also 200 / 15 min per user — docs.x.com rate-limits page, 2026-11-20).
   x_news_search: 'news-search',
   x_news_get: 'news-lookup',
+  // Q12 articles: draft create and publish are distinct endpoints. X documents no rate limit
+  // for either (docs.x.com rate-limits page has no /2/articles rows, 2026-11-20), so each
+  // gets its own bucket that learns from the response headers.
+  x_article_draft_create: 'articles-draft',
+  x_article_publish: 'articles-publish',
 };
 
 /** Test seams: override any port; production passes nothing and gets the real adapters. */
