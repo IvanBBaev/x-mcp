@@ -173,6 +173,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 >
 > Bookmark folders (2026-11-20, Q10, 0f4c1a4, OD-4 / review 13 §6 Q4): the three new tools
 > add 3,160 B, to **69,917 B** (10,083 B of headroom).
+>
+> News (2026-11-20, Q11, fef5278, review 13 §6 Q4): the two news reads add 2,675 B, to
+> **72,592 B** (7,408 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -208,6 +211,14 @@ MCP spec (2026-07-28) is ahead of both SDK lines (2025-11-25). Candidate stays u
 expansions. The create route is documented only in the OpenAPI spec, and X publishes no price
 for the folder endpoints, so the cost classes are assumptions. Existing bookmark scopes only;
 docs/07 BKF-1..6. Fixtures are hand-written, pending H2 capture. +3,160 B, to **69,917 B**.
+
+**News shipped 2026-11-20 (queue Q11, fef5278):** two read-only tools in the `search`
+package, `x_news_search` and `x_news_get` (both `read:content`, `app+user`, existing
+`tweet.read users.read` scopes). News search is unpaginated, so the search tool has no
+`page_token`. X publishes no news price, so both bill as `r:post` per story (the `news.new`
+webhook rate), which is an assumption. The `updated_at` / `last_updated_at_ms` naming drift
+is handled; docs/07 NEWS-1..7. Fixtures are hand-written, pending H2 capture. +2,675 B, to
+**72,592 B**.
 
 ---
 
