@@ -506,6 +506,28 @@ Note the count side:
    baseline in `scripts/context-gate.mjs` was updated.
 3. **Gate scope.** Keep the 80,000 B wire cap and add a model-visible sub-measure (e1)
    and a tool-count warning (e3)? Or raise the wire cap (e2), and to what figure?
+   **Answered 2026-11-21 (owner): e1 + e3; the 80,000 B wire cap stays.** Landed 2026-11-21
+   as Q13 in `scripts/context-gate.mjs` (judging logic in `scripts/lib/context-budget.mjs`,
+   tested by `test/context-budget.test.ts`):
+   - **e1.** A model-visible sub-measure: per tool `name`, `description`, `inputSchema`
+     and `annotations.title`, in their wire positions inside a `{"tools":[…]}` envelope,
+     taken over the same configurations as the wire size. Re-measured at the 49-tool
+     surface: **39,802 B** worst case (`read-only`; 39,010 B under `full` + DM allow),
+     gated at **40,000 B** with its own baseline, so **198 B** of headroom. The ≈ 36.6 kB in
+     §2 (e) was an estimate. The same projection gives 35,063 B for the 42 pre-Q10 tools,
+     and the seven Bookmark Folders, News and Articles tools add 4,739 B. The wire size is
+     unchanged at 74,790 B.
+   - **e3.** A fixed "warn above 48" would fire on every run, because all 49 tools are
+     listed in every preset with hide-denied off. The guard is therefore an exact count
+     instead: every configuration must list `TOOL_COUNT_BASELINE` (49) tools, and a
+     mismatch fails. Separately, a count above a recorded client limit prints a warning
+     and never fails. The limits are VS Code / Copilot at 128 (documented, S6) and Cursor
+     at 40. The Cursor figure is a historic community number: Cursor's MCP docs
+     (https://cursor.com/docs/context/mcp, fetched 2026-11-21) publish no numeric cap,
+     and a staff reply on the forum (https://forum.cursor.com/t/cli-mcp-tool-limits/165642,
+     2026-07-14) describes "a per-model provider cap on the number of tools". In
+     September 2026 the Cursor CLI moved to loading tool definitions on demand. The Cursor
+     warning prints today (49 > 40), which keeps Q6 visible for H3.
 4. **Candidate order.** Which candidate takes the freed headroom first? This report
    assumes Bookmark Folders with the OD-4 write (merged reads or two tools?), then News,
    then Articles. Each still needs its own Phase 4 fact-check and real use case.

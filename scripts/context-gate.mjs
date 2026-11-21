@@ -4,7 +4,7 @@
 // finding.
 //
 //   node scripts/context-gate.mjs            # measure, print the breakdown, enforce the cap
-//   node scripts/context-gate.mjs --quiet    # totals only (no per-tool breakdown)
+//   node scripts/context-gate.mjs --quiet    # totals only (wire, model-visible, tool count)
 //
 // WHY. Agent context is the scarce resource in an MCP session: every host pays for the whole
 // serialized `tools/list` result on EVERY conversation, before a single tool is called. A
@@ -66,13 +66,35 @@
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
 //
+// THE MODEL-VISIBLE SUB-MEASURE (Q13, review 13 §2 e1, owner pick 2026-11-21). The wire
+// size is a proxy: about half of it is `outputSchema`, which Anthropic-style tool definitions
+// have no field for, so a model most likely never sees those bytes. Next to the wire cap
+// the gate therefore measures, from the same captured response, what a client that puts
+// every definition into the prompt actually spends: per tool `name`, `description`,
+// `inputSchema` and `annotations.title`, kept in their wire positions inside a
+// `{"tools":[…]}` envelope (scripts/lib/context-budget.mjs `modelVisibleView`). It is taken
+// over the same configurations and enforced against its own worst case (again `read-only`,
+// whose " (disabled by policy …)" suffixes sit in the descriptions). Measured at the 49-tool
+// surface: **39,802 bytes**, cap **40,000 bytes** — 198 B of headroom. The wire cap stays
+// 80,000 B; the two caps are independent and both must hold.
+//
+// THE TOOL-COUNT GUARD (Q13, review 13 §2 e3). The limits clients actually enforce are tool
+// COUNTS, not bytes. With hide-denied off every configuration lists the whole surface, so
+// every measured configuration must list exactly TOOL_COUNT_BASELINE tools; a mismatch
+// fails, and a count change is a deliberate baseline edit, like the bytes (it moves together
+// with REGISTERED_TOOLS in test/mcp/surface.test.ts). Separately, a listed count above a
+// known client limit (CLIENT_TOOL_LIMITS, each with its source and how firm it is) prints a
+// warning and never fails: those limits are shared with every other server the user runs,
+// so x-mcp alone cannot decide whether a session crosses them.
+//
 // DETERMINISM / OFFLINE. Nothing here reads the clock, the environment or the network;
 // `globalThis.fetch` is replaced by a tripwire before the server is composed, and a hit is a
 // finding.
 
-import { Buffer } from 'node:buffer';
 import process from 'node:process';
 import { URL } from 'node:url';
+
+import { bytes, evaluate, modelVisibleBytes } from './lib/context-budget.mjs';
 
 const REPO = new URL('../', import.meta.url);
 const BUILD = new URL('build/src/', REPO);
@@ -82,6 +104,36 @@ const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
 const BASELINE_BYTES = 74_790;
+
+/** The enforced cap, in UTF-8 bytes, on the model-visible view (header, Q13 / e1). */
+const MODEL_VISIBLE_BUDGET_BYTES = 40_000;
+
+/** The model-visible measurement its cap was set from. */
+const MODEL_VISIBLE_BASELINE_BYTES = 39_802;
+
+/** Listed tools in every configuration (hide-denied off). Changing it is deliberate (e3). */
+const TOOL_COUNT_BASELINE = 49;
+
+/**
+ * Client tool-count limits a listing above which prints a warning (never a failure).
+ * Fact-checked 2026-11-21; `status` says how firm each figure is.
+ */
+const CLIENT_TOOL_LIMITS = [
+  {
+    client: 'VS Code / GitHub Copilot',
+    limit: 128,
+    status: 'documented, per request across all servers',
+    source: 'https://code.visualstudio.com/docs/copilot/agents/agent-tools',
+  },
+  {
+    client: 'Cursor',
+    limit: 40,
+    status:
+      'historic community figure, unconfirmed — the official MCP docs publish no cap as of ' +
+      '2026-11-21; staff cite a per-model provider cap',
+    source: 'https://forum.cursor.com/t/tools-limited-to-40-total/67976',
+  },
+];
 
 /** Per-tool advisory ceiling: no single tool should own an outsized slice of the listing. */
 const PER_TOOL_WARN_BYTES = 3_000;
@@ -122,8 +174,6 @@ async function loadBuild() {
     process.exit(2);
   }
 }
-
-const bytes = (value) => Buffer.byteLength(value, 'utf8');
 
 /**
  * Compose the real server for one configuration, connect an SDK client over an in-memory
@@ -167,6 +217,7 @@ async function measure(build, label, env) {
   return {
     label,
     total: bytes(json),
+    modelVisible: modelVisibleBytes(response.result.tools),
     count: tools.length,
     tools,
     // Everything that is not a tool object: the `{"tools":[…]}` envelope and the separators.
@@ -214,31 +265,31 @@ async function main() {
     }),
   );
 
-  const worst = measurements.reduce((max, entry) => (entry.total > max.total ? entry : max));
+  const { worst, worstModelVisible, listed, findings, warnings } = evaluate(measurements, {
+    budgetBytes: BUDGET_BYTES,
+    modelVisibleBudgetBytes: MODEL_VISIBLE_BUDGET_BYTES,
+    toolCountBaseline: TOOL_COUNT_BASELINE,
+    clientToolLimits: CLIENT_TOOL_LIMITS,
+    networkHits: network.hits,
+  });
 
   if (!quiet) {
     process.stdout.write(`context-gate: tools/list size by configuration (hide-denied off)\n`);
+    process.stdout.write(
+      `  ${'configuration'.padEnd(16)} ${'wire'.padStart(8)}  ${'model'.padStart(8)}\n`,
+    );
     for (const entry of measurements) {
       const marker = entry === worst ? ' <- worst case' : '';
       process.stdout.write(
-        `  ${entry.label.padEnd(16)} ${pad(entry.total, 6)} B  ${pad(entry.count, 3)} tools${marker}\n`,
+        `  ${entry.label.padEnd(16)} ${pad(entry.total, 6)} B  ${pad(entry.modelVisible, 6)} B  ` +
+          `${pad(entry.count, 3)} tools${marker}\n`,
       );
     }
     process.stdout.write(`\ncontext-gate: per-tool breakdown for "${worst.label}"\n`);
     process.stdout.write(`${renderBreakdown(worst)}\n\n`);
   }
 
-  const findings = [];
-  if (network.hits > 0) {
-    findings.push(`composing the server hit the network ${network.hits} time(s)`);
-  }
-  if (worst.total > BUDGET_BYTES) {
-    findings.push(
-      `tools/list is ${worst.total} B under "${worst.label}", over the ${BUDGET_BYTES} B budget ` +
-        `by ${worst.total - BUDGET_BYTES} B — shrink the largest descriptions/schemas above, or ` +
-        `raise BUDGET_BYTES in ${'scripts/context-gate.mjs'} with a justification in the PR`,
-    );
-  }
+  for (const warning of warnings) process.stdout.write(`context-gate: warning — ${warning}\n`);
 
   if (findings.length > 0) {
     process.stderr.write(`context-gate: FAIL — ${findings.length} finding(s)\n\n`);
@@ -247,12 +298,18 @@ async function main() {
     return 1;
   }
 
-  const drift = worst.total - BASELINE_BYTES;
-  const sign = drift >= 0 ? '+' : '';
+  const drift = (value, baseline) => `${value >= baseline ? '+' : ''}${value - baseline} B`;
+  const headroom = (value, cap) => `${(((cap - value) / cap) * 100).toFixed(1)}% headroom`;
   process.stdout.write(
     `context-gate: PASS — ${worst.count} tools, ${worst.total} B / ${BUDGET_BYTES} B budget ` +
-      `(${(((BUDGET_BYTES - worst.total) / BUDGET_BYTES) * 100).toFixed(1)}% headroom, ` +
-      `${sign}${drift} B vs the ${BASELINE_BYTES} B baseline)\n`,
+      `(${headroom(worst.total, BUDGET_BYTES)}, ${drift(worst.total, BASELINE_BYTES)} vs the ` +
+      `${BASELINE_BYTES} B baseline)\n` +
+      `context-gate: PASS — model-visible ${worstModelVisible.modelVisible} B / ` +
+      `${MODEL_VISIBLE_BUDGET_BYTES} B budget under "${worstModelVisible.label}" ` +
+      `(${headroom(worstModelVisible.modelVisible, MODEL_VISIBLE_BUDGET_BYTES)}, ` +
+      `${drift(worstModelVisible.modelVisible, MODEL_VISIBLE_BASELINE_BYTES)} vs the ` +
+      `${MODEL_VISIBLE_BASELINE_BYTES} B baseline)\n` +
+      `context-gate: PASS — tool count ${listed} = the ${TOOL_COUNT_BASELINE}-tool baseline\n`,
   );
   return 0;
 }

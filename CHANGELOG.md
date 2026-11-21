@@ -347,6 +347,19 @@ development chronology lives in `WORKLOG.md`.
   than before for the same workload; it is closer to the real invoice, and a
   `X_MCP_CREDIT_BUDGET` tuned against the old numbers will now be reached much sooner.
 
+### Internal
+
+- The context gate (`scripts/context-gate.mjs`) now checks three things. The 80,000 B
+  wire cap on `tools/list` is unchanged. A new model-visible sub-measure covers per tool
+  `name`, `description`, `inputSchema` and `annotations.title`, worst case across all
+  policy configurations; it is gated at 40,000 B with its own baseline (39,802 B today).
+  A new tool-count guard requires every configuration to list exactly the recorded
+  baseline (49 tools). A listed count above a recorded client tool limit prints a warning
+  and never fails: VS Code / Copilot 128 (documented) and Cursor 40 (historic community
+  figure, unconfirmed). `--quiet` prints all three totals. The judging logic lives in
+  `scripts/lib/context-budget.mjs` and is unit-tested. Review 13 §6 Q3 (e1 + e3) is
+  answered. `tools/list` +0 B.
+
 ### Platform changes absorbed
 
 - (2026-11-15) Platform fact-check pre-run

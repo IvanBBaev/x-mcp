@@ -22,7 +22,8 @@ import { PAGE_TOKEN_DESC, RAW_HISTOGRAM_DESC, RAW_PAGE_DESC } from '../../src/to
 /**
  * The registered tool count. Changing this number is a deliberate act: it also moves
  * docs/reference/tools.md (regenerate with `npm run docs:gen`), the docs/03-tool-catalog.md
- * reconciliation, and the context budget in scripts/context-gate.mjs.
+ * reconciliation, and the context budget and `TOOL_COUNT_BASELINE` in
+ * scripts/context-gate.mjs.
  */
 const REGISTERED_TOOLS = 49;
 
