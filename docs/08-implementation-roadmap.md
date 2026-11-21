@@ -232,6 +232,15 @@ both bill as `w:post`, which is an assumption. The 10,000 weighted-character lim
 checked locally as a lower bound; docs/07 ART-1..6. Fixtures are hand-written, pending H2
 capture. +2,198 B, to **74,790 B**.
 
+**Context gate re-scoped 2026-11-21 (queue Q13, 9734020; review 13 §6 Q3, e1 + e3):** the
+80,000 B wire cap stays. `scripts/context-gate.mjs` also gates a model-visible sub-measure
+(name, description, inputSchema and `annotations.title`, worst case) at **40,000 B**,
+baseline **39,802 B**, so 198 B of headroom. It also requires an exact tool count, baseline
+**49**, and fails on a mismatch. A count above a recorded client tool limit prints a
+warning and never fails: VS Code 128 (documented) and Cursor 40 (historic, unconfirmed).
+Cursor's MCP docs publish no numeric cap, so the Cursor warning prints today. `tools/list`
++0 B.
+
 ---
 
 ## 1.0 acceptance checklist
@@ -271,7 +280,10 @@ above; this is the single list to walk before tagging:
       **76,816 B** (4.0% headroom); `x_usage_get`'s `by_tool` map then added 69 B
       (**76,885 B**), `x_thread_create`'s resume `reply_to_id` 120 B more
       (**77,005 B**), and `since_id` on the search/timeline reads 464 B more
-      (**77,469 B**, 3.2% headroom).*
+      (**77,469 B**, 3.2% headroom).
+      From Q13 (2026-11-21) the same gate also caps the model-visible sub-measure at
+      40,000 B (39,802 B at 49 tools) and pins the listed tool count to an exact
+      baseline (49); see the Phase 4 note.*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
       Audited the shipped code, not the design: 17 threats and 4 kill-chains walked
