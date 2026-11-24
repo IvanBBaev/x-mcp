@@ -517,6 +517,8 @@ Note the count side:
      §2 (e) was an estimate. The same projection gives 35,063 B for the 42 pre-Q10 tools,
      and the seven Bookmark Folders, News and Articles tools add 4,739 B. The wire size is
      unchanged at 74,790 B.
+     **Owner decision 2026-11-24:** the model-visible cap is raised to **44,000 B**, so
+     about 4,198 B (9.5%) of headroom.
    - **e3.** A fixed "warn above 48" would fire on every run, because all 49 tools are
      listed in every preset with hide-denied off. The guard is therefore an exact count
      instead: every configuration must list `TOOL_COUNT_BASELINE` (49) tools, and a

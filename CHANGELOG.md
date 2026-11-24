@@ -352,7 +352,7 @@ development chronology lives in `WORKLOG.md`.
 - The context gate (`scripts/context-gate.mjs`) now checks three things. The 80,000 B
   wire cap on `tools/list` is unchanged. A new model-visible sub-measure covers per tool
   `name`, `description`, `inputSchema` and `annotations.title`, worst case across all
-  policy configurations; it is gated at 40,000 B with its own baseline (39,802 B today).
+  policy configurations; it is gated at 44,000 B with its own baseline (39,802 B today).
   A new tool-count guard requires every configuration to list exactly the recorded
   baseline (49 tools). A listed count above a recorded client tool limit prints a warning
   and never fails: VS Code / Copilot 128 (documented) and Cursor 40 (historic community

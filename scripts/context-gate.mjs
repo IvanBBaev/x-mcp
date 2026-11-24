@@ -75,7 +75,9 @@
 // `{"tools":[…]}` envelope (scripts/lib/context-budget.mjs `modelVisibleView`). It is taken
 // over the same configurations and enforced against its own worst case (again `read-only`,
 // whose " (disabled by policy …)" suffixes sit in the descriptions). Measured at the 49-tool
-// surface: **39,802 bytes**, cap **40,000 bytes** — 198 B of headroom. The wire cap stays
+// surface: **39,802 bytes**. The cap was set at 40,000 B in Q13 (198 B of headroom, effectively a
+// freeze) and raised by the owner on 2026-11-24 to **44,000 bytes** — ~4,198 B (9.5%) of
+// headroom, enough for a few small additions while still catching silent growth. The wire cap stays
 // 80,000 B; the two caps are independent and both must hold.
 //
 // THE TOOL-COUNT GUARD (Q13, review 13 §2 e3). The limits clients actually enforce are tool
@@ -106,7 +108,7 @@ const BUDGET_BYTES = 80_000;
 const BASELINE_BYTES = 74_790;
 
 /** The enforced cap, in UTF-8 bytes, on the model-visible view (header, Q13 / e1). */
-const MODEL_VISIBLE_BUDGET_BYTES = 40_000;
+const MODEL_VISIBLE_BUDGET_BYTES = 44_000;
 
 /** The model-visible measurement its cap was set from. */
 const MODEL_VISIBLE_BASELINE_BYTES = 39_802;

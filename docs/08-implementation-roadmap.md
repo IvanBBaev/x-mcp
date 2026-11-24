@@ -238,6 +238,8 @@ capture. +2,198 B, to **74,790 B**.
 baseline **39,802 B**, so 198 B of headroom. It also requires an exact tool count, baseline
 **49**, and fails on a mismatch. A count above a recorded client tool limit prints a
 warning and never fails: VS Code 128 (documented) and Cursor 40 (historic, unconfirmed).
+**Owner decision 2026-11-24:** the model-visible cap is raised from 40,000 B to **44,000 B**
+(~4,198 B of headroom); 198 B froze every description or schema change.
 Cursor's MCP docs publish no numeric cap, so the Cursor warning prints today. `tools/list`
 +0 B.
 
@@ -282,7 +284,7 @@ above; this is the single list to walk before tagging:
       (**77,005 B**), and `since_id` on the search/timeline reads 464 B more
       (**77,469 B**, 3.2% headroom).
       From Q13 (2026-11-21) the same gate also caps the model-visible sub-measure at
-      40,000 B (39,802 B at 49 tools) and pins the listed tool count to an exact
+      44,000 B (39,802 B at 49 tools; raised from 40,000 B by the owner on 2026-11-24) and pins the listed tool count to an exact
       baseline (49); see the Phase 4 note.*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
