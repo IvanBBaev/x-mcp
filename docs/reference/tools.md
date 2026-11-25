@@ -108,6 +108,7 @@ Takes no input fields.
 | `poll.duration_minutes` | integer (5–10080) | ✅ | Poll duration in minutes: 5 to 10080 (7 days). |
 | `reply_settings` | `following` \| `mentionedUsers` \| `subscribers` |  | Who may reply. Omit to allow everyone. |
 | `paid_partnership` | boolean |  | true labels the post as a paid promotion (ad disclosure). |
+| `dry_run` | boolean |  | Preview the request and price; send and charge nothing. |
 
 ### `x_post_delete`
 
@@ -146,6 +147,7 @@ Takes no input fields.
 |---|---|:--:|---|
 | `posts` | string[] (2–25 items) | ✅ | Thread texts, in order (2-25); each replies to the previous. |
 | `reply_to_id` | string |  | Post the first one replies to (id or status URL); resumes a stopped thread. |
+| `dry_run` | boolean |  | Preview the request and price; send and charge nothing. |
 
 ### `x_article_draft_create`
 
@@ -723,6 +725,7 @@ Takes no input fields.
 | `text` | string (1–10000 chars) | ✅ | Message text to send (1-10,000 characters). |
 | `conversation_id` | string (non-empty) |  | Target conversation id (numeric, or two numeric ids joined by "-"). |
 | `participant` | string (non-empty) |  | Target user for a 1:1 DM: numeric id, handle, or @handle. |
+| `dry_run` | boolean |  | Preview the request and price; send and charge nothing. |
 
 ## `archive`
 

@@ -64,3 +64,9 @@ export const BUCKET_END_TIME_DESC =
 export function maxResultsDesc(min: number, max: number): string {
   return `Page size ${min}-${max} (clamped).`;
 }
+
+/**
+ * `dry_run` on a write that supports it (Q14): every local check and the price, but no
+ * request and no charge. The registry reads the flag (core/registry); handlers ignore it.
+ */
+export const DRY_RUN_DESC = 'Preview the request and price; send and charge nothing.';

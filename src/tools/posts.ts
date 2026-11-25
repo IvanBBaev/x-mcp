@@ -16,12 +16,14 @@ import {
   REPLY_SETTINGS,
   createArticleDraft,
   createPost,
+  createPostRequest,
   deletePost,
   getPosts,
   publishArticle,
   setReplyHidden,
 } from '../api/endpoints/posts.js';
 import type {
+  CreatePostParams,
   RawArticleDraft,
   RawArticlePublished,
   RawCreatedPost,
@@ -41,6 +43,7 @@ import {
 import type { RawSingleResponse } from '../core/render.js';
 import { parsePostId } from '../core/resolve.js';
 import { defineTool } from '../core/tooldef.js';
+import { DRY_RUN_DESC } from './params.js';
 import { withSelfServeRemovalNote } from './self-serve.js';
 
 const TITLE = 'Get posts';
@@ -387,6 +390,7 @@ const createInput = z
       .boolean()
       .optional()
       .describe('true labels the post as a paid promotion (ad disclosure).'),
+    dry_run: z.boolean().optional().describe(DRY_RUN_DESC),
   })
   .strict()
   // POST-1 / POST-6 and the reply/quote reference shape, in the schema rather than the
@@ -430,6 +434,33 @@ const createInput = z
   });
 
 /**
+ * Map validated `x_post_create` input to the endpoint params. Shared by the handler and the
+ * dry-run preview (Q14), so both describe the same request. Text, POST-6 exclusivity and the
+ * reference shapes were validated by the schema, so `parsePostId` cannot throw here; it only
+ * normalizes a status URL to its id.
+ */
+function createParams(input: z.infer<typeof createInput>): CreatePostParams {
+  const replyToId = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
+  const quoteId = input.quote_id !== undefined ? parsePostId(input.quote_id) : undefined;
+  return {
+    text: input.text,
+    ...(replyToId !== undefined ? { replyToId } : {}),
+    ...(quoteId !== undefined ? { quoteId } : {}),
+    ...(input.media_ids !== undefined ? { mediaIds: input.media_ids } : {}),
+    ...(input.poll !== undefined
+      ? {
+          poll: {
+            options: input.poll.options,
+            durationMinutes: input.poll.duration_minutes,
+          },
+        }
+      : {}),
+    ...(input.reply_settings !== undefined ? { replySettings: input.reply_settings } : {}),
+    ...(input.paid_partnership === true ? { paidPartnership: true } : {}),
+  };
+}
+
+/**
  * `x_post_create` — create a post (docs/03 posts §; POST-1..4/6/7/9, COST-4, NET-4).
  * The cost is a RESOLVER, not a static class: a URL in the text raises the per-post
  * price to $0.20 via the `CostEstimate.usd` override (COST-4), which core/budget's
@@ -457,35 +488,19 @@ export const xPostCreate = defineTool({
   },
   phase: 2,
   input: createInput,
+  // Q14: `dry_run: true` returns this request instead of sending it (core/registry).
+  preview: (input) => ({ requests: [createPostRequest(createParams(input))] }),
   handler: async (input, ctx) => {
-    // Text, POST-6 exclusivity and the reference shapes were validated by the schema, so
-    // `parsePostId` cannot throw here; it only normalizes a status URL to its id.
-    const replyToId = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
-    const quoteId = input.quote_id !== undefined ? parsePostId(input.quote_id) : undefined;
+    const params = createParams(input);
 
     let res: RawSingleResponse<RawCreatedPost>;
     try {
-      res = await createPost(ctx.http, {
-        text: input.text,
-        ...(replyToId !== undefined ? { replyToId } : {}),
-        ...(quoteId !== undefined ? { quoteId } : {}),
-        ...(input.media_ids !== undefined ? { mediaIds: input.media_ids } : {}),
-        ...(input.poll !== undefined
-          ? {
-              poll: {
-                options: input.poll.options,
-                durationMinutes: input.poll.duration_minutes,
-              },
-            }
-          : {}),
-        ...(input.reply_settings !== undefined ? { replySettings: input.reply_settings } : {}),
-        ...(input.paid_partnership === true ? { paidPartnership: true } : {}),
-      });
+      res = await createPost(ctx.http, params);
     } catch (err) {
       if (XError.is(err)) {
-        const mapped = mapCreateFailure(err, replyToId !== undefined, input.text);
+        const mapped = mapCreateFailure(err, params.replyToId !== undefined, input.text);
         // F-5: a quote-post `forbidden` that no create rule explained gets the self-serve note.
-        throw quoteId !== undefined && mapped === err
+        throw params.quoteId !== undefined && mapped === err
           ? withSelfServeRemovalNote(mapped, 'quote')
           : mapped;
       }
@@ -691,6 +706,7 @@ const threadInput = z
       .string()
       .optional()
       .describe('Post the first one replies to (id or status URL); resumes a stopped thread.'),
+    dry_run: z.boolean().optional().describe(DRY_RUN_DESC),
   })
   .strict()
   // Same reference shape as x_post_create, refused in the schema so it is never charged.
@@ -745,6 +761,19 @@ export const xThreadCreate = defineTool({
   },
   phase: 3,
   input: threadInput,
+  // Q14: one request per post. From the second post on, the parent id only exists once the
+  // previous post is created, so the preview names it with a `<id of post k>` placeholder.
+  preview: (input) => {
+    const first = input.reply_to_id !== undefined ? parsePostId(input.reply_to_id) : undefined;
+    // The schema guarantees at least two posts, so there is always a placeholder to explain.
+    return {
+      requests: input.posts.map((text, index) => {
+        const replyToId = index === 0 ? first : `<id of post ${index}>`;
+        return createPostRequest({ text, ...(replyToId !== undefined ? { replyToId } : {}) });
+      }),
+      note: 'Each later post replies to the id X assigns the previous one; shown as <id of post k>.',
+    };
+  },
   handler: async (input, ctx) => {
     const posts: { id: string; url: string }[] = [];
     // Validated by the schema; parsePostId only normalizes a status URL to its id here.

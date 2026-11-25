@@ -121,6 +121,14 @@ export async function createPost(
   http: EndpointInvoker,
   params: CreatePostParams,
 ): Promise<RawSingleResponse<RawCreatedPost>> {
+  return http.send<RawSingleResponse<RawCreatedPost>>(createPostRequest(params));
+}
+
+/**
+ * The exact `POST /2/tweets` request {@link createPost} sends — shared with the dry-run
+ * preview (Q14), so a preview can never drift from what a real call would send.
+ */
+export function createPostRequest(params: CreatePostParams): XApiRequest {
   const body: Record<string, unknown> = {
     text: params.text,
     ...(params.replyToId !== undefined
@@ -139,13 +147,7 @@ export async function createPost(
     ...(params.replySettings !== undefined ? { reply_settings: params.replySettings } : {}),
     ...(params.paidPartnership === true ? { paid_partnership: true } : {}),
   };
-  const req: XApiRequest = {
-    method: 'POST',
-    path: '/2/tweets',
-    body,
-    scopes: POST_WRITE_SCOPES,
-  };
-  return http.send<RawSingleResponse<RawCreatedPost>>(req);
+  return { method: 'POST', path: '/2/tweets', body, scopes: POST_WRITE_SCOPES };
 }
 
 /**

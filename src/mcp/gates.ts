@@ -4,7 +4,13 @@
 // `api/*` imports — the rate-limit gate takes its tracker STRUCTURALLY (`preflight` only)
 // plus a tool→bucket-key mapping, so the api wiring stays in the composition (INT-3).
 
-import type { BudgetGate, BudgetReservation, PolicyGate, RateLimitGate } from '../core/registry.js';
+import type {
+  BudgetGate,
+  BudgetQuote,
+  BudgetReservation,
+  PolicyGate,
+  RateLimitGate,
+} from '../core/registry.js';
 import type { SessionBudget, SpendByTool } from '../core/budget.js';
 import { deniedToolError, isCellAllowed } from '../core/policy.js';
 import type { ResolvedPolicy } from '../core/policy.js';
@@ -50,7 +56,10 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
 export function createBudgetGate(
   budget: SessionBudget,
   spend?: Pick<SpendByTool, 'record'>,
-): BudgetGate & { release(estimate: CostEstimate): void } {
+): BudgetGate & {
+  release(estimate: CostEstimate): void;
+  quote(estimate: CostEstimate): BudgetQuote;
+} {
   // Each held reservation remembers the tool it was taken for, so every later move of the
   // session ledger (settle, release) is mirrored onto the same tool's share.
   const reserved = new WeakMap<CostEstimate, { meta: BudgetReservation; tool?: string }>();
@@ -76,6 +85,11 @@ export function createBudgetGate(
       // Defensive: unreachable through the registry pipeline (check always precedes
       // reserve); if a future caller skips check, charge now so nothing rides free.
       return budget.reserve(units === undefined ? estimate : { ...estimate, units });
+    },
+    quote(estimate) {
+      // Q14 dry run: the same pricing and hard-mode refusal as `check`, but nothing is
+      // reserved, held or attributed — the ledger and the per-tool shares stay untouched.
+      return { projected: budget.quote(estimate), total: budget.total() };
     },
     release(estimate) {
       const held = reserved.get(estimate);

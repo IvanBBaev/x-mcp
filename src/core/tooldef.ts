@@ -204,6 +204,27 @@ export interface ResultMeta {
 
 export type ToolHandler<I> = (input: I, ctx: ToolContext) => Promise<ToolOutput>;
 
+/**
+ * What a write would send, computed WITHOUT sending it (Q14 dry run). The registry calls a
+ * tool's previewer instead of its handler when the validated input carries `dry_run: true`;
+ * every gate in front of the handler has already run, so a refusal stays a refusal.
+ */
+export interface ToolPreview {
+  /** The exact requests, in send order, a real call would make. */
+  readonly requests: readonly XApiRequest[];
+  /** Where the preview is not exact (a value only known at send time), in our own prose. */
+  readonly note?: string;
+}
+
+/**
+ * A pure, synchronous previewer: no invoker, no ports, no network, no token access — only
+ * the process-scoped handle memo, which is read and never filled.
+ */
+export type ToolPreviewer<I> = (
+  input: I,
+  ctx: { readonly resolveCache?: ResolveCache },
+) => ToolPreview;
+
 /** A resolved per-call cost. `usd` overrides the class→table lookup (e.g. w:post with URL). */
 export interface CostEstimate {
   readonly class: CostClass;
@@ -273,6 +294,12 @@ export interface ToolDef<I = unknown> {
    * already states that the endpoint needs a user-context token.
    */
   readonly credential?: 'app-only';
+  /**
+   * Set on a write that accepts `dry_run` (Q14). With `dry_run: true` the registry runs every
+   * local gate, quotes the price without charging, and returns this preview in place of the
+   * handler's result — no request, no charge, no token refresh.
+   */
+  readonly preview?: ToolPreviewer<I>;
 }
 
 /** The registry holds heterogeneous tools; input types are erased at the collection boundary. */
@@ -297,6 +324,7 @@ export function defineTool<S extends z.ZodType>(def: {
   readonly phase: 1 | 2 | 3;
   readonly conditional?: boolean;
   readonly credential?: 'app-only';
+  readonly preview?: ToolPreviewer<z.infer<S>>;
 }): ToolDef<z.infer<S>> {
   // zod v4's `ZodType` carries its internals in a third type parameter, so TypeScript
   // cannot prove the generic `S` is a `ZodType<z.infer<S>>` inside this body; the cast

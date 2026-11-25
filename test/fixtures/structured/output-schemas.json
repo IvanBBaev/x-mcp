@@ -643,19 +643,62 @@
       "type": "object",
       "properties": {
         "data": {
-          "type": "object",
-          "properties": {
-            "sent": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "sent": {
+                  "type": "boolean"
+                },
+                "conversation_id": {
+                  "type": "string"
+                },
+                "event_id": {
+                  "type": "string"
+                }
+              },
+              "required": ["sent"]
             },
-            "conversation_id": {
-              "type": "string"
-            },
-            "event_id": {
-              "type": "string"
+            {
+              "type": "object",
+              "properties": {
+                "dry_run": {
+                  "const": true
+                },
+                "requests": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "object"
+                      }
+                    },
+                    "required": ["method", "path"]
+                  }
+                },
+                "cost_usd": {
+                  "type": "number"
+                },
+                "session_total_usd": {
+                  "type": "number"
+                },
+                "budget_warning": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["dry_run", "requests", "cost_usd", "session_total_usd"]
             }
-          },
-          "required": ["sent"]
+          ]
         },
         "summary": {
           "type": "string"
@@ -1731,19 +1774,62 @@
       "type": "object",
       "properties": {
         "data": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "url"]
             },
-            "url": {
-              "type": "string"
-            },
-            "note": {
-              "type": "string"
+            {
+              "type": "object",
+              "properties": {
+                "dry_run": {
+                  "const": true
+                },
+                "requests": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "object"
+                      }
+                    },
+                    "required": ["method", "path"]
+                  }
+                },
+                "cost_usd": {
+                  "type": "number"
+                },
+                "session_total_usd": {
+                  "type": "number"
+                },
+                "budget_warning": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["dry_run", "requests", "cost_usd", "session_total_usd"]
             }
-          },
-          "required": ["id", "url"]
+          ]
         },
         "summary": {
           "type": "string"
@@ -2327,31 +2413,74 @@
       "type": "object",
       "properties": {
         "data": {
-          "type": "object",
-          "properties": {
-            "ok": {
-              "type": "boolean"
-            },
-            "posts": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "url": {
-                    "type": "string"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "posts": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["id", "url"]
                   }
                 },
-                "required": ["id", "url"]
-              }
+                "failed_at": {
+                  "type": "number"
+                }
+              },
+              "required": ["ok", "posts"]
             },
-            "failed_at": {
-              "type": "number"
+            {
+              "type": "object",
+              "properties": {
+                "dry_run": {
+                  "const": true
+                },
+                "requests": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "object"
+                      }
+                    },
+                    "required": ["method", "path"]
+                  }
+                },
+                "cost_usd": {
+                  "type": "number"
+                },
+                "session_total_usd": {
+                  "type": "number"
+                },
+                "budget_warning": {
+                  "type": "string"
+                },
+                "note": {
+                  "type": "string"
+                }
+              },
+              "required": ["dry_run", "requests", "cost_usd", "session_total_usd"]
             }
-          },
-          "required": ["ok", "posts"]
+          ]
         },
         "summary": {
           "type": "string"

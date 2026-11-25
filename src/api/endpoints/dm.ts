@@ -130,13 +130,20 @@ export async function sendDmToConversation(
   http: EndpointInvoker,
   params: { readonly conversationId: string; readonly text: string },
 ): Promise<RawSingleResponse<RawDmSendResult>> {
-  const req: XApiRequest = {
+  return http.send<RawSingleResponse<RawDmSendResult>>(dmToConversationRequest(params));
+}
+
+/** The exact request {@link sendDmToConversation} sends — shared with the Q14 dry run. */
+export function dmToConversationRequest(params: {
+  readonly conversationId: string;
+  readonly text: string;
+}): XApiRequest {
+  return {
     method: 'POST',
     path: `/2/dm_conversations/${encodeURIComponent(params.conversationId)}/messages`,
     body: { text: params.text },
     scopes: DM_WRITE_SCOPES,
   };
-  return http.send<RawSingleResponse<RawDmSendResult>>(req);
 }
 
 /**
@@ -148,11 +155,18 @@ export async function sendDmToParticipant(
   http: EndpointInvoker,
   params: { readonly participantId: string; readonly text: string },
 ): Promise<RawSingleResponse<RawDmSendResult>> {
-  const req: XApiRequest = {
+  return http.send<RawSingleResponse<RawDmSendResult>>(dmToParticipantRequest(params));
+}
+
+/** The exact request {@link sendDmToParticipant} sends — shared with the Q14 dry run. */
+export function dmToParticipantRequest(params: {
+  readonly participantId: string;
+  readonly text: string;
+}): XApiRequest {
+  return {
     method: 'POST',
     path: `/2/dm_conversations/with/${encodeURIComponent(params.participantId)}/messages`,
     body: { text: params.text },
     scopes: DM_WRITE_SCOPES,
   };
-  return http.send<RawSingleResponse<RawDmSendResult>>(req);
 }

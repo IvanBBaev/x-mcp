@@ -29,7 +29,8 @@
 import { z } from 'zod';
 
 import { defineTool } from '../core/tooldef.js';
-import type { ToolContext, ToolOutput } from '../core/tooldef.js';
+import type { ToolContext, ToolOutput, ToolPreview, XApiRequest } from '../core/tooldef.js';
+import type { ResolveCache } from '../core/resolve.js';
 import { validationError, XError } from '../core/errors.js';
 import { PAGE_BOUNDS, clampMaxResults, toCursor } from '../core/paginate.js';
 import { billableUnits, renderDmPage } from '../core/render.js';
@@ -41,12 +42,14 @@ import {
   dmConversationEvents,
   dmEventsList,
   dmParticipantEvents,
+  dmToConversationRequest,
+  dmToParticipantRequest,
   sendDmToConversation,
   sendDmToParticipant,
 } from '../api/endpoints/dm.js';
 import type { RawDmSendResult } from '../api/endpoints/dm.js';
 import type { RawSingleResponse } from '../core/render.js';
-import { PAGE_TOKEN_DESC, maxResultsDesc } from './params.js';
+import { DRY_RUN_DESC, PAGE_TOKEN_DESC, maxResultsDesc } from './params.js';
 
 // --- Notes (DM-2 / DM-3) ---------------------------------------------------------
 
@@ -320,6 +323,7 @@ const sendInput = z
       .min(1)
       .optional()
       .describe('Target user for a 1:1 DM: numeric id, handle, or @handle.'),
+    dry_run: z.boolean().optional().describe(DRY_RUN_DESC),
   })
   .strict()
   // Exactly-one-target, the conversation_id shape, and the participant "me" rejection, in
@@ -371,6 +375,51 @@ const sendInput = z
     }
   });
 
+/** Path token swapped for the readable placeholder AFTER the endpoint builder encodes it. */
+const PARTICIPANT_TOKEN = 'PARTICIPANT_ID';
+
+/**
+ * Q14: the request `x_dm_send` would send. A numeric participant or a conversation id gives
+ * the exact path. A handle is resolved to its id over the network at send time, which a dry
+ * run never does — so it uses the process memo when that already knows the handle, and
+ * otherwise shows an `<id of @handle>` placeholder with a note saying so.
+ */
+function previewDmSend(
+  input: z.infer<typeof sendInput>,
+  ctx: { readonly resolveCache?: ResolveCache },
+): ToolPreview {
+  if (input.conversation_id !== undefined) {
+    const conversationId = parseConversationId(input.conversation_id);
+    return { requests: [dmToConversationRequest({ conversationId, text: input.text })] };
+  }
+  if (input.participant === undefined) {
+    // Unreachable via the registry (the schema guarantees exactly one target).
+    throw validationError('x_dm_send needs a target: pass conversation_id or participant.');
+  }
+  const ref = classifyUserRef(input.participant);
+  if (ref.kind === 'id') {
+    return { requests: [dmToParticipantRequest({ participantId: ref.id, text: input.text })] };
+  }
+  if (ref.kind === 'me') {
+    // Unreachable via the registry (the schema refuses "me" as a participant).
+    throw validationError('participant identifies the OTHER user in the conversation.');
+  }
+  const cached = ctx.resolveCache?.getIdByHandle(ref.handle);
+  if (cached !== undefined) {
+    return { requests: [dmToParticipantRequest({ participantId: cached, text: input.text })] };
+  }
+  const req: XApiRequest = dmToParticipantRequest({
+    participantId: PARTICIPANT_TOKEN,
+    text: input.text,
+  });
+  return {
+    requests: [{ ...req, path: req.path.replace(PARTICIPANT_TOKEN, `<id of @${ref.handle}>`) }],
+    note:
+      `A real send first resolves @${ref.handle} to its id (GET /2/users/by/username), ` +
+      'which a dry run does not do; the user is not checked to exist.',
+  };
+}
+
 export const xDmSend = defineTool({
   name: 'x_dm_send',
   title: 'Send a direct message',
@@ -395,6 +444,7 @@ export const xDmSend = defineTool({
   },
   phase: 3,
   input: sendInput,
+  preview: previewDmSend,
   handler: async (input, ctx) => {
     // Exactly-one-target, the conversation_id shape, and the participant "me" rejection were
     // validated by the schema; parseConversationId only normalizes (trims) and

@@ -54,6 +54,35 @@ function compactOrRaw(compact: SchemaNode): SchemaNode {
 }
 
 /**
+ * The `dry_run: true` result (Q14, core/registry `previewResult`): the requests a real call
+ * would send, the quoted price and the projected session total. Nothing was sent or charged.
+ */
+const DRY_RUN_DATA: SchemaNode = {
+  type: 'object',
+  properties: {
+    dry_run: { const: true },
+    requests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { method: STR, path: STR, body: { type: 'object' } },
+        required: ['method', 'path'],
+      },
+    },
+    cost_usd: NUM,
+    session_total_usd: NUM,
+    budget_warning: STR,
+    note: STR,
+  },
+  required: ['dry_run', 'requests', 'cost_usd', 'session_total_usd'],
+};
+
+/** `anyOf` of a write's own result and the dry-run preview, for `dry_run`-capable writes. */
+function resultOrDryRun(result: SchemaNode): SchemaNode {
+  return { anyOf: [result, DRY_RUN_DATA] };
+}
+
+/**
  * `Page<T>` (frozen; REND-5/REND-10): `next_token`/`note` present only when meaningful.
  * A page may also carry the optional REND-2 `missing[]` (same shape as on `BatchResult`);
  * it is deliberately left undeclared here - the object is open (no `additionalProperties:
@@ -599,7 +628,7 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   }),
   x_search_recent: envelope(POST_PAGE_OR_RAW, POST_DEFS),
   x_post_counts_recent: envelope(compactOrRaw(COUNTS_DATA)),
-  x_post_create: envelope(POST_CREATE_DATA),
+  x_post_create: envelope(resultOrDryRun(POST_CREATE_DATA)),
   x_post_delete: envelope(POST_DELETE_DATA),
   x_like_set: envelope(engagementData(['like', 'unlike'], 'liked')),
   x_repost_set: envelope(engagementData(['repost', 'unrepost'], 'reposted')),
@@ -629,7 +658,7 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   x_dm_events_list: envelope(DM_PAGE, DM_DEFS),
   x_dm_conversation_events_list: envelope(DM_PAGE, DM_DEFS),
   x_dm_participant_events_list: envelope(DM_PAGE, DM_DEFS),
-  x_dm_send: envelope(DM_SEND_DATA),
+  x_dm_send: envelope(resultOrDryRun(DM_SEND_DATA)),
   x_search_archive: envelope(POST_PAGE_OR_RAW, POST_DEFS),
   x_post_counts_archive: envelope(compactOrRaw(COUNTS_DATA)),
   x_usage_get: envelope(compactOrRaw(USAGE_DATA)),
@@ -639,7 +668,7 @@ export const TOOL_OUTPUT_SCHEMAS: Readonly<Record<string, OutputSchema>> = deepF
   x_post_hide_reply: envelope(engagementData(['hide', 'unhide'], 'hidden')),
   // Phase 3 roadmap convenience (docs/06): a thread posted as one x_post_create call per
   // post; a mid-thread failure reports what published so far instead of throwing (POST-9).
-  x_thread_create: envelope(THREAD_CREATE_DATA),
+  x_thread_create: envelope(resultOrDryRun(THREAD_CREATE_DATA)),
   // Phase 4 bookmark folders (Q10, OD-4): the folder list, a folder's post ids (X returns
   // ids only), and the folder-create confirmation.
   x_bookmark_folders_list: envelope(FOLDER_PAGE_OR_RAW),

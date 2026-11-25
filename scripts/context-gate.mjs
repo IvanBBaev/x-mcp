@@ -61,7 +61,10 @@
 // x_news_get 1,080 B (+2,675 B with the list framing): **72,592 bytes** — ~7,408 B of
 // headroom. Q12 (owner go 2026-11-20) then added the two Article writes —
 // x_article_draft_create 1,437 B, x_article_publish 759 B (+2,198 B with the list framing):
-// **74,790 bytes** — ~5,210 B of headroom. The
+// **74,790 bytes** — ~5,210 B of headroom. Q14 (owner pick 2026-11-24) then added the optional
+// `dry_run` input and the dry-run result branch to x_post_create, x_thread_create and
+// x_dm_send (+1,614 B, most of it the three `anyOf` outputSchema branches):
+// **76,404 bytes** — ~3,596 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -75,9 +78,9 @@
 // `{"tools":[…]}` envelope (scripts/lib/context-budget.mjs `modelVisibleView`). It is taken
 // over the same configurations and enforced against its own worst case (again `read-only`,
 // whose " (disabled by policy …)" suffixes sit in the descriptions). Measured at the 49-tool
-// surface: **39,802 bytes**. The cap was set at 40,000 B in Q13 (198 B of headroom, effectively a
+// surface: **39,802 bytes**; Q14's three `dry_run` inputs then cost +303 B: **40,105 bytes**. The cap was set at 40,000 B in Q13 (198 B of headroom, effectively a
 // freeze) and raised by the owner on 2026-11-24 to **44,000 bytes** — ~4,198 B (9.5%) of
-// headroom, enough for a few small additions while still catching silent growth. The wire cap stays
+// headroom at the Q13 measure (3,895 B / 8.9% after Q14), enough for a few small additions while still catching silent growth. The wire cap stays
 // 80,000 B; the two caps are independent and both must hold.
 //
 // THE TOOL-COUNT GUARD (Q13, review 13 §2 e3). The limits clients actually enforce are tool
@@ -105,13 +108,13 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 74_790;
+const BASELINE_BYTES = 76_404;
 
 /** The enforced cap, in UTF-8 bytes, on the model-visible view (header, Q13 / e1). */
 const MODEL_VISIBLE_BUDGET_BYTES = 44_000;
 
 /** The model-visible measurement its cap was set from. */
-const MODEL_VISIBLE_BASELINE_BYTES = 39_802;
+const MODEL_VISIBLE_BASELINE_BYTES = 40_105;
 
 /** Listed tools in every configuration (hide-denied off). Changing it is deliberate (e3). */
 const TOOL_COUNT_BASELINE = 49;

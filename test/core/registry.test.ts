@@ -1031,3 +1031,196 @@ test('AUTH-17/OD-1: policy still decides first, and no credential mode means no 
   await unset.call('x_usage_get', {}, callCtx({ http: recordingHttp(sent) }));
   assert.equal(sent.length, 2);
 });
+
+// --- Q14: the dry-run short-circuit ---------------------------------------------------
+
+/** A previewable write tool: `dry_run` in its schema, a previewer, and a counting handler. */
+function previewableTool(runs: { handler: number; preview: number }): AnyToolDef {
+  const base = makeTool({
+    name: 'x_preview_me',
+    policy: 'write:content',
+    cost: 'w:post',
+    input: z.object({ text: z.string().min(1), dry_run: z.boolean().optional() }).strict(),
+    handler: () => {
+      runs.handler += 1;
+      return Promise.resolve({ data: { sent: true } });
+    },
+  });
+  return {
+    ...base,
+    preview: (input) => {
+      runs.preview += 1;
+      const { text } = input as { text: string };
+      return {
+        requests: [{ method: 'POST', path: '/2/tweets', body: { text }, scopes: ['tweet.write'] }],
+        note: 'preview note',
+      };
+    },
+  };
+}
+
+/** A budget gate that counts charges and quotes a fixed projection. */
+function quotingBudget(
+  counts: { checks: number; quotes: number },
+  checkError?: XError,
+): BudgetGate {
+  return {
+    check: () => {
+      counts.checks += 1;
+    },
+    reserve: () => ({ cost_usd: 0.015, session_total_usd: 0.515 }),
+    quote: () => {
+      counts.quotes += 1;
+      if (checkError !== undefined) throw checkError;
+      return {
+        projected: { cost_usd: 0.015, session_total_usd: 0.515, budget_warning: 'near cap' },
+        total: 0.5,
+      };
+    },
+  };
+}
+
+test('Q14/DRY-1: dry_run returns the previewed request; no handler, no charge, no HTTP', async () => {
+  const runs = { handler: 0, preview: 0 };
+  const counts = { checks: 0, quotes: 0 };
+  const sent: XApiRequest[] = [];
+  const reg = createRegistry([previewableTool(runs)], deps({ budget: quotingBudget(counts) }));
+  const out = await reg.call(
+    'x_preview_me',
+    { text: 'hi', dry_run: true },
+    callCtx({ http: recordingHttp(sent) }),
+  );
+  assert.deepEqual(out.data, {
+    dry_run: true,
+    // Scopes and the signal are transport details — they are not part of the preview.
+    requests: [{ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }],
+    cost_usd: 0.015,
+    session_total_usd: 0.515,
+    budget_warning: 'near cap',
+    note: 'preview note',
+  });
+  assert.equal(
+    out.summary,
+    'Dry run: 1 request previewed, nothing sent or charged; a real call would cost $0.015.',
+  );
+  // THIS call cost nothing and left the session total where it was.
+  assert.deepEqual(out.meta, { cost_usd: 0, session_total_usd: 0.5 });
+  assert.deepEqual(runs, { handler: 0, preview: 1 });
+  assert.deepEqual(counts, { checks: 0, quotes: 1 });
+  assert.equal(sent.length, 0);
+});
+
+test('Q14/DRY-1: dry_run false (or absent) runs the real pipeline and never the previewer', async () => {
+  for (const input of [{ text: 'hi', dry_run: false }, { text: 'hi' }]) {
+    const runs = { handler: 0, preview: 0 };
+    const counts = { checks: 0, quotes: 0 };
+    const reg = createRegistry([previewableTool(runs)], deps({ budget: quotingBudget(counts) }));
+    const out = await reg.call('x_preview_me', input, callCtx());
+    assert.deepEqual(out.data, { sent: true });
+    assert.deepEqual(runs, { handler: 1, preview: 0 });
+    assert.deepEqual(counts, { checks: 1, quotes: 0 });
+  }
+});
+
+test('Q14/DRY-3: a dry run is refused by every local gate exactly like a real call', async () => {
+  const runs = { handler: 0, preview: 0 };
+  const counts = { checks: 0, quotes: 0 };
+  const tool = previewableTool(runs);
+  const call = (reg: ReturnType<typeof createRegistry>, input: object): Promise<XError> =>
+    rejected(reg.call('x_preview_me', input, callCtx()));
+
+  // Schema: invalid input fails before any gate.
+  const schemaReg = createRegistry([tool], deps({ budget: quotingBudget(counts) }));
+  assert.equal((await call(schemaReg, { text: '', dry_run: true })).kind, 'validation');
+  // Policy: a denied tool cannot be previewed either.
+  const policyReg = createRegistry(
+    [tool],
+    deps({ policy: fakePolicy({ isAllowed: () => false }), budget: quotingBudget(counts) }),
+  );
+  assert.equal((await call(policyReg, { text: 'hi', dry_run: true })).kind, 'policy');
+  // Rate limit: a known-exhausted window refuses the preview as it would the send.
+  const rateReg = createRegistry(
+    [tool],
+    deps({
+      rateLimit: fakeRateLimit(rateLimitError('window spent')),
+      budget: quotingBudget(counts),
+    }),
+  );
+  assert.equal((await call(rateReg, { text: 'hi', dry_run: true })).kind, 'rate-limit');
+  // Hard budget: the quote throws the same budget error `check` would.
+  const budgetReg = createRegistry(
+    [tool],
+    deps({ budget: quotingBudget(counts, budgetError('over the cap')) }),
+  );
+  assert.equal((await call(budgetReg, { text: 'hi', dry_run: true })).kind, 'budget');
+
+  assert.deepEqual(runs, { handler: 0, preview: 0 });
+  assert.equal(counts.checks, 0);
+});
+
+test('Q14/DRY-3: AUTH-17 refuses a dry run under the wrong credential before the quote', async () => {
+  const runs = { handler: 0, preview: 0 };
+  const counts = { checks: 0, quotes: 0 };
+  const tool: AnyToolDef = { ...previewableTool(runs), availability: 'user-only' };
+  const reg = createRegistry(
+    [tool],
+    deps({ credentialMode: 'app-only', budget: quotingBudget(counts) }),
+  );
+  const err = await rejected(reg.call('x_preview_me', { text: 'hi', dry_run: true }, callCtx()));
+  assert.equal(err.kind, 'auth');
+  assert.deepEqual(runs, { handler: 0, preview: 0 });
+  assert.deepEqual(counts, { checks: 0, quotes: 0 });
+});
+
+test('Q14/DRY-4: a budget gate that cannot quote refuses the dry run — never a real charge', async () => {
+  const runs = { handler: 0, preview: 0 };
+  let checks = 0;
+  const gate: BudgetGate = {
+    check: () => {
+      checks += 1;
+    },
+    reserve: () => ({ cost_usd: 0, session_total_usd: 0 }),
+  };
+  const reg = createRegistry([previewableTool(runs)], deps({ budget: gate }));
+  const err = await rejected(reg.call('x_preview_me', { text: 'hi', dry_run: true }, callCtx()));
+  assert.equal(err.kind, 'api');
+  assert.match(err.message, /Dry run for "x_preview_me" is unavailable/);
+  assert.equal(checks, 0);
+  assert.deepEqual(runs, { handler: 0, preview: 0 });
+});
+
+test('Q14: a previewer that throws a non-XError surfaces as a generic api error', async () => {
+  const counts = { checks: 0, quotes: 0 };
+  const tool: AnyToolDef = {
+    ...previewableTool({ handler: 0, preview: 0 }),
+    preview: () => {
+      throw new Error('secret internals');
+    },
+  };
+  const reg = createRegistry([tool], deps({ budget: quotingBudget(counts) }));
+  const err = await rejected(reg.call('x_preview_me', { text: 'hi', dry_run: true }, callCtx()));
+  assert.equal(err.kind, 'api');
+  assert.doesNotMatch(err.message, /secret internals/);
+  assert.equal(counts.checks, 0);
+});
+
+test('Q14: the previewer sees the call resolve cache', async () => {
+  const cache = createResolveCache();
+  cache.set({ id: '42', handle: 'alice' });
+  let seen: string | undefined;
+  const tool: AnyToolDef = {
+    ...previewableTool({ handler: 0, preview: 0 }),
+    preview: (_input, ctx) => {
+      seen = ctx.resolveCache?.getIdByHandle('alice');
+      return { requests: [] };
+    },
+  };
+  const reg = createRegistry([tool], deps({ budget: quotingBudget({ checks: 0, quotes: 0 }) }));
+  const out = await reg.call(
+    'x_preview_me',
+    { text: 'hi', dry_run: true },
+    callCtx({ resolveCache: cache }),
+  );
+  assert.equal(seen, '42');
+  assert.match(out.summary ?? '', /^Dry run: 0 requests previewed/);
+});

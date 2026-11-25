@@ -168,6 +168,14 @@ export interface SessionBudget {
    */
   reserve(cost: ResolvedCost): ResultMeta;
   /**
+   * What {@link reserve} WOULD return for `cost`, without moving the counter (Q14 dry run).
+   * It runs the same pricing and the same hard-mode check, so a call that `reserve` would
+   * refuse throws the identical `budget` XError here; otherwise it returns the projected
+   * meta (`session_total_usd` is the total AFTER the call, `budget_warning` as `reserve`
+   * would attach it). Never mutates anything, in either mode.
+   */
+  quote(cost: ResolvedCost): ResultMeta;
+  /**
    * Adjust an already-taken reservation to what the response actually carried (COST-3).
    * The gate charges at CHECK time (INT-2, `mcp/gates`), before the handler runs and long
    * before anyone knows how many resources a read will return; this is the second half of
@@ -214,29 +222,40 @@ export function createSessionBudget(options: SessionBudgetOptions = {}): Session
     )} (warn mode — call not blocked).`;
   }
 
+  // The pricing + hard-mode refusal shared by `reserve` and `quote`, so a dry run refuses
+  // with exactly the message a real call gets. Pure: it never touches `spent`.
+  function project(cost: ResolvedCost): ResultMeta {
+    const price = round6(priceOf(cost));
+    const next = round6(spent + price);
+    if (mode === 'hard' && limit !== undefined && next > limit + EPSILON) {
+      // COST-1/COST-5: refuse BEFORE mutating the counter, so a blocked reservation
+      // spends nothing and the boundary stays exact under interleaving (CONC-2).
+      const why = typeof cost === 'object' && cost.note !== undefined ? ` ${cost.note}` : '';
+      throw budgetError(
+        `This call (${formatUsd(price)}) would bring session spend to ${formatUsd(
+          next,
+        )}, over the credit budget of ${formatUsd(
+          limit,
+        )}.${why} This is an operator-set limit; cannot be changed from within this session.`,
+      );
+    }
+    const warning = warningFor(next);
+    return warning === undefined
+      ? { cost_usd: price, session_total_usd: next }
+      : { cost_usd: price, session_total_usd: next, budget_warning: warning };
+  }
+
   return {
     limit,
     mode,
     reserve(cost) {
-      const price = round6(priceOf(cost));
-      const next = round6(spent + price);
-      if (mode === 'hard' && limit !== undefined && next > limit + EPSILON) {
-        // COST-1/COST-5: refuse BEFORE mutating the counter, so a blocked reservation
-        // spends nothing and the boundary stays exact under interleaving (CONC-2).
-        const why = typeof cost === 'object' && cost.note !== undefined ? ` ${cost.note}` : '';
-        throw budgetError(
-          `This call (${formatUsd(price)}) would bring session spend to ${formatUsd(
-            next,
-          )}, over the credit budget of ${formatUsd(
-            limit,
-          )}.${why} This is an operator-set limit; cannot be changed from within this session.`,
-        );
-      }
-      spent = next; // atomic increment — same synchronous tick as the check above (CONC-2)
-      const warning = warningFor(next);
-      return warning === undefined
-        ? { cost_usd: price, session_total_usd: next }
-        : { cost_usd: price, session_total_usd: next, budget_warning: warning };
+      const meta = project(cost);
+      // Atomic increment — same synchronous tick as the check inside `project` (CONC-2).
+      spent = meta.session_total_usd;
+      return meta;
+    },
+    quote(cost) {
+      return project(cost);
     },
     settle(held, actual) {
       const price = round6(priceOf(actual));

@@ -392,3 +392,40 @@ test('SpendByTool sorts by spend, drops $0 tools and ignores non-finite deltas',
     ['x_b', 0.01],
   ]);
 });
+
+// --- Q14: quote (the dry-run price check) -------------------------------------------
+
+test('Q14/DRY-2: quote prices exactly as reserve would but never moves the counter', () => {
+  const budget = createSessionBudget({ limit: 1, mode: 'warn' });
+  budget.reserve({ class: 'local', usd: 0.885 });
+  const quoted = budget.quote({ class: 'w:post', usd: 0.015 }); // → 0.90 = 90%
+  assert.equal(quoted.cost_usd, 0.015);
+  assert.equal(quoted.session_total_usd, 0.9); // the total AFTER a real call
+  assert.match(quoted.budget_warning ?? '', /~90%/); // the warning the real call would get
+  assert.equal(budget.total(), 0.885); // ...and nothing was spent
+  // Quoting twice gives the same answer — there is no hidden state.
+  assert.deepEqual(budget.quote({ class: 'w:post', usd: 0.015 }), quoted);
+  // The real reservation then matches the quote to the cent.
+  assert.deepEqual(budget.reserve({ class: 'w:post', usd: 0.015 }), quoted);
+});
+
+test('Q14/DRY-2: in hard mode quote refuses with the identical budget error reserve throws', () => {
+  const budget = createSessionBudget({ limit: 0.1, mode: 'hard' });
+  const cost = { class: 'w:post' as const, usd: 0.2, note: 'URL post.' };
+  let fromQuote: unknown;
+  let fromReserve: unknown;
+  try {
+    budget.quote(cost);
+  } catch (err) {
+    fromQuote = err;
+  }
+  try {
+    budget.reserve(cost);
+  } catch (err) {
+    fromReserve = err;
+  }
+  assert.ok(XError.is(fromQuote) && XError.is(fromReserve));
+  assert.equal(fromQuote.kind, 'budget');
+  assert.equal(fromQuote.message, fromReserve.message);
+  assert.equal(budget.total(), 0);
+});

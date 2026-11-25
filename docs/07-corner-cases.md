@@ -829,3 +829,47 @@ H2 live capture.
   draft-update page returns 404 (2026-11-20). The surface is create + publish, and the
   draft result and descriptions say so. Inline styles, links and media blocks are not
   exposed (plain text blocks only, `entities: []`).
+
+## 20. DRY — Dry run for the send tools *(Q14, Phase 4)*
+
+`[Q14]` = the Q14 item (owner pick 2026-11-24 from the feature analyses). `x_post_create`,
+`x_thread_create` and `x_dm_send` take an optional `dry_run: true`. The dry run is one seam
+in the registry pipeline (`core/registry`): it runs after every local gate and before the
+budget charge, and returns a preview instead of calling the handler. Article tools are out
+of scope (their drafts are already a staging step).
+
+- **DRY-1 — A dry run returns the exact request a real call would send** `P3` `[Q14]`
+  `data` is `{ dry_run: true, requests[{ method, path, query?, body? }], cost_usd,
+  session_total_usd, budget_warning?, note? }`. The request comes from the same endpoint
+  builder the real call uses (`createPostRequest`, `dmToConversationRequest`,
+  `dmToParticipantRequest`), so the two cannot drift. Values a dry run cannot know are
+  named placeholders, explained in `note`: a thread's later posts reply to
+  `<id of post k>`, and a DM to a `@handle` the process has not resolved yet goes to
+  `<id of @handle>` (a handle already in the process memo shows its real id). Scopes and
+  the abort signal are transport details and are not shown. `dry_run: false` or an absent
+  `dry_run` is the normal call — the previewer never runs. Tools without a previewer have no
+  `dry_run` key, so their strict schemas reject it as an unknown key.
+
+- **DRY-2 — A dry run sends, charges and attributes nothing** `P3` `[Q14]`
+  The price is quoted by the same pricing a real call uses (COST-4 included, so a URL post
+  quotes $0.20), and `session_total_usd` in `data` is the total AFTER a real call. `meta`
+  reports the dry run itself: `cost_usd: 0` and the unchanged session total. The session
+  ledger and the per-tool spend shares do not move, no reservation is held, and no token is
+  loaded or refreshed.
+
+- **DRY-3 — A dry run is refused exactly where a real call would be** `P3` `[Q14]`
+  Schema validation, the policy gate, the AUTH-17 credential check and the rate-limit
+  preflight run unchanged, so a dry run that succeeds means the real call passes every
+  local check. In hard budget mode the quote throws the same typed `budget` error the real
+  charge would; otherwise `budget_warning` shows the warning the real call would carry.
+  Checks that need X (a target that does not exist, a closed DM inbox) are not made.
+
+- **DRY-4 — A budget gate that cannot quote refuses the dry run** `P3` `[Q14]`
+  `BudgetGate.quote` is optional so test fakes need not implement it. A gate without it
+  makes the registry refuse the dry run with an `api` error instead of falling through to a
+  real charge.
+
+- **DRY-5 — A dry run never reaches X or the credential store** `P3` `[Q14]`
+  No handler, invoker or HTTP request runs, so no OAuth token is loaded, refreshed or
+  persisted, and an unresolved `@handle` is not looked up. A previewer that throws becomes a
+  generic `api` error; it is never retried as a real call.

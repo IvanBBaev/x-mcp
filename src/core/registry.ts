@@ -39,6 +39,7 @@ import type {
   ToolAnnotations,
   ToolContext,
   ToolOutput,
+  ToolPreview,
   XApiRequest,
 } from './tooldef.js';
 import { apiError, authError, networkError, validationError, XError } from './errors.js';
@@ -97,6 +98,21 @@ export interface BudgetGate {
    * to hand back.
    */
   release?(estimate: CostEstimate): void;
+  /**
+   * The dry-run price check (Q14): what `check` would charge, WITHOUT charging. It throws the
+   * same typed `budget` XError `check` would throw in hard mode, and otherwise returns the
+   * projected reservation plus the current session total. It must never move the ledger.
+   * Optional so a fake gate need not implement it; the registry refuses a dry run on a gate
+   * that lacks it rather than fall through to a real charge.
+   */
+  quote?(estimate: CostEstimate): BudgetQuote;
+}
+
+/** A dry-run price check: the reservation a real call would take, and today's total. */
+export interface BudgetQuote {
+  readonly projected: BudgetReservation;
+  /** The session total right now — unchanged by the quote. */
+  readonly total: number;
 }
 
 /**
@@ -308,6 +324,21 @@ export function createRegistry(tools: readonly AnyToolDef[], deps: RegistryDeps)
     // (4) budget pre-flight — `hard` mode over cap -> typed `budget` error, nothing reserved.
     //     Synchronous with step 3, so no await separates the two (CONC-2 still holds).
     const estimate = resolveCost(tool, input);
+
+    // Q14 — the dry-run short-circuit. Every local refusal above (schema, policy, credential
+    // mode, rate-limit window) has already run exactly as for a real call; the price is QUOTED
+    // with the same hard-mode refusal `check` applies, but nothing is charged. The handler and
+    // the invoker are never reached, so no request is sent and no token is loaded or
+    // refreshed. A gate that cannot quote refuses the dry run rather than fall through to a
+    // charge.
+    if (tool.preview !== undefined && isDryRun(input)) {
+      if (deps.budget.quote === undefined) {
+        throw apiError(`Dry run for "${tool.name}" is unavailable: the budget gate cannot quote.`);
+      }
+      const quote = deps.budget.quote(estimate);
+      return previewResult(runPreviewer(tool, input, ctx), estimate, quote);
+    }
+
     deps.budget.check(estimate, tool.name);
 
     // (5) invoke the handler through its ToolContext (the only place a handler ever runs).
@@ -496,6 +527,63 @@ function isAbortError(err: unknown): boolean {
     'name' in err &&
     (err as { name?: unknown }).name === 'AbortError'
   );
+}
+
+/** True when the validated input asks for a dry run (`dry_run: true`, Q14). */
+function isDryRun(input: unknown): boolean {
+  return (
+    typeof input === 'object' && input !== null && (input as { dry_run?: unknown }).dry_run === true
+  );
+}
+
+/**
+ * Run a tool's previewer. It is pure and synchronous, so like a handler a typed XError
+ * passes through unchanged and anything else is a bug surfaced as a generic `api` error.
+ */
+function runPreviewer(tool: AnyToolDef, input: unknown, ctx: CallContext): ToolPreview {
+  const preview = tool.preview;
+  if (preview === undefined) throw apiError(`Tool "${tool.name}" has no dry run.`);
+  try {
+    return preview(input, ctx.resolveCache === undefined ? {} : { resolveCache: ctx.resolveCache });
+  } catch (err) {
+    if (XError.is(err)) throw err;
+    throw apiError(`Tool "${tool.name}" failed unexpectedly.`, { cause: err });
+  }
+}
+
+/**
+ * The dry-run result (Q14). `data` carries the requests a real call would send (method,
+ * path, query and body only — scopes and the signal are transport details), the quoted
+ * price and the projected session total, plus any budget warning the real call would get.
+ * `meta` reports what THIS call cost: nothing, with the session total unchanged.
+ */
+function previewResult(
+  preview: ToolPreview,
+  estimate: CostEstimate,
+  quote: BudgetQuote,
+): ToolResult {
+  const requests = preview.requests.map((req) => ({
+    method: req.method,
+    path: req.path,
+    ...(req.query !== undefined ? { query: req.query } : {}),
+    ...(req.body !== undefined ? { body: req.body } : {}),
+  }));
+  const notes = [preview.note, estimate.note].filter((n): n is string => n !== undefined);
+  const { projected } = quote;
+  const data = {
+    dry_run: true,
+    requests,
+    cost_usd: projected.cost_usd,
+    session_total_usd: projected.session_total_usd,
+    ...(projected.budget_warning !== undefined ? { budget_warning: projected.budget_warning } : {}),
+    ...(notes.length > 0 ? { note: notes.join(' ') } : {}),
+  };
+  const count = requests.length === 1 ? '1 request' : `${requests.length} requests`;
+  return {
+    data,
+    summary: `Dry run: ${count} previewed, nothing sent or charged; a real call would cost $${projected.cost_usd}.`,
+    meta: { cost_usd: 0, session_total_usd: quote.total },
+  };
 }
 
 /** Envelope the handler output with ResultMeta, honoring exactOptionalPropertyTypes. */

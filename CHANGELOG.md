@@ -10,6 +10,16 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- `dry_run` for the send tools: `x_post_create`, `x_thread_create` and `x_dm_send` take an
+  optional `dry_run: true` that returns the exact request(s) the call would send (method,
+  path, body), the quoted cost and the session total after a real call, with any budget
+  warning, and sends, charges and loads nothing. A dry run passes the same validation,
+  policy, credential, rate-limit and hard-budget checks as a real call, so a refusal shows
+  up before anything is sent. Values only X can supply are named placeholders: a thread's
+  later parents (`<id of post k>`) and a DM `@handle` not yet resolved in this process
+  (`<id of @handle>`). The result's `data` schema is an `anyOf` of the normal result and the
+  preview. `tools/list` grows by 1,614 B, to 76,404 of 80,000 B (model-visible +303 B, to
+  40,105 of 44,000 B). docs/07 DRY-1..5.
 - Articles (two new writes in the `posts` package, 47 → 49): `x_article_draft_create`
   creates a private long-form draft from a `title`, 1-1000 text `blocks` (paragraph,
   heading, list item, quote) and an optional cover image, and `x_article_publish` publishes a

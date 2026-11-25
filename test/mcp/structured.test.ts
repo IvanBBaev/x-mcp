@@ -541,6 +541,25 @@ test('REND-11/Q09: the remaining reads and writes conform with meta attached', (
     posts: [{ id: '1', url: 'https://x.com/i/status/1' }],
     failed_at: 1,
   });
+  // Q14: the three send tools also return the dry-run preview shape.
+  const preview = {
+    dry_run: true,
+    requests: [{ method: 'POST', path: '/2/tweets', body: { text: 'hi' } }],
+    cost_usd: 0.015,
+    session_total_usd: 0.015,
+  };
+  for (const name of ['x_post_create', 'x_thread_create', 'x_dm_send']) {
+    assertConforms(name, preview, 'Dry run: 1 request previewed.');
+    assertConforms(name, {
+      ...preview,
+      requests: [
+        { method: 'GET', path: '/2/x', query: { a: '1' } },
+        { method: 'POST', path: '/2/y' },
+      ],
+      budget_warning: 'near cap',
+      note: 'placeholder ids',
+    });
+  }
   const usage: UsageReport = {
     platform: { project_id: '1', posts_read: 125_000, cap: 2_000_000, percent_used: 6.3 },
     session_budget: { spent_usd: 0.02, mode: 'warn', by_tool: { x_post_get: 0.02 } },

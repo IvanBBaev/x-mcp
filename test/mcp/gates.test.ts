@@ -250,3 +250,37 @@ test('the registry attributes each charge to the tool that was called', async ()
   );
   assert.deepEqual(spend.snapshot(), { x_follow_set: USER_INTERACTION_CREATE_USD });
 });
+
+// --- Q14: quote (the dry-run price check) -------------------------------------------
+
+test('Q14/DRY-2: the gate quote reserves, holds and attributes nothing', () => {
+  const budget = createSessionBudget({ limit: 1, mode: 'hard' });
+  const spend = createSpendByTool();
+  const gate = createBudgetGate(budget, spend);
+  const estimate: CostEstimate = { class: 'w:dm' };
+
+  gate.check(estimate, 'x_user_get'); // one real charge, so `total` is not trivially zero
+  const before = budget.total();
+  const quote = gate.quote({ class: 'w:dm' });
+  assert.deepEqual(quote, {
+    projected: { cost_usd: 0.015, session_total_usd: 0.03 },
+    total: before,
+  });
+  assert.equal(budget.total(), before);
+  assert.deepEqual(Object.keys(spend.snapshot()), ['x_user_get']);
+  // A quoted estimate holds no reservation: a later release of it moves nothing.
+  const quoted: CostEstimate = { class: 'w:post' };
+  gate.quote(quoted);
+  gate.release(quoted);
+  assert.equal(budget.total(), before);
+});
+
+test('Q14/DRY-2: the gate quote refuses past a hard cap, exactly like check', () => {
+  const budget = createSessionBudget({ limit: 0.01, mode: 'hard' });
+  const gate = createBudgetGate(budget);
+  assert.throws(
+    () => gate.quote({ class: 'w:dm' }),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  assert.equal(budget.total(), 0);
+});
