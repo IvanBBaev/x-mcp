@@ -179,6 +179,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 >
 > Articles (2026-11-20, Q12, 70d3e08, review 13 §6 Q4): the two Article writes add 2,198 B,
 > to **74,790 B** (5,210 B of headroom).
+>
+> Dry run (2026-11-25, Q14, 01af1b3): `dry_run` on the three send tools adds 1,614 B, to
+> **76,404 B** (3,596 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -243,6 +246,15 @@ warning and never fails: VS Code 128 (documented) and Cursor 40 (historic, uncon
 Cursor's MCP docs publish no numeric cap, so the Cursor warning prints today. `tools/list`
 +0 B.
 
+**Dry run for the send tools shipped 2026-11-25 (queue Q14, 01af1b3; owner pick 2026-11-24):**
+`x_post_create`, `x_thread_create` and `x_dm_send` take an optional `dry_run: true`. One
+registry seam runs every local gate (schema, policy, AUTH-17, rate-limit preflight, COST-4
+pricing), quotes the cost through `BudgetGate.quote` with the same hard-mode refusal, and
+returns the exact request(s) from the real endpoint builders, with nothing sent, charged or
+loaded. Values only X can supply are named placeholders (`<id of post k>`, `<id of @handle>`).
+Article tools are out of scope. docs/07 DRY-1..5. `tools/list` +1,614 B, to **76,404 B**;
+model-visible +303 B, to **40,105 B** of 44,000 B.
+
 ---
 
 ## 1.0 acceptance checklist
@@ -284,7 +296,7 @@ above; this is the single list to walk before tagging:
       (**77,005 B**), and `since_id` on the search/timeline reads 464 B more
       (**77,469 B**, 3.2% headroom).
       From Q13 (2026-11-21) the same gate also caps the model-visible sub-measure at
-      44,000 B (39,802 B at 49 tools; raised from 40,000 B by the owner on 2026-11-24) and pins the listed tool count to an exact
+      44,000 B (39,802 B at 49 tools, 40,105 B after Q14; raised from 40,000 B by the owner on 2026-11-24) and pins the listed tool count to an exact
       baseline (49); see the Phase 4 note.*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
