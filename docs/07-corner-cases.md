@@ -873,3 +873,86 @@ of scope (their drafts are already a staging step).
   No handler, invoker or HTTP request runs, so no OAuth token is loaded, refreshed or
   persisted, and an unresolved `@handle` is not looked up. A previewer that throws becomes a
   generic `api` error; it is never retried as a real call.
+
+## 21. LEDGER — Persisted spend ledger *(Q15, Phase 4)*
+
+`[Q15]` = the Q15 item (owner pick 2026-11-25 from the feature analyses). The session budget
+(COST-1..7) forgets everything on restart. The ledger keeps the SAME local estimate in an
+append-only JSONL file, folded per UTC calendar day and UTC calendar month, with optional
+operator caps per window: `X_MCP_DAILY_BUDGET`, `X_MCP_MONTHLY_BUDGET`,
+`X_MCP_SPEND_LEDGER_FILE`. Logic in `core/ledger` (no I/O), persistence in
+`api/spendledger`, wiring in `mcp/gates` and `mcp/compose`. It adds no tool and no
+parameter; `x_usage_get` gains an optional `spend_ledger` block (outputSchema only).
+
+- **LEDGER-1 — Off by default** `P3` `[Q15]`
+  Without any of the three variables no ledger is built and no file is read or created; the
+  usage report has no `spend_ledger` and its summary is unchanged. An empty value (what an
+  MCPB host passes for an unset option) counts as unset. Setting only the file records
+  spend with no cap; setting a cap uses the default file `spend-ledger.jsonl` in the x-mcp
+  config directory (next to the default token file). Reading a missing file does not
+  create it.
+
+- **LEDGER-2 — Totals survive restarts, per UTC day and UTC month** `P3` `[Q15]`
+  Every charged call appends `{"t":<epoch ms>,"u":<usd>}` with the same price the session
+  budget charged. A new process folds the whole file, so today's and this month's totals
+  carry over; the day rolls over at 00:00 UTC and the month on the 1st. The file is created
+  `0600` in a `0700` directory. `x_usage_get` reports `spend_ledger { mode, day, month,
+  note? }`, each window `{ period, spent_usd, limit_usd?, remaining_usd?, percent_used? }`,
+  and adds `; persisted today $Y` to its summary.
+
+- **LEDGER-3 — Same hard/warn semantics as the session budget, refusal before charge** `P3` `[Q15]`
+  `X_MCP_BUDGET_MODE` governs both. In `hard` mode a call that would push the day or month
+  over its cap throws the typed `budget` error naming the window (*"…would bring persisted
+  daily spend (UTC day 2026-11-26) to $1.01, over the daily budget of $1. … This is an
+  operator-set limit; cannot be changed from within this session."*). The order is: session
+  quote (session refusal first, the ledger is not touched), ledger check-and-append, session
+  reserve — all one synchronous step (CONC-2). A ledger refusal leaves the session total,
+  the per-tool shares and the file unchanged, and nothing is sent. In `warn` mode a
+  `budget_warning` appears from 90% of a cap and again past it; it is joined to any session
+  warning with a space.
+
+- **LEDGER-4 — Settles and releases are dated to the reservation** `P3` `[Q15]`
+  A per-resource read settles by the difference (COST-3) and a refused call releases to $0;
+  the ledger appends the same delta with the reservation's timestamp, so a call that
+  straddles midnight UTC lands entirely in the day it was charged. Totals per window are
+  clamped at $0 for reporting.
+
+- **LEDGER-5 — Multi-process: append-only, bounded overshoot** `P3` `[Q15]`
+  Each process keeps its own read offset and folds only what was appended since its last
+  read, by anyone. Writes use `O_APPEND`, so no process overwrites another's entry. The cap
+  check is not a cross-process lock: two processes that check in the same instant can both
+  pass, so a hard cap may be overshot by at most one in-flight reservation per other
+  process. That bound is documented rather than closed with a lock file, because a
+  synchronous lock would block the event loop.
+
+- **LEDGER-6 — Corrupt, partial or rotated files** `P3` `[Q15]`
+  A malformed line is skipped, never guessed at. A trailing line without its newline (a
+  writer caught mid-write) is not consumed until the newline arrives. A file that shrank,
+  was replaced (new inode) or was removed resets the fold, so deleting or truncating the
+  file is how an operator starts over. The file is never opened through a symlink
+  (`O_NOFOLLOW` where the platform has it).
+
+- **LEDGER-7 — I/O failure: hard fails closed, warn carries on** `P3` `[Q15]`
+  If the file cannot be read or appended (`EACCES`, `EROFS`, `ENOSPC`, `ELOOP`…), `hard`
+  mode refuses the call with a `budget` error naming the error code (never the path), and
+  `warn` mode lets it through with *"The persisted spend ledger is unavailable (CODE)…"*.
+  Settle, release and snapshot never throw: a failed settle append is reported as a
+  warning, and the usage snapshot shows the last totals read plus a `note`. A failed write
+  still closes its file descriptor.
+
+- **LEDGER-8 — $0 calls never touch the file** `P3` `[Q15]`
+  A local (`local` cost class) call, a $0 settle and a release of a $0 reservation append
+  nothing and do not read the file.
+
+- **LEDGER-9 — A dry run quotes against the ledger and writes nothing** `P3` `[Q15]`
+  `BudgetGate.quote` folds the file and applies the same caps (DRY-3): in `hard` mode a dry
+  run that a real call could not pass is refused with the same error; in `warn` mode the
+  preview's `budget_warning` shows the ledger warning the real call would carry. Nothing is
+  appended.
+
+- **LEDGER-10 — Caps are operator-set and validated** `P3` `[Q15]`
+  `X_MCP_DAILY_BUDGET` and `X_MCP_MONTHLY_BUDGET` are positive USD amounts (trimmed); `0`, a
+  negative or a non-number is a fatal configuration error naming the variable. A daily cap
+  larger than the monthly cap is accepted with a startup warning (it can never be reached
+  first). `~` in the file path is expanded. No tool or parameter can change a cap; profiles
+  share the default file unless each sets its own `X_MCP_SPEND_LEDGER_FILE`.

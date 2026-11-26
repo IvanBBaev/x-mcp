@@ -502,10 +502,24 @@ const DM_SEND_DATA: SchemaNode = {
   required: ['sent'],
 };
 
+/** One persisted-ledger window (Q15): a UTC day `YYYY-MM-DD` or month `YYYY-MM`. */
+const LEDGER_WINDOW: SchemaNode = {
+  type: 'object',
+  properties: {
+    period: STR,
+    spent_usd: NUM,
+    limit_usd: NUM,
+    remaining_usd: NUM,
+    percent_used: NUM,
+  },
+  required: ['period', 'spent_usd'],
+};
+
 /**
  * `x_usage_get` report (WP-3.11). Two deliberately separate halves: `platform` is the X
  * project's own post-READ COUNTS against the monthly cap (never money — X publishes no
- * spend API), `session_budget` is this process's local dollar estimate. `note` is required
+ * spend API), `session_budget` is this process's local dollar estimate (`spend_ledger`, when
+ * the operator enabled it, is the same estimate persisted per UTC day/month). `note` is required
  * so the distinction travels with every result and cannot be schema-optional away.
  */
 const USAGE_DATA: SchemaNode = {
@@ -549,6 +563,16 @@ const USAGE_DATA: SchemaNode = {
         by_tool: { type: 'object', additionalProperties: NUM },
       },
       required: ['spent_usd', 'mode'],
+    },
+    spend_ledger: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['warn', 'hard'] },
+        day: LEDGER_WINDOW,
+        month: LEDGER_WINDOW,
+        note: STR,
+      },
+      required: ['mode', 'day', 'month'],
     },
     note: STR,
   },

@@ -197,7 +197,10 @@ X_MCP_AUTH_MODE=oauth2 X_MCP_CLIENT_ID=… node build/src/index.js authorize
 | `X_MCP_POLICY_DENY` | | | Comma-separated cells to remove (wins over allow and preset). |
 | `X_MCP_HIDE_DENIED` | `0` | | `1` → drop denied tools from registration entirely. |
 | `X_MCP_CREDIT_BUDGET` | | | Session spend cap, USD (e.g. `5.00`). Unset = no cap. |
-| `X_MCP_BUDGET_MODE` | `warn` | | `warn` \| `hard`. |
+| `X_MCP_BUDGET_MODE` | `warn` | | `warn` \| `hard`. Also applies to the daily/monthly caps. |
+| `X_MCP_DAILY_BUDGET` | | | Persisted spend cap per UTC day, USD. Turns the spend ledger on. |
+| `X_MCP_MONTHLY_BUDGET` | | | Persisted spend cap per UTC month, USD. Turns the spend ledger on. |
+| `X_MCP_SPEND_LEDGER_FILE` | OS-resolved | | Path of the spend ledger (`~` expanded). Setting it turns the ledger on, uncapped. |
 | `X_MCP_AVAILABILITY` | | | Comma-separated availability classes to enable (`pilot`, `premium-user`, `enterprise`). |
 | `X_MCP_MEDIA_DIR` | | | Directory uploads must `realpath` inside (media default-deny). |
 | `X_MCP_PROFILES_FILE` | | | Multi-account profiles file. |

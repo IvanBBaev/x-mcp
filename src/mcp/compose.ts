@@ -18,9 +18,12 @@ import type { OAuth2Auth } from '../api/oauth2/index.js';
 import { createRateLimitTracker, rateLimitKey } from '../api/ratelimit.js';
 import type { RateLimitTracker } from '../api/ratelimit.js';
 import { createHandleLookup } from '../api/endpoints/users.js';
+import { createFileLedgerStore } from '../api/spendledger.js';
 import { createSessionBudget, createSpendByTool } from '../core/budget.js';
 import type { SessionBudget } from '../core/budget.js';
 import type { Config } from '../core/config.js';
+import { createSpendLedger } from '../core/ledger.js';
+import type { LedgerStore, SpendLedger } from '../core/ledger.js';
 import { resolvePolicy } from '../core/policy.js';
 import type { Clock, Dispatcher, Ports, Random, Sleep, TokenStore } from '../core/ports.js';
 import { createRegistry } from '../core/registry.js';
@@ -147,6 +150,8 @@ export interface ComposeOverrides {
    * behavior, if any.
    */
   readonly tokenFilePermissionAlreadyReported?: boolean;
+  /** Q15 — replaces the file-backed spend-ledger store; used only when the ledger is on. */
+  readonly ledgerStore?: LedgerStore;
 }
 
 /** Everything the entrypoint (and the integrator) needs a handle on. */
@@ -318,6 +323,20 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
   });
   // Per-tool share of the same estimate: written only by the budget gate, read by x_usage_get.
   const spend = createSpendByTool();
+  // Q15 — the persisted daily/monthly ledger, only when the operator configured it (LEDGER-1).
+  const ledgerFile = config.budget.ledgerFile;
+  const ledger: SpendLedger | undefined =
+    ledgerFile === undefined
+      ? undefined
+      : createSpendLedger({
+          store: overrides.ledgerStore ?? createFileLedgerStore(ledgerFile),
+          clock,
+          mode: config.budget.mode,
+          ...(config.budget.dailyUsd !== undefined ? { dailyUsd: config.budget.dailyUsd } : {}),
+          ...(config.budget.monthlyUsd !== undefined
+            ? { monthlyUsd: config.budget.monthlyUsd }
+            : {}),
+        });
 
   const session = createSessionProvider(config, policy);
   // WP-3.3 bridge: the media package's per-segment events reach the client as
@@ -347,7 +366,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
     // INT-6, like createAuthTools: the report reads process state (the session credit
     // estimate) that the frozen ToolContext does not carry, so the budget is injected here.
     // Only the READ side of the budget is in the seam's type — the tool cannot charge.
-    ...createUsageTools({ budget, spend }),
+    ...createUsageTools({ budget, spend, ...(ledger !== undefined ? { ledger } : {}) }),
   ];
   for (const tool of tools) {
     if (!(tool.name in TOOL_BUCKETS)) {
@@ -369,7 +388,7 @@ export function composeServer(config: Config, overrides: ComposeOverrides = {}):
 
   const registry = createRegistry(gate.registered, {
     policy: createPolicyGate(policy, config.policy.hideDenied),
-    budget: createBudgetGate(budget, spend),
+    budget: createBudgetGate(budget, spend, ledger),
     rateLimit: createRateLimitGate(tracker, (tool) => {
       const bucket = TOOL_BUCKETS[tool.name];
       return bucket == null ? null : rateLimitKey(bucket, authContext);

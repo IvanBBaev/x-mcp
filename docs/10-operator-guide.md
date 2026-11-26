@@ -324,7 +324,8 @@ credit balance. Hitting it returns a `billing` error with `platform_title:
 Properties worth knowing before you rely on it:
 
 - **Per-process and advisory.** The counter lives in memory, starts at 0 on every server
-  start, and never seeds itself from an X usage API. Restarting the client resets it.
+  start, and never seeds itself from an X usage API. Restarting the client resets it — use
+  the persisted daily/monthly caps below when a restart must not reset the guardrail.
 - **Model-immutable.** There is no per-call budget override and no tool that raises the
   cap. A refusal says so: *"This is an operator-set limit; cannot be changed from within
   this session."*
@@ -332,6 +333,30 @@ Properties worth knowing before you rely on it:
   `meta.session_total_usd`.
 - **An estimate.** It is the local price table applied to calls made, not a bill. Reconcile
   against your X developer portal.
+
+**Persisted daily and monthly caps** (opt-in). The same estimate, written to a local
+append-only ledger so it survives restarts and is shared by every server process that uses
+the same file:
+
+| Variable | Effect |
+|---|---|
+| `X_MCP_DAILY_BUDGET` | Spend cap per **UTC day**, USD. |
+| `X_MCP_MONTHLY_BUDGET` | Spend cap per **UTC month**, USD. |
+| `X_MCP_SPEND_LEDGER_FILE` | Ledger path (`~` expanded). Default: `spend-ledger.jsonl` next to the default token file (`~/.config/x-mcp/`, `%APPDATA%\x-mcp\` on Windows). |
+
+- **Off unless one of the three is set.** Setting only the file records spend with no cap.
+- **Same mode as the session cap.** `X_MCP_BUDGET_MODE=hard` refuses a call that would push
+  today's or this month's total past its cap, before anything is sent or charged; `warn`
+  attaches a `budget_warning` from 90%.
+- **Fails safe.** If the file cannot be read or written, `hard` mode refuses calls until it
+  is fixed; `warn` mode carries on with a warning.
+- **Multi-process.** Several clients may share one file — entries are only ever appended.
+  The check is not a lock: two processes that check at the same instant can both pass, so a
+  hard cap can be overshot by at most one call per other running process.
+- **Profiles.** All profiles share the default file. Give each account its own
+  `X_MCP_SPEND_LEDGER_FILE` if their spend should be counted separately.
+- **Resetting.** Delete or truncate the file; every process starts again from the new
+  contents. `x_usage_get` reports the totals as `spend_ledger`.
 
 ## 6. Env recipes
 

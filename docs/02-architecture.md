@@ -126,7 +126,10 @@ lists an `X_MCP_*` variable defers to this one.
 | `X_MCP_POLICY_ALLOW` / `X_MCP_POLICY_DENY` | — | Comma-separated `op:domain` cell overrides on top of the preset; **deny always wins** (POL-2) |
 | `X_MCP_HIDE_DENIED` | `0` | `1` → drop policy-denied tools from registration entirely; default keeps them registered + annotated (POL-7) |
 | `X_MCP_CREDIT_BUDGET` | — (no cap) | Session credit budget in **USD** (decimal), operator-set and model-immutable (§7, COST-1) |
-| `X_MCP_BUDGET_MODE` | `warn` | `warn` (past-cap results carry `budget_warning`) \| `hard` (reads **and** writes fail with the typed `budget` error) |
+| `X_MCP_BUDGET_MODE` | `warn` | `warn` (past-cap results carry `budget_warning`) \| `hard` (reads **and** writes fail with the typed `budget` error); applies to the session cap and to the persisted daily/monthly caps alike |
+| `X_MCP_DAILY_BUDGET` | — (no cap) | Persisted spend cap per **UTC day**, USD; operator-set and model-immutable. Setting it turns the spend ledger on (§7, [07 §21](07-corner-cases.md) LEDGER-*) |
+| `X_MCP_MONTHLY_BUDGET` | — (no cap) | Persisted spend cap per **UTC month**, USD; turns the spend ledger on. A daily cap above it is accepted with a warning (LEDGER-10) |
+| `X_MCP_SPEND_LEDGER_FILE` | resolved (`<config dir>/x-mcp/spend-ledger.jsonl`) | Path of the append-only spend ledger; setting it alone turns the ledger on, uncapped. Give each profile/account its own file to keep their totals apart |
 | `X_MCP_AVAILABILITY` | conservative (none) | Which account-gated surface is reachable; gates only `pilot`/`premium-user`/`enterprise` tool registration (archive & `user_search` are `app+user`, budget-guarded), surfaced in `auth_status`. Value vocabulary is defined by [01](01-api-landscape.md) (WP-0.10) |
 | `X_MCP_MEDIA_DIR` | — (default-deny) | **Required** for `media_upload`; every upload must `realpath` inside it (SEC-T9/MEDIA-5) |
 | `X_MCP_PROFILES_FILE` | — | JSON file defining multiple named accounts (work/personal/bot) |
@@ -427,6 +430,15 @@ X-F4; cases COST-1…7):
   a URL-bearing post is $0.20 — COST-3/4). The authoritative cost table is the appendix in
   [01](01-api-landscape.md) (WP-0.1). Restart resets the counter — the docs state plainly
   that this is per-process, advisory accounting, not a hard ledger (OPS-F10).
+- **Persisted spend ledger (Q15, opt-in).** `X_MCP_DAILY_BUDGET` / `X_MCP_MONTHLY_BUDGET` /
+  `X_MCP_SPEND_LEDGER_FILE` turn on `core/ledger`: the same estimate, appended to a JSONL
+  file (`api/spendledger`, 0600, `O_APPEND`, never through a symlink) and folded per UTC day
+  and UTC month, so it survives restarts and is shared by every process on that file. The
+  budget gate charges it in the same synchronous step as the session budget (session refusal
+  first, then the ledger, then the session reserve), settles it by the same difference and
+  releases it to $0. Same `warn`/`hard` semantics; a ledger I/O failure fails closed in
+  `hard` and warns in `warn`. The cross-process check is not a lock — a hard cap may be
+  overshot by at most one in-flight reservation per other process ([07 §21](07-corner-cases.md)).
 - **Reads are priced per resource returned, writes per request** ([01 §3.1](01-api-landscape.md)).
   A handler reports how many billable resources its response carried (`ToolOutput.units`);
   the registry hands that count to the budget's settle step, and the price is

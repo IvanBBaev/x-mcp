@@ -12,6 +12,7 @@ import type {
   RateLimitGate,
 } from '../core/registry.js';
 import type { SessionBudget, SpendByTool } from '../core/budget.js';
+import type { LedgerReservation, SpendLedger } from '../core/ledger.js';
 import { deniedToolError, isCellAllowed } from '../core/policy.js';
 import type { ResolvedPolicy } from '../core/policy.js';
 import type { AnyToolDef, CostEstimate } from '../core/tooldef.js';
@@ -52,25 +53,51 @@ export function createPolicyGate(policy: ResolvedPolicy, hideDenied: boolean): P
  * page shorter than asked for, a top-up for a full one. `settle` never throws, so a hard-mode
  * budget that the settled price pushes past the cap reports a warning rather than failing a
  * call whose resources the platform has already delivered (the money is spent either way).
+ *
+ * PERSISTED LEDGER (Q15, docs/07 §21): when the operator configured one, every charge also
+ * goes through the daily/monthly ledger, in the same synchronous step. Order matters for
+ * "charge before refuse is a bug": the session budget is QUOTED first (its hard refusal
+ * moves nothing), then the ledger reserves (its hard refusal moves nothing either — the
+ * session budget has not been charged yet), and only then is the session budget charged.
+ * Settle and release move the ledger by the same difference as the session ledger.
  */
 export function createBudgetGate(
   budget: SessionBudget,
   spend?: Pick<SpendByTool, 'record'>,
+  ledger?: SpendLedger,
 ): BudgetGate & {
   release(estimate: CostEstimate): void;
   quote(estimate: CostEstimate): BudgetQuote;
 } {
   // Each held reservation remembers the tool it was taken for, so every later move of the
   // session ledger (settle, release) is mirrored onto the same tool's share.
-  const reserved = new WeakMap<CostEstimate, { meta: BudgetReservation; tool?: string }>();
+  const reserved = new WeakMap<
+    CostEstimate,
+    { meta: BudgetReservation; tool?: string; ledger?: LedgerReservation }
+  >();
   const attribute = (tool: string | undefined, deltaUsd: number): void => {
     if (tool !== undefined) spend?.record(tool, deltaUsd);
+  };
+  /** Charge the session budget and the ledger as one synchronous step (CONC-2). */
+  const charge = (cost: CostEstimate): { meta: BudgetReservation; ledger?: LedgerReservation } => {
+    if (ledger === undefined) return { meta: budget.reserve(cost) };
+    // Session hard refusal first, while nothing has moved (COST-1)…
+    const projected = budget.quote(cost);
+    // …then the ledger's (LEDGER-3); it writes only when it does not refuse…
+    const persisted = ledger.reserve(projected.cost_usd, cost.note);
+    // …and only then the session charge, which can no longer refuse.
+    const meta = withLedgerWarning(budget.reserve(cost), persisted.warning);
+    return { meta, ledger: persisted.reservation };
   };
   return {
     check(estimate, tool) {
       // Throws the typed `budget` XError in hard mode BEFORE any reservation (COST-1).
-      const meta = budget.reserve(estimate);
-      reserved.set(estimate, tool === undefined ? { meta } : { meta, tool });
+      const { meta, ledger: held } = charge(estimate);
+      reserved.set(estimate, {
+        meta,
+        ...(tool !== undefined ? { tool } : {}),
+        ...(held !== undefined ? { ledger: held } : {}),
+      });
       attribute(tool, meta.cost_usd);
     },
     reserve(estimate, units) {
@@ -80,16 +107,21 @@ export function createBudgetGate(
         if (units === undefined) return held.meta;
         const settled = budget.settle(held.meta, { ...estimate, units });
         attribute(held.tool, settled.cost_usd - held.meta.cost_usd);
-        return settled;
+        if (ledger === undefined || held.ledger === undefined) return settled;
+        // LEDGER-4: the ledger moves by the same difference, dated to the reservation.
+        return withLedgerWarning(settled, ledger.settle(held.ledger, settled.cost_usd).warning);
       }
       // Defensive: unreachable through the registry pipeline (check always precedes
       // reserve); if a future caller skips check, charge now so nothing rides free.
-      return budget.reserve(units === undefined ? estimate : { ...estimate, units });
+      return charge(units === undefined ? estimate : { ...estimate, units }).meta;
     },
     quote(estimate) {
-      // Q14 dry run: the same pricing and hard-mode refusal as `check`, but nothing is
-      // reserved, held or attributed — the ledger and the per-tool shares stay untouched.
-      return { projected: budget.quote(estimate), total: budget.total() };
+      // Q14 dry run: the same pricing and hard-mode refusals as `check`, but nothing is
+      // reserved, held, attributed or persisted (LEDGER-9).
+      const projected = budget.quote(estimate);
+      const warning =
+        ledger === undefined ? undefined : ledger.quote(projected.cost_usd, estimate.note).warning;
+      return { projected: withLedgerWarning(projected, warning), total: budget.total() };
     },
     release(estimate) {
       const held = reserved.get(estimate);
@@ -99,8 +131,19 @@ export function createBudgetGate(
       // held, never by overwriting a total another call moved in between (CONC-2).
       budget.settle(held.meta, 'local');
       attribute(held.tool, -held.meta.cost_usd);
+      if (ledger !== undefined && held.ledger !== undefined) ledger.settle(held.ledger, 0);
     },
   };
+}
+
+/** Append the ledger's warning to the session meta's own (`budget_warning` is one string). */
+function withLedgerWarning(
+  meta: BudgetReservation,
+  warning: string | undefined,
+): BudgetReservation {
+  if (warning === undefined) return meta;
+  const merged = meta.budget_warning !== undefined ? `${meta.budget_warning} ${warning}` : warning;
+  return { ...meta, budget_warning: merged };
 }
 
 /** The read side of the rate-limit tracker the gate needs (api/ratelimit, structurally). */

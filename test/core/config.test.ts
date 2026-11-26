@@ -753,3 +753,80 @@ test('a profile named without a profiles file is ignored with a warning (not fat
     cfg.warnings.some((w) => /X_MCP_PROFILE is set but X_MCP_PROFILES_FILE is not/.test(w)),
   );
 });
+
+// --- Q15: persisted spend ledger (docs/07 §21 LEDGER-1/10) -----------------------------
+
+test('LEDGER-1: the ledger is off unless one of its three variables is set', () => {
+  const cfg = parseConfig({});
+  assert.equal(Object.hasOwn(cfg.budget, 'ledgerFile'), false);
+  assert.equal(Object.hasOwn(cfg.budget, 'dailyUsd'), false);
+  assert.equal(Object.hasOwn(cfg.budget, 'monthlyUsd'), false);
+  // MCPB hosts pass every unset option as "" — that must not turn the ledger on.
+  const blank = parseConfig({
+    X_MCP_DAILY_BUDGET: '',
+    X_MCP_MONTHLY_BUDGET: '  ',
+    X_MCP_SPEND_LEDGER_FILE: '',
+  });
+  assert.equal(Object.hasOwn(blank.budget, 'ledgerFile'), false);
+});
+
+test('LEDGER-1: a cap alone turns the ledger on at the default path in the x-mcp config dir', () => {
+  if (process.platform === 'win32') {
+    const cfg = parseConfig({
+      APPDATA: 'C:\\Users\\me\\AppData\\Roaming',
+      X_MCP_DAILY_BUDGET: '2',
+    });
+    assert.equal(
+      cfg.budget.ledgerFile,
+      path.join('C:\\Users\\me\\AppData\\Roaming', 'x-mcp', 'spend-ledger.jsonl'),
+    );
+  } else {
+    const cfg = parseConfig({ XDG_CONFIG_HOME: '/xdg/config', X_MCP_MONTHLY_BUDGET: '20' });
+    assert.equal(cfg.budget.ledgerFile, path.join('/xdg/config', 'x-mcp', 'spend-ledger.jsonl'));
+    assert.equal(cfg.budget.monthlyUsd, 20);
+    assert.equal(Object.hasOwn(cfg.budget, 'dailyUsd'), false);
+  }
+});
+
+test('LEDGER-1: X_MCP_SPEND_LEDGER_FILE alone turns the ledger on, uncapped, with ~ expanded', () => {
+  const cfg = parseConfig({
+    X_MCP_SPEND_LEDGER_FILE: '~/x/ledger.jsonl',
+    X_MCP_BUDGET_MODE: 'hard',
+  });
+  assert.equal(cfg.budget.ledgerFile, path.join(os.homedir(), 'x/ledger.jsonl'));
+  assert.equal(cfg.budget.mode, 'hard');
+  assert.equal(Object.hasOwn(cfg.budget, 'dailyUsd'), false);
+  assert.ok(Object.isFrozen(cfg.budget));
+});
+
+test('LEDGER-10: the caps are positive USD amounts; bad values are fatal and named', () => {
+  const cfg = parseConfig({ X_MCP_DAILY_BUDGET: ' 1.5 ', X_MCP_MONTHLY_BUDGET: '30' });
+  assert.equal(cfg.budget.dailyUsd, 1.5);
+  assert.equal(cfg.budget.monthlyUsd, 30);
+  assertFatal(
+    () => parseConfig({ X_MCP_DAILY_BUDGET: '0' }),
+    /X_MCP_DAILY_BUDGET must be a positive USD/,
+  );
+  assertFatal(
+    () => parseConfig({ X_MCP_MONTHLY_BUDGET: 'lots' }),
+    /X_MCP_MONTHLY_BUDGET must be a positive USD/,
+  );
+});
+
+test('LEDGER-10: a daily cap above the monthly one is accepted with a warning', () => {
+  const cfg = parseConfig({ X_MCP_DAILY_BUDGET: '50', X_MCP_MONTHLY_BUDGET: '10' });
+  assert.ok(
+    cfg.warnings.some((w) => /X_MCP_DAILY_BUDGET is larger than X_MCP_MONTHLY_BUDGET/.test(w)),
+  );
+  const fine = parseConfig({ X_MCP_DAILY_BUDGET: '1', X_MCP_MONTHLY_BUDGET: '10' });
+  assert.ok(!fine.warnings.some((w) => /X_MCP_DAILY_BUDGET/.test(w)));
+});
+
+test('LEDGER-10: the three ledger variables are known (no CFG-8 unknown-variable warning)', () => {
+  const cfg = parseConfig({
+    X_MCP_DAILY_BUDGET: '1',
+    X_MCP_MONTHLY_BUDGET: '10',
+    X_MCP_SPEND_LEDGER_FILE: '/tmp/l.jsonl',
+  });
+  assert.ok(!cfg.warnings.some((w) => /unknown/i.test(w)));
+});

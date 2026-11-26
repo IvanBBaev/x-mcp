@@ -58,6 +58,7 @@ actionable. Format: `invalid configuration — X_MCP_FOO: <what is wrong>`.
 | `X_MCP_TOKEN_KEYCHAIN=1 is mutually exclusive with an explicit X_MCP_TOKEN_FILE` | Both stores requested. | Drop one. The two backends never fall back to each other, so the server refuses rather than guess which one holds your token. |
 | `invalid policy cell(s): …` / `Unknown policy preset …` | Typo in `X_MCP_POLICY`, `X_MCP_POLICY_ALLOW`, `X_MCP_POLICY_DENY`. | The message lists every valid preset / cell — copy one. |
 | `X_MCP_CREDIT_BUDGET must be a positive USD amount` | `0`, negative, or non-numeric. | Use e.g. `5.00`, or unset for no cap. |
+| `X_MCP_DAILY_BUDGET` / `X_MCP_MONTHLY_BUDGET must be a positive USD amount` | Same, for the persisted caps. | Use e.g. `2.00`, or unset for no cap. |
 | `X_MCP_TIMEOUT_MS must be a positive integer number of milliseconds` | Non-integer or `0`. | e.g. `30000`. |
 | `X_MCP_BASE_URL must use https://` / `host "…" is not *.x.com` | A custom base URL. | Unset it (default `https://api.x.com`), or set `X_MCP_ALLOW_INSECURE_BASE_URL=1` if you genuinely intend a test host. **The flag relaxes the host check only — `https://` stays mandatory no matter what it is set to**, so it will not get you a plain-`http://` endpoint. The name is broader than the behaviour; the behaviour is the conservative one. |
 | `authorize needs an OAuth2 token store` | `authorize` run in `app-only` mode, which has no user token to mint. | Run it with `X_MCP_AUTH_MODE=oauth2`. Either backend works — `authorize` writes to whichever store the same configuration makes the server read from. |
@@ -182,6 +183,13 @@ within this session."* — `X_MCP_BUDGET_MODE=hard` refused a call that would pu
 - A `budget_warning` on successful results means you crossed 90% of the cap.
 - If the spend surprised you, check for `x_post_create` calls with URLs in the text: those
   cost $0.20 instead of $0.015.
+- *"…would bring persisted daily spend (UTC day …) to $…, over the daily budget of $…"* (or
+  *monthly*) — the persisted cap (`X_MCP_DAILY_BUDGET` / `X_MCP_MONTHLY_BUDGET`) refused it.
+  A restart does **not** clear it; the day rolls over at 00:00 UTC. Raise the cap, or delete
+  the ledger file to start over.
+- *"The persisted spend ledger is unavailable (EACCES)…"* — the ledger file (or its
+  directory) cannot be read or written. Fix its permissions or point
+  `X_MCP_SPEND_LEDGER_FILE` elsewhere; `hard` mode refuses calls until then.
 
 ## 7. A tool is missing from `tools/list`
 

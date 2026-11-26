@@ -42,6 +42,9 @@
         "X_MCP_LOG_LEVEL": "${user_config.log_level}",
         "X_MCP_CREDIT_BUDGET": "${user_config.credit_budget}",
         "X_MCP_BUDGET_MODE": "${user_config.budget_mode}",
+        "X_MCP_DAILY_BUDGET": "${user_config.daily_budget}",
+        "X_MCP_MONTHLY_BUDGET": "${user_config.monthly_budget}",
+        "X_MCP_SPEND_LEDGER_FILE": "${user_config.spend_ledger_file}",
         "X_MCP_ALLOW_PROXY": "${user_config.allow_proxy}"
       }
     }
@@ -166,6 +169,24 @@
       "type": "string",
       "title": "Budget mode",
       "description": "warn (the default) or hard (calls past the cap fail with a budget error).",
+      "default": ""
+    },
+    "daily_budget": {
+      "type": "string",
+      "title": "Daily budget (USD)",
+      "description": "Spend cap per UTC day, kept across restarts in the spend ledger. Empty = no cap.",
+      "default": ""
+    },
+    "monthly_budget": {
+      "type": "string",
+      "title": "Monthly budget (USD)",
+      "description": "Spend cap per UTC month, kept across restarts in the spend ledger. Empty = no cap.",
+      "default": ""
+    },
+    "spend_ledger_file": {
+      "type": "string",
+      "title": "Spend ledger file",
+      "description": "Path of the persisted spend ledger. Empty = off unless a daily or monthly budget is set (then ~/.config/x-mcp/spend-ledger.jsonl).",
       "default": ""
     },
     "allow_proxy": {

@@ -64,7 +64,9 @@
 // **74,790 bytes** — ~5,210 B of headroom. Q14 (owner pick 2026-11-24) then added the optional
 // `dry_run` input and the dry-run result branch to x_post_create, x_thread_create and
 // x_dm_send (+1,614 B, most of it the three `anyOf` outputSchema branches):
-// **76,404 bytes** — ~3,596 B of headroom. The
+// **76,404 bytes** — ~3,596 B of headroom. Q15 (owner pick 2026-11-25) then added the optional
+// `spend_ledger` block to x_usage_get's outputSchema (+611 B, model-visible +0 B):
+// **77,015 bytes** — ~2,985 B of headroom. The
 // nine remaining design-catalogue rows were already cut for the same reason (docs/decisions/
 // 0002); landing anything else means trimming descriptions first, or raising the cap as a
 // deliberate, reviewable act — state in the PR what grew and why the agent should pay for it.
@@ -108,7 +110,7 @@ const BUILD = new URL('build/src/', REPO);
 const BUDGET_BYTES = 80_000;
 
 /** The measurement this budget was set from — printed so drift against it is visible. */
-const BASELINE_BYTES = 76_404;
+const BASELINE_BYTES = 77_015;
 
 /** The enforced cap, in UTF-8 bytes, on the model-visible view (header, Q13 / e1). */
 const MODEL_VISIBLE_BUDGET_BYTES = 44_000;

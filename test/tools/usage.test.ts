@@ -18,6 +18,7 @@ import type { AnyToolDef, EndpointInvoker, ToolContext } from '../../src/core/to
 import type { SessionBudget } from '../../src/core/budget.js';
 import { USAGE_FIELDS } from '../../src/api/endpoints/usage.js';
 import type { RawUsageResponse } from '../../src/api/endpoints/usage.js';
+import type { LedgerSnapshot } from '../../src/core/ledger.js';
 import { createUsageTools } from '../../src/tools/usage.js';
 import type { UsageReport, UsageToolDeps } from '../../src/tools/usage.js';
 import {
@@ -536,6 +537,52 @@ test('REND-9 / DRIFT-1: malformed daily and per-app entries are skipped or zeroe
     { client_app_id: 'app-2', posts_read: 3 },
   ]);
 
+  http.assertDone();
+  await http.close();
+});
+
+// --- Q15: the persisted ledger block (docs/07 §21 LEDGER-1/2) ---------------------------
+
+test('LEDGER-1: no ledger configured → no spend_ledger block and the summary is unchanged', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, loadFixture<RawUsageResponse>(FIXTURE));
+  const out = await usageTool({ budget: fakeBudget(0.125, 5) }).handler({}, makeCtx(http));
+  const report = out.data as UsageReport;
+  assert.equal(Object.hasOwn(report, 'spend_ledger'), false);
+  assert.doesNotMatch(report.note, /spend_ledger/);
+  http.assertDone();
+  await http.close();
+});
+
+test('LEDGER-2: with the ledger on, the report carries its snapshot and the summary today’s total', async () => {
+  const http = mockHttp();
+  http.pool
+    .intercept({ path: '/2/usage/tweets', method: 'GET', query: { ...FIELD_PARAMS } })
+    .reply(200, loadFixture<RawUsageResponse>(FIXTURE));
+  const snapshot: LedgerSnapshot = {
+    mode: 'hard',
+    day: {
+      period: '2026-11-26',
+      spent_usd: 0.75,
+      limit_usd: 1,
+      remaining_usd: 0.25,
+      percent_used: 75,
+    },
+    month: { period: '2026-11', spent_usd: 4.5 },
+  };
+  const out = await usageTool({
+    budget: fakeBudget(0.125, 5),
+    ledger: { snapshot: () => snapshot },
+  }).handler({}, makeCtx(http));
+  const report = out.data as UsageReport;
+  assert.deepEqual(report.spend_ledger, snapshot);
+  assert.match(report.note, /spend_ledger is the same local estimate persisted across restarts/);
+  assert.equal(
+    out.summary,
+    '125000 of 2000000 posts read (6.3%); local session estimate $0.125; persisted today $0.75.',
+  );
   http.assertDone();
   await http.close();
 });

@@ -120,9 +120,11 @@ controls are:
   contains a hostile instruction embedded in fetched content.
 - **Media default-deny.** Uploads are refused unless the source file `realpath`s inside
   `X_MCP_MEDIA_DIR`, preventing an agent from exfiltrating arbitrary local files as media.
-- **Operator-immutable cost budget.** `X_MCP_CREDIT_BUDGET` / `X_MCP_BUDGET_MODE` are set by
-  the operator via environment; the model cannot raise or disable them, and every result
-  reports `cost_usd` and the running session total.
+- **Operator-immutable cost budget.** `X_MCP_CREDIT_BUDGET` / `X_MCP_BUDGET_MODE` (and the
+  persisted `X_MCP_DAILY_BUDGET` / `X_MCP_MONTHLY_BUDGET`) are set by the operator via
+  environment; the model cannot raise or disable them, and every result reports `cost_usd`
+  and the running session total. The spend ledger file is created `0600` in a `0700`
+  directory and is never opened through a symlink.
 
 ## Hardened defaults
 

@@ -29,6 +29,7 @@ import { z } from 'zod';
 import { defineTool } from '../core/tooldef.js';
 import type { AnyToolDef, ToolOutput } from '../core/tooldef.js';
 import type { BudgetMode, SessionBudget, SpendByTool } from '../core/budget.js';
+import type { LedgerSnapshot, SpendLedger } from '../core/ledger.js';
 import { validationError } from '../core/errors.js';
 import { toIso } from '../core/render.js';
 import { sanitizePlatformText } from '../core/sanitize.js';
@@ -46,6 +47,8 @@ export interface UsageToolDeps {
   readonly budget: Pick<SessionBudget, 'limit' | 'mode' | 'total'>;
   /** Read side of the per-tool attribution; absent → `by_tool` is never reported. */
   readonly spend?: Pick<SpendByTool, 'snapshot'>;
+  /** Read side of the persisted Q15 ledger; absent (ledger off) → `spend_ledger` is omitted. */
+  readonly ledger?: Pick<SpendLedger, 'snapshot'>;
 }
 
 // --- Rendered report shape ------------------------------------------------------------
@@ -90,6 +93,8 @@ export interface SessionBudgetReport {
 export interface UsageReport {
   readonly platform: PlatformUsage;
   readonly session_budget: SessionBudgetReport;
+  /** Q15 — the persisted UTC day/month totals; present only when the operator enabled them. */
+  readonly spend_ledger?: LedgerSnapshot;
   readonly note: string;
 }
 
@@ -107,6 +112,12 @@ const USAGE_NOTE =
   'corrected from these platform counts. Its limit is operator-set and cannot be changed from ' +
   'within this session. The monthly cap is reported exactly as the platform states it and is ' +
   'not tracked between sessions.';
+
+/** Added when the persisted ledger (Q15) is on, so the "starts at zero" above is not misread. */
+const LEDGER_NOTE =
+  'spend_ledger is the same local estimate persisted across restarts, per UTC day and UTC ' +
+  'month, and shared by every process that uses the same ledger file; its daily and monthly ' +
+  'limits are operator-set too.';
 
 /** DRIFT-1: a missing `data` block must not read as "nothing was consumed". */
 const DEGRADED_NOTE =
@@ -288,10 +299,13 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
         ...(res.data === undefined ? [DEGRADED_NOTE, ...platformReason(res)] : []),
         ...(clamp?.note !== undefined ? [clamp.note] : []),
         USAGE_NOTE,
+        ...(deps.ledger !== undefined ? [LEDGER_NOTE] : []),
       ];
+      const ledger = deps.ledger?.snapshot();
       const report: UsageReport = {
         platform,
         session_budget: renderBudget(deps),
+        ...(ledger !== undefined ? { spend_ledger: ledger } : {}),
         note: notes.join(' '),
       };
 
@@ -304,7 +318,9 @@ export function createUsageTools(deps: UsageToolDeps): AnyToolDef[] {
             : `${platform.posts_read} posts read`;
       return {
         data: report,
-        summary: `${capPart}; local session estimate $${report.session_budget.spent_usd}.`,
+        summary:
+          `${capPart}; local session estimate $${report.session_budget.spent_usd}` +
+          (ledger !== undefined ? `; persisted today $${ledger.day.spent_usd}.` : '.'),
       };
     },
   });

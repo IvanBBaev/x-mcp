@@ -566,6 +566,26 @@ test('REND-11/Q09: the remaining reads and writes conform with meta attached', (
     note: 'platform = X read counts; session_budget = local estimate.',
   };
   assertConforms('x_usage_get', usage, 'usage report');
+  // Q15: the persisted ledger block, with and without operator caps.
+  assertConforms(
+    'x_usage_get',
+    {
+      ...usage,
+      spend_ledger: {
+        mode: 'hard',
+        day: {
+          period: '2026-11-26',
+          spent_usd: 0.75,
+          limit_usd: 1,
+          remaining_usd: 0.25,
+          percent_used: 75,
+        },
+        month: { period: '2026-11', spent_usd: 4.5 },
+        note: 'The persisted spend ledger is unavailable (EACCES).',
+      },
+    },
+    'usage report with spend_ledger',
+  );
   assertConforms('x_usage_get', loadFixture<object>('usage/usage-tweets.json')); // raw
 });
 

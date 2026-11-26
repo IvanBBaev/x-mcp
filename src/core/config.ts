@@ -78,6 +78,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 /** The config directory is `x-mcp` on every platform — the npm name never leaks (CFG-2). */
 const CONFIG_DIR = 'x-mcp';
 const TOKEN_FILE_NAME = 'tokens.json';
+const LEDGER_FILE_NAME = 'spend-ledger.jsonl';
 
 /** Every `X_MCP_*` variable the server recognizes; anything else warns (CFG-8). */
 const KNOWN_VARS: ReadonlySet<string> = new Set([
@@ -93,6 +94,9 @@ const KNOWN_VARS: ReadonlySet<string> = new Set([
   'X_MCP_HIDE_DENIED',
   'X_MCP_CREDIT_BUDGET',
   'X_MCP_BUDGET_MODE',
+  'X_MCP_DAILY_BUDGET',
+  'X_MCP_MONTHLY_BUDGET',
+  'X_MCP_SPEND_LEDGER_FILE',
   'X_MCP_AVAILABILITY',
   'X_MCP_MEDIA_DIR',
   'X_MCP_PROFILES_FILE',
@@ -121,10 +125,18 @@ export interface PolicyConfig {
   readonly hideDenied: boolean;
 }
 
-/** Session credit budget (docs/02 §7). `creditUsd` omitted → no cap. */
+/**
+ * Session credit budget (docs/02 §7). `creditUsd` omitted → no cap. The persisted spend
+ * ledger (Q15, docs/07 §21) is on exactly when `ledgerFile` is set — which happens when any of
+ * `X_MCP_DAILY_BUDGET`, `X_MCP_MONTHLY_BUDGET` or `X_MCP_SPEND_LEDGER_FILE` is set
+ * (LEDGER-1). It shares `mode` with the session budget.
+ */
 export interface BudgetConfig {
   readonly mode: BudgetMode;
   readonly creditUsd?: number;
+  readonly dailyUsd?: number;
+  readonly monthlyUsd?: number;
+  readonly ledgerFile?: string;
 }
 
 /**
@@ -247,6 +259,16 @@ function toAvailability(value: string | undefined): AvailabilityClass[] {
   return out;
 }
 
+/** The per-user x-mcp config directory (CFG-2): `%APPDATA%\\x-mcp`, else XDG / `~/.config`. */
+function configDir(env: Record<string, string | undefined>): string {
+  if (process.platform === 'win32') {
+    const appData = norm(env.APPDATA) ?? path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, CONFIG_DIR);
+  }
+  const xdg = norm(env.XDG_CONFIG_HOME);
+  return path.join(xdg ?? path.join(os.homedir(), '.config'), CONFIG_DIR);
+}
+
 /**
  * Default OAuth2 token path when `X_MCP_TOKEN_FILE` is unset (CFG-2). No hardcoded `/`
  * joins — `node:path` keeps backslash paths and drive letters working (PLAT-3). Only
@@ -261,13 +283,7 @@ function resolveTokenFile(
 ): string | undefined {
   if (explicit !== undefined) return expandTilde(explicit);
   if (keychain || authMode !== 'oauth2') return undefined;
-  if (process.platform === 'win32') {
-    const appData = norm(env.APPDATA) ?? path.join(os.homedir(), 'AppData', 'Roaming');
-    return path.join(appData, CONFIG_DIR, TOKEN_FILE_NAME);
-  }
-  const xdg = norm(env.XDG_CONFIG_HOME);
-  const baseDir = xdg ?? path.join(os.homedir(), '.config');
-  return path.join(baseDir, CONFIG_DIR, TOKEN_FILE_NAME);
+  return path.join(configDir(env), TOKEN_FILE_NAME);
 }
 
 /** CFG-7 value rules: `https://` required, non-`*.x.com` host needs the dev flag. */
@@ -447,14 +463,14 @@ function availabilityField() {
   });
 }
 
-/** Positive USD decimal for `X_MCP_CREDIT_BUDGET`. */
-function usdAmountField() {
+/** Positive USD decimal for a budget variable (`X_MCP_CREDIT_BUDGET`, the Q15 caps). */
+function usdAmountField(name: string) {
   return z.string().refine(
     (v) => {
       const n = Number(v);
       return Number.isFinite(n) && n > 0;
     },
-    { error: 'X_MCP_CREDIT_BUDGET must be a positive USD amount' },
+    { error: `${name} must be a positive USD amount` },
   );
 }
 
@@ -481,8 +497,11 @@ const EnvObject = z.object({
   X_MCP_POLICY_ALLOW: cellListField().optional(),
   X_MCP_POLICY_DENY: cellListField().optional(),
   X_MCP_HIDE_DENIED: flag().default('0'),
-  X_MCP_CREDIT_BUDGET: usdAmountField().optional(),
+  X_MCP_CREDIT_BUDGET: usdAmountField('X_MCP_CREDIT_BUDGET').optional(),
   X_MCP_BUDGET_MODE: enumField(BUDGET_MODES).default('warn'),
+  X_MCP_DAILY_BUDGET: usdAmountField('X_MCP_DAILY_BUDGET').optional(),
+  X_MCP_MONTHLY_BUDGET: usdAmountField('X_MCP_MONTHLY_BUDGET').optional(),
+  X_MCP_SPEND_LEDGER_FILE: z.string().optional(),
   X_MCP_AVAILABILITY: availabilityField().optional(),
   X_MCP_MEDIA_DIR: z.string().optional(),
   X_MCP_PROFILES_FILE: z.string().optional(),
@@ -780,6 +799,9 @@ export function parseConfig(
     X_MCP_HIDE_DENIED: normTrim(env.X_MCP_HIDE_DENIED),
     X_MCP_CREDIT_BUDGET: normTrim(env.X_MCP_CREDIT_BUDGET),
     X_MCP_BUDGET_MODE: normTrim(env.X_MCP_BUDGET_MODE),
+    X_MCP_DAILY_BUDGET: normTrim(env.X_MCP_DAILY_BUDGET),
+    X_MCP_MONTHLY_BUDGET: normTrim(env.X_MCP_MONTHLY_BUDGET),
+    X_MCP_SPEND_LEDGER_FILE: norm(env.X_MCP_SPEND_LEDGER_FILE),
     X_MCP_AVAILABILITY: normTrim(env.X_MCP_AVAILABILITY),
     X_MCP_MEDIA_DIR: norm(env.X_MCP_MEDIA_DIR),
     X_MCP_PROFILES_FILE: norm(env.X_MCP_PROFILES_FILE),
@@ -857,9 +879,22 @@ export function parseConfig(
     hideDenied,
   };
 
+  // Q15 — the persisted ledger is opt-in: any of its three variables turns it on (LEDGER-1).
+  const ledgerOn =
+    d.X_MCP_DAILY_BUDGET !== undefined ||
+    d.X_MCP_MONTHLY_BUDGET !== undefined ||
+    d.X_MCP_SPEND_LEDGER_FILE !== undefined;
+  const ledgerFile = ledgerOn
+    ? d.X_MCP_SPEND_LEDGER_FILE !== undefined
+      ? expandTilde(d.X_MCP_SPEND_LEDGER_FILE)
+      : path.join(configDir(env), LEDGER_FILE_NAME)
+    : undefined;
   const budget: BudgetConfig = {
     mode: d.X_MCP_BUDGET_MODE,
     ...(d.X_MCP_CREDIT_BUDGET !== undefined ? { creditUsd: Number(d.X_MCP_CREDIT_BUDGET) } : {}),
+    ...(d.X_MCP_DAILY_BUDGET !== undefined ? { dailyUsd: Number(d.X_MCP_DAILY_BUDGET) } : {}),
+    ...(d.X_MCP_MONTHLY_BUDGET !== undefined ? { monthlyUsd: Number(d.X_MCP_MONTHLY_BUDGET) } : {}),
+    ...(ledgerFile !== undefined ? { ledgerFile } : {}),
   };
 
   const tokenFile = resolveTokenFile(
@@ -886,6 +921,16 @@ export function parseConfig(
   // A profile named without a profiles file is ignored (likely a leftover/typo).
   if (profileName !== undefined && d.X_MCP_PROFILES_FILE === undefined) {
     warnings.push('X_MCP_PROFILE is set but X_MCP_PROFILES_FILE is not — the selection is ignored');
+  }
+  // LEDGER-10 — a daily cap above the monthly one can never bind; likely a swapped pair.
+  if (
+    budget.dailyUsd !== undefined &&
+    budget.monthlyUsd !== undefined &&
+    budget.dailyUsd > budget.monthlyUsd
+  ) {
+    warnings.push(
+      'X_MCP_DAILY_BUDGET is larger than X_MCP_MONTHLY_BUDGET — the daily cap can never be reached first',
+    );
   }
   // CFG-6 — unknown profile keys and env-over-profile overrides (never a secret value).
   warnings.push(...(resolved?.warnings ?? []));

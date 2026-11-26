@@ -10,6 +10,18 @@ development chronology lives in `WORKLOG.md`.
 
 ### Added
 
+- Persisted spend ledger (opt-in): `X_MCP_DAILY_BUDGET` and `X_MCP_MONTHLY_BUDGET` cap the
+  local spend estimate per UTC day and UTC month, and `X_MCP_SPEND_LEDGER_FILE` sets where it
+  is kept (default `spend-ledger.jsonl` in the x-mcp config directory). Any of the three
+  turns it on. The ledger is an append-only JSONL file (`0600`, never opened through a
+  symlink), so totals survive restarts and are shared by every process on the same file.
+  `X_MCP_BUDGET_MODE` applies to it too: `hard` refuses a call that would pass a cap before
+  anything is sent or charged, `warn` attaches a `budget_warning` from 90%. A ledger that
+  cannot be read or written fails closed in `hard` mode and warns in `warn` mode. Dry runs
+  quote against it without writing. `x_usage_get` reports the totals as `spend_ledger`.
+  The cross-process check is not a lock: a hard cap can be overshot by at most one call per
+  other running process. `tools/list` grows by 611 B to 77,015 of 80,000 B (outputSchema only;
+  model-visible +0 B, 40,105 of 44,000 B). docs/07 LEDGER-1..10.
 - `dry_run` for the send tools: `x_post_create`, `x_thread_create` and `x_dm_send` take an
   optional `dry_run: true` that returns the exact request(s) the call would send (method,
   path, body), the quoted cost and the session total after a real call, with any budget

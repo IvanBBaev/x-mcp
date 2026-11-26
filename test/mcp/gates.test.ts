@@ -17,12 +17,14 @@ import { XError, apiError } from '../../src/core/errors.js';
 import { createRegistry } from '../../src/core/registry.js';
 import type { CallContext, Registry } from '../../src/core/registry.js';
 import type { AnyToolDef, CostEstimate, XApiRequest } from '../../src/core/tooldef.js';
+import { createSpendLedger } from '../../src/core/ledger.js';
+import type { LedgerEntry, LedgerStore, SpendLedger } from '../../src/core/ledger.js';
 import { createBudgetGate } from '../../src/mcp/gates.js';
 import { xLikeSet } from '../../src/tools/engagement.js';
 import { xFollowSet } from '../../src/tools/graph.js';
 import { xListUpdate } from '../../src/tools/lists.js';
 
-import { loadFixture, makePorts } from '../helpers/index.js';
+import { fakeClock, loadFixture, makePorts } from '../helpers/index.js';
 
 test('INT-2: check reserves atomically; the paired reserve is a read-back, not a second charge', () => {
   const budget = createSessionBudget();
@@ -283,4 +285,137 @@ test('Q14/DRY-2: the gate quote refuses past a hard cap, exactly like check', ()
     (err: unknown) => XError.is(err) && err.kind === 'budget',
   );
   assert.equal(budget.total(), 0);
+});
+
+// --- Q15: the persisted spend ledger rides the same charge (docs/07 §21) ---------------
+
+/** An in-memory LedgerStore: the "file" is the array, shared by whoever holds it. */
+function memLedger(
+  lines: LedgerEntry[],
+  options: { mode?: 'warn' | 'hard'; dailyUsd?: number } = {},
+): SpendLedger {
+  let offset = 0;
+  const store: LedgerStore = {
+    readNew: () => {
+      const entries = lines.slice(offset);
+      offset = lines.length;
+      return { reset: false, entries };
+    },
+    append: (entry) => {
+      lines.push(entry);
+    },
+  };
+  return createSpendLedger({
+    store,
+    clock: fakeClock(Date.UTC(2026, 10, 26, 12)),
+    mode: options.mode ?? 'warn',
+    ...(options.dailyUsd !== undefined ? { dailyUsd: options.dailyUsd } : {}),
+  });
+}
+
+const sumOf = (lines: readonly LedgerEntry[]): number =>
+  Math.round(lines.reduce((acc, l) => acc + l.usd, 0) * 1e6) / 1e6;
+
+test('LEDGER-2: check persists the same price the session budget charges', () => {
+  const lines: LedgerEntry[] = [];
+  const budget = createSessionBudget();
+  const gate = createBudgetGate(budget, undefined, memLedger(lines));
+  gate.check({ class: 'w:dm' }, 'x_dm_send');
+  assert.equal(budget.total(), 0.015);
+  assert.equal(sumOf(lines), 0.015);
+});
+
+test('LEDGER-3: a hard ledger refusal moves neither the session budget nor the ledger', () => {
+  const lines: LedgerEntry[] = [{ at: Date.UTC(2026, 10, 26, 1), usd: 0.99 }];
+  const budget = createSessionBudget({ mode: 'hard' });
+  const spend = createSpendByTool();
+  const gate = createBudgetGate(budget, spend, memLedger(lines, { mode: 'hard', dailyUsd: 1 }));
+  assert.throws(
+    () => gate.check({ class: 'w:dm', note: 'Priced as 1 DM.' }, 'x_dm_send'),
+    (err: unknown) =>
+      XError.is(err) &&
+      err.kind === 'budget' &&
+      /daily budget of \$1\. Priced as 1 DM\./.test(err.message),
+  );
+  assert.equal(budget.total(), 0);
+  assert.equal(lines.length, 1);
+  assert.deepEqual(spend.snapshot(), {});
+});
+
+test('LEDGER-3: a hard SESSION refusal never reaches the ledger', () => {
+  const lines: LedgerEntry[] = [];
+  const budget = createSessionBudget({ limit: 0.01, mode: 'hard' });
+  const gate = createBudgetGate(budget, undefined, memLedger(lines));
+  assert.throws(
+    () => gate.check({ class: 'w:dm' }),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  assert.equal(lines.length, 0);
+});
+
+test('LEDGER-3: the ledger warning is appended to the session meta', () => {
+  const lines: LedgerEntry[] = [{ at: Date.UTC(2026, 10, 26, 1), usd: 0.9 }];
+  const gate = createBudgetGate(
+    createSessionBudget(),
+    undefined,
+    memLedger(lines, { dailyUsd: 1 }),
+  );
+  const estimate: CostEstimate = { class: 'w:dm' };
+  gate.check(estimate);
+  const meta = gate.reserve(estimate);
+  assert.equal(meta.cost_usd, 0.015);
+  assert.match(meta.budget_warning ?? '', /^Persisted daily spend \$0\.915 .* ~92%/);
+});
+
+test('LEDGER-4: settle and release move the ledger by the same difference as the session', () => {
+  const lines: LedgerEntry[] = [];
+  const budget = createSessionBudget();
+  const gate = createBudgetGate(budget, undefined, memLedger(lines));
+  const page: CostEstimate = { class: 'r:post' };
+  gate.check(page);
+  gate.reserve(page, 42);
+  assert.equal(budget.total(), 0.21);
+  assert.equal(sumOf(lines), 0.21);
+
+  const refused: CostEstimate = { class: 'w:post' };
+  gate.check(refused);
+  gate.release(refused);
+  assert.equal(budget.total(), 0.21);
+  assert.equal(sumOf(lines), 0.21);
+  assert.equal(lines.length, 4); // reserve, settle delta, reserve, release delta
+});
+
+test('LEDGER-8: a $0 local call leaves the ledger file untouched', () => {
+  const lines: LedgerEntry[] = [];
+  const gate = createBudgetGate(createSessionBudget(), undefined, memLedger(lines));
+  const estimate: CostEstimate = { class: 'local' };
+  gate.check(estimate);
+  gate.reserve(estimate);
+  gate.release(estimate);
+  assert.equal(lines.length, 0);
+});
+
+test('LEDGER-9: the dry-run quote checks the ledger but persists nothing', () => {
+  const lines: LedgerEntry[] = [{ at: Date.UTC(2026, 10, 26, 1), usd: 0.99 }];
+  const budget = createSessionBudget({ mode: 'hard' });
+  const hard = createBudgetGate(budget, undefined, memLedger(lines, { mode: 'hard', dailyUsd: 1 }));
+  assert.throws(
+    () => hard.quote({ class: 'w:dm' }),
+    (err: unknown) => XError.is(err) && err.kind === 'budget',
+  );
+  const warn = createBudgetGate(
+    createSessionBudget(),
+    undefined,
+    memLedger(lines, { dailyUsd: 1 }),
+  );
+  const quote = warn.quote({ class: 'r:post' });
+  assert.match(quote.projected.budget_warning ?? '', /~100%/);
+  assert.equal(lines.length, 1);
+});
+
+test('the defensive reserve-without-check path also persists to the ledger', () => {
+  const lines: LedgerEntry[] = [];
+  const gate = createBudgetGate(createSessionBudget(), undefined, memLedger(lines));
+  gate.reserve({ class: 'r:post' }, 2);
+  assert.equal(sumOf(lines), 0.01);
 });

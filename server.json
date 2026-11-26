@@ -128,6 +128,24 @@
           "format": "string"
         },
         {
+          "name": "X_MCP_DAILY_BUDGET",
+          "description": "Persisted spend cap per UTC day in USD; turns the spend ledger on.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_MONTHLY_BUDGET",
+          "description": "Persisted spend cap per UTC month in USD; turns the spend ledger on.",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "X_MCP_SPEND_LEDGER_FILE",
+          "description": "Path of the persisted spend ledger (default: spend-ledger.jsonl in the x-mcp config directory).",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
           "name": "X_MCP_ALLOW_PROXY",
           "description": "Set to 1 to mark a Node env-proxying HTTP(S) proxy as trusted and silence the startup warning.",
           "isRequired": false,

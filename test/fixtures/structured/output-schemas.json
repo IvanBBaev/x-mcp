@@ -2983,6 +2983,61 @@
                   },
                   "required": ["spent_usd", "mode"]
                 },
+                "spend_ledger": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": ["warn", "hard"]
+                    },
+                    "day": {
+                      "type": "object",
+                      "properties": {
+                        "period": {
+                          "type": "string"
+                        },
+                        "spent_usd": {
+                          "type": "number"
+                        },
+                        "limit_usd": {
+                          "type": "number"
+                        },
+                        "remaining_usd": {
+                          "type": "number"
+                        },
+                        "percent_used": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["period", "spent_usd"]
+                    },
+                    "month": {
+                      "type": "object",
+                      "properties": {
+                        "period": {
+                          "type": "string"
+                        },
+                        "spent_usd": {
+                          "type": "number"
+                        },
+                        "limit_usd": {
+                          "type": "number"
+                        },
+                        "remaining_usd": {
+                          "type": "number"
+                        },
+                        "percent_used": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["period", "spent_usd"]
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["mode", "day", "month"]
+                },
                 "note": {
                   "type": "string"
                 }
