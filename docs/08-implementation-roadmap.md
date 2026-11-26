@@ -182,6 +182,9 @@ on 2026-08-29; what remains for the gate is re-running them at the 1.0.0 tag). T
 >
 > Dry run (2026-11-25, Q14, 01af1b3): `dry_run` on the three send tools adds 1,614 B, to
 > **76,404 B** (3,596 B of headroom).
+>
+> Spend ledger (2026-11-26, Q15, 1b175aa): the optional `spend_ledger` block in
+> `x_usage_get`'s outputSchema adds 611 B, to **77,015 B** (2,985 B of headroom).
 
 ## Phase 4 — Exploratory *(post-1.0, demand-driven)*
 
@@ -255,6 +258,17 @@ loaded. Values only X can supply are named placeholders (`<id of post k>`, `<id 
 Article tools are out of scope. docs/07 DRY-1..5. `tools/list` +1,614 B, to **76,404 B**;
 model-visible +303 B, to **40,105 B** of 44,000 B.
 
+**Persisted spend ledger shipped 2026-11-26 (queue Q15, 1b175aa; owner pick 2026-11-25):**
+`X_MCP_DAILY_BUDGET`, `X_MCP_MONTHLY_BUDGET` and `X_MCP_SPEND_LEDGER_FILE` (any of them turns it
+on) keep the session budget's estimate in an append-only JSONL file, folded per UTC day and
+UTC month, so the totals survive restarts and are shared by every process on that file.
+`core/ledger` holds the logic (no I/O), `api/spendledger` the file (`0600`, `O_APPEND`,
+`O_NOFOLLOW`). The budget gate charges it in the same synchronous step as the session budget
+(session refusal first), settles it by the same difference and releases it to $0; same
+`warn`/`hard` semantics, fail-closed in `hard` on I/O errors, and dry runs quote against it.
+No tool or parameter was added. docs/07 LEDGER-1..10. `tools/list` +611 B, to **77,015 B**;
+model-visible +0 B (**40,105 B** of 44,000 B).
+
 ---
 
 ## 1.0 acceptance checklist
@@ -296,7 +310,7 @@ above; this is the single list to walk before tagging:
       (**77,005 B**), and `since_id` on the search/timeline reads 464 B more
       (**77,469 B**, 3.2% headroom).
       From Q13 (2026-11-21) the same gate also caps the model-visible sub-measure at
-      44,000 B (39,802 B at 49 tools, 40,105 B after Q14; raised from 40,000 B by the owner on 2026-11-24) and pins the listed tool count to an exact
+      44,000 B (39,802 B at 49 tools, 40,105 B after Q14 and Q15; raised from 40,000 B by the owner on 2026-11-24) and pins the listed tool count to an exact
       baseline (49); see the Phase 4 note.*
 - [x] Security re-audit of the **implementation** against T1–T17 + kill-chains A–D.
       *T-320, 2026-08-07 — [reviews/07-implementation-audit.md](reviews/07-implementation-audit.md).
